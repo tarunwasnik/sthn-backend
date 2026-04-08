@@ -1,0 +1,14 @@
+"use strict";
+//backend/src/config/cloudinary.ts
+Object.defineProperty(exports, "__esModule", { value: true });
+const cloudinary_1 = require("cloudinary");
+console.log("CLOUDINARY CONFIG:", {
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+});
+cloudinary_1.v2.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+exports.default = cloudinary_1.v2;
