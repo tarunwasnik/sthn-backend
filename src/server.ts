@@ -13,7 +13,7 @@ import routes from "./routes";
 import { initSockets } from "./sockets";
 
 import { expireBookingsJob } from "./jobs/expireBookings.job";
-import { completeBookingsJob } from "./jobs/completeBookings.job"; // ✅ ADD THIS
+import { completeBookingsJob } from "./jobs/completeBookings.job";
 import { interactionTriggerJob } from "./jobs/interactionTrigger.job";
 import { sessionEndingSoonJob } from "./jobs/sessionEndingSoon.job";
 import { disputeEscalationJob } from "./jobs/disputeEscalation.job";
@@ -22,11 +22,27 @@ mongoose.set("bufferCommands", false);
 
 const app = express();
 
-/* ===================== MIDDLEWARE ===================== */
+/* ===================== CORS CONFIG ===================== */
+
+// ✅ Add your frontend URLs here
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://sthn-frontend.vercel.app",
+  "https://sthn-frontend-hmcpkqxce-tarunwasniks-projects.vercel.app"
+];
 
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: function (origin, callback) {
+      // allow requests with no origin (like mobile apps, curl, postman)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("CORS not allowed"));
+      }
+    },
     credentials: true,
   })
 );
@@ -54,7 +70,7 @@ async function runBackgroundJobs() {
     console.log("🔄 Running background jobs...");
 
     await expireBookingsJob();
-    await completeBookingsJob(); // ✅ ADD THIS (CRITICAL)
+    await completeBookingsJob();
     await interactionTriggerJob();
     await sessionEndingSoonJob();
     await disputeEscalationJob();
@@ -68,7 +84,6 @@ async function runBackgroundJobs() {
 }
 
 async function startJobLoop() {
-  // ✅ WAIT BEFORE FIRST RUN
   await new Promise((resolve) => setTimeout(resolve, 5000));
 
   console.log("⏱ Starting job loop...");
@@ -91,9 +106,11 @@ async function startServer() {
 
     const httpServer = http.createServer(app);
 
+    /* ===================== SOCKET.IO ===================== */
+
     io = new Server(httpServer, {
       cors: {
-        origin: "http://localhost:5173",
+        origin: allowedOrigins,
         credentials: true,
       },
     });
