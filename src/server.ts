@@ -18,13 +18,14 @@ import { interactionTriggerJob } from "./jobs/interactionTrigger.job";
 import { sessionEndingSoonJob } from "./jobs/sessionEndingSoon.job";
 import { disputeEscalationJob } from "./jobs/disputeEscalation.job";
 
+import { errorHandler } from "./middlewares/errorHandler"; // ✅ ADDED
+
 mongoose.set("bufferCommands", false);
 
 const app = express();
 
 /* ===================== CORS CONFIG ===================== */
 
-// ✅ Add your frontend URLs here
 const allowedOrigins = [
   "http://localhost:5173",
   "https://sthn-frontend.vercel.app",
@@ -34,7 +35,6 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      // allow requests with no origin (like mobile apps, curl, postman)
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
@@ -102,7 +102,13 @@ async function startServer() {
 
     console.log("✅ MongoDB connected");
 
+    /* ===================== ROUTES ===================== */
+
     app.use("/api", routes);
+
+    /* ===================== ERROR HANDLER (🔥 MUST BE LAST) ===================== */
+
+    app.use(errorHandler);
 
     const httpServer = http.createServer(app);
 
