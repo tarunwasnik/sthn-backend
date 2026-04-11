@@ -1,13 +1,12 @@
 // backend/src/routes/profile.routes.ts
 
-import { Router, Request, Response, NextFunction } from "express";
-import multer from "multer";
+import { Router } from "express";
 
 import { protect } from "../middlewares/auth.middleware";
-import { upload } from "../middlewares/upload.middleware";
 import {
   upsertProfile,
   getMyProfile,
+  updateMyProfile,
 } from "../controllers/profile.controller";
 
 const router = Router();
@@ -16,31 +15,17 @@ const router = Router();
 
 router.get("/me", protect, getMyProfile);
 
-/* ================= CREATE / UPDATE PROFILE ================= */
+/* ================= CREATE PROFILE ================= */
+/**
+ * First-time profile creation
+ * Expects JSON (NOT FormData anymore)
+ */
+router.post("/me", protect, upsertProfile);
 
-router.post(
-  "/me",
-  protect,
-
-  // ✅ Multer wrapper to catch errors BEFORE Express crashes
-  (req: Request, res: Response, next: NextFunction) => {
-    upload.array("profilePhotos", 6)(req, res, (err: any) => {
-      if (err instanceof multer.MulterError) {
-        return res.status(400).json({
-          success: false,
-          message: err.message,
-        });
-      } else if (err) {
-        return res.status(500).json({
-          success: false,
-          message: "File upload failed",
-        });
-      }
-      next();
-    });
-  },
-
-  upsertProfile
-);
+/* ================= UPDATE PROFILE ================= */
+/**
+ * Editing profile (frontend already uploads to Cloudinary)
+ */
+router.patch("/me", protect, updateMyProfile);
 
 export default router;

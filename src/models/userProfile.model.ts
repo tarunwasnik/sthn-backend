@@ -11,13 +11,16 @@ export type ProfileStatus =
 export interface UserProfileDocument extends Document {
   userId: mongoose.Types.ObjectId;
 
-  username: string; // public unique
+  username: string;
   dateOfBirth: Date;
 
   interests: string[];
   bio: string;
 
-  profilePhotos: string[]; // 2–6 required
+  avatar: string;        // NEW
+  cover: string;         // NEW
+
+  profilePhotos: string[]; // gallery only (2–6)
 
   profileStatus: ProfileStatus;
 
@@ -60,9 +63,27 @@ const UserProfileSchema = new Schema<UserProfileDocument>(
       trim: true,
     },
 
+    // ✅ NEW FIELDS
+    avatar: {
+      type: String,
+      required: true,
+    },
+
+    cover: {
+      type: String,
+      required: true,
+    },
+
+    // ✅ GALLERY ONLY
     profilePhotos: {
       type: [String],
-      default: [],
+      validate: {
+        validator: function (value: string[]) {
+          return value.length >= 2 && value.length <= 6;
+        },
+        message: "Gallery must contain between 2 and 6 images",
+      },
+      required: true,
     },
 
     profileStatus: {

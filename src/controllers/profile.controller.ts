@@ -4,7 +4,6 @@ import { Request, Response } from "express";
 import { UserProfile } from "../models/userProfile.model";
 import User from "../models/User";
 import { AppError } from "../utils/AppError";
-import { uploadToCloudinary } from "../utils/uploadToCloudinary";
 import { catchAsync } from "../utils/catchAsync";
 
 /* ================= UTIL ================= */
@@ -19,30 +18,33 @@ const calculateAge = (dob: Date) => {
 
 export const upsertProfile = catchAsync(
   async (req: Request, res: Response) => {
-    console.log("🔥 BODY:", req.body);
-    console.log("🔥 FILES:", req.files);
-
     const userId = req.user!.id;
 
-    const { username, dateOfBirth, interests, bio } = req.body;
-    const files = req.files as Express.Multer.File[];
+    const {
+      username,
+      dateOfBirth,
+      interests,
+      bio,
+      profilePhotos,
+      avatar,
+      cover,
+    } = req.body;
 
     let profile = await UserProfile.findOne({ userId });
     const isFirstSubmission = !profile;
 
-    /* ================= FILE VALIDATION ================= */
+    /* ================= VALIDATION ================= */
 
-    if (!files || files.length < 2 || files.length > 6) {
+    if (!profilePhotos || profilePhotos.length < 2 || profilePhotos.length > 6) {
       throw new AppError("Profile must have between 2 and 6 photos", 400);
     }
 
-    /* ================= UPLOAD TO CLOUDINARY ================= */
+    if (!avatar) {
+      throw new AppError("Avatar is required", 400);
+    }
 
-    const uploadedPhotos: string[] = [];
-
-    for (const file of files) {
-      const result = await uploadToCloudinary(file.buffer);
-      uploadedPhotos.push(result.secure_url);
+    if (!cover) {
+      throw new AppError("Cover is required", 400);
     }
 
     /* ================= CREATE ================= */
@@ -74,7 +76,9 @@ export const upsertProfile = catchAsync(
           ? [interests]
           : [],
         bio,
-        profilePhotos: uploadedPhotos,
+        avatar,
+        cover,
+        profilePhotos,
         profileStatus: "pending_verification",
       });
     }
@@ -105,8 +109,20 @@ export const upsertProfile = catchAsync(
           : [interests];
       }
 
-      if (files && files.length > 0) {
-        profile.profilePhotos = uploadedPhotos;
+      if (profilePhotos && Array.isArray(profilePhotos)) {
+        if (profilePhotos.length < 2 || profilePhotos.length > 6) {
+          throw new AppError("Profile must have 2–6 photos", 400);
+        }
+
+        profile.profilePhotos = profilePhotos;
+      }
+
+      if (avatar !== undefined) {
+        profile.avatar = avatar;
+      }
+
+      if (cover !== undefined) {
+        profile.cover = cover;
       }
 
       if (profile.profileStatus === "rejected") {
@@ -153,6 +169,8 @@ export const getMyProfile = catchAsync(
         username: "",
         bio: "",
         interests: [],
+        avatar: "",
+        cover: "",
         profilePhotos: [],
         profileStatus: "incomplete",
       });
@@ -165,6 +183,77 @@ export const getMyProfile = catchAsync(
     res.json({
       ...profile.toObject(),
       age,
+    });
+  }
+);
+
+/* ================= EDIT PROFILE ================= */
+
+export const updateMyProfile = catchAsync(
+  async (req: Request, res: Response) => {
+    const userId = req.user!.id;
+
+    const {
+      bio,
+      interests,
+      dateOfBirth,
+      profilePhotos,
+      avatar,
+      cover,
+    } = req.body;
+
+    const profile = await UserProfile.findOne({ userId });
+
+    if (!profile) {
+      throw new AppError("Profile not found", 404);
+    }
+
+    /* ================= UPDATE ================= */
+
+    if (bio !== undefined) profile.bio = bio;
+
+    if (interests !== undefined) {
+      profile.interests = Array.isArray(interests)
+        ? interests
+        : [interests];
+    }
+
+    if (dateOfBirth) {
+      const dob = new Date(dateOfBirth);
+      const age = calculateAge(dob);
+
+      if (age < 18) {
+        throw new AppError("Minimum age is 18", 403);
+      }
+
+      profile.dateOfBirth = dob;
+    }
+
+    if (profilePhotos && Array.isArray(profilePhotos)) {
+      if (profilePhotos.length < 2 || profilePhotos.length > 6) {
+        throw new AppError("Profile must have 2–6 photos", 400);
+      }
+
+      profile.profilePhotos = profilePhotos;
+    }
+
+    if (avatar !== undefined) {
+      profile.avatar = avatar;
+    }
+
+    if (cover !== undefined) {
+      profile.cover = cover;
+    }
+
+    if (profile.profileStatus === "rejected") {
+      profile.profileStatus = "pending_verification";
+    }
+
+    await profile.save();
+
+    res.status(200).json({
+      message: "Profile updated successfully",
+      profile,
     });
   }
 );
