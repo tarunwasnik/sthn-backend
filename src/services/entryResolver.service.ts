@@ -47,13 +47,7 @@ export const resolveEntry = (user: any): EntryResult => {
     };
   }
 
-  // ⏳ Creator application pending
-  if (role === "USER" && creatorStatus === "pending") {
-    return {
-      entryType: "CREATOR_PENDING",
-      entryRoute: "/creator-pending",
-    };
-  }
+
 
   // 👤 Default user dashboard
   return {

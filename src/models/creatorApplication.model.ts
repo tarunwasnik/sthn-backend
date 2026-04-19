@@ -21,7 +21,8 @@ export interface CreatorApplicationDocument extends Document {
 
   services: string[];
   publicBio: string;
-  verificationMedia: string[];
+
+  languages: string[];
 
   status: CreatorApplicationStatus;
 
@@ -36,8 +37,8 @@ const CreatorApplicationSchema =
         type: Schema.Types.ObjectId,
         ref: "User",
         required: true,
-        index: true,
         unique: true,
+        index: true,
       },
 
       displayName: {
@@ -83,7 +84,7 @@ const CreatorApplicationSchema =
         trim: true,
       },
 
-      verificationMedia: {
+      languages: {
         type: [String],
         default: [],
       },

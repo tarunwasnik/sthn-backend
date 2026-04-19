@@ -1,3 +1,5 @@
+//backend/src/types/adminMode.types.ts
+
 export type AdminMode = "SYSTEM" | "OPERATIONS";
 
 export const ADMIN_MODES = {

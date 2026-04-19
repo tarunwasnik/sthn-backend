@@ -1,3 +1,5 @@
+//backend/src/types/featurFlag.types.ts
+
 export type FeatureFlagScope = "GLOBAL" | "ROLE" | "USER";
 
 export interface FeatureFlagConditions {

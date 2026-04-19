@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import mongoose from "mongoose";
 import { CreatorApplication } from "../models/creatorApplication.model";
 import { CreatorProfile } from "../models/creatorProfile.model";
+import { UserProfile } from "../models/userProfile.model";
 import User from "../models/User";
 import { ROLES } from "../constants/roles";
 import { AppError } from "../utils/AppError";
@@ -44,6 +45,7 @@ export const approveCreatorApplication = async (
   try {
     session.startTransaction();
 
+    /* 1️⃣ FIND APPLICATION */
     const application = await CreatorApplication.findById(
       applicationId
     ).session(session);
@@ -59,6 +61,7 @@ export const approveCreatorApplication = async (
       );
     }
 
+    /* 2️⃣ GET USER */
     const user = await User.findById(application.userId).session(
       session
     );
@@ -67,6 +70,7 @@ export const approveCreatorApplication = async (
       throw new AppError("User not found", 404);
     }
 
+    /* 3️⃣ CHECK EXISTING CREATOR PROFILE */
     const existingProfile = await CreatorProfile.findOne({
       userId: application.userId,
     }).session(session);
@@ -78,47 +82,75 @@ export const approveCreatorApplication = async (
       );
     }
 
+    /* 4️⃣ GET USER PROFILE */
+    const userProfile = await UserProfile.findOne({
+      userId: application.userId,
+    }).session(session);
+
+    if (!userProfile) {
+      throw new AppError(
+        "User profile required before approval",
+        400
+      );
+    }
+
+    /* 5️⃣ GENERATE UNIQUE SLUG */
     const slug = await generateUniqueCreatorSlug(
       application.displayName
     );
 
-    // ✅ FIX: Use single object instead of array
+    /* 6️⃣ CREATE CREATOR PROFILE */
     const creatorProfile = new CreatorProfile({
-  userId: application.userId,
-  slug,
-  displayName: application.displayName,
-  primaryCategory: application.primaryCategory,
-  bio: application.publicBio,
+      userId: application.userId,
+      slug,
+      displayName: application.displayName,
 
-  country: application.country,
-  city: application.city,
+      // 🔗 USER PROFILE LINK
+      avatarUrl: userProfile.avatar,
+      coverUrl: userProfile.cover,
+      media: userProfile.profilePhotos,
 
-  currency: application.currency,
+      primaryCategory: application.primaryCategory,
+      categories: [application.primaryCategory],
 
-  rating: 0,
-  reviewCount: 0,
-  status: "active",
-});
+      bio: application.publicBio,
+      languages: application.languages,
 
-await creatorProfile.save({ session });
+      country: application.country,
+      city: application.city,
 
+      currency: application.currency,
+
+      rating: 0,
+      reviewCount: 0,
+
+      status: "active",
+    });
+
+    await creatorProfile.save({ session });
+
+    /* 7️⃣ UPDATE USER */
     user.role = ROLES.CREATOR;
     user.creatorStatus = "approved";
-
     await user.save({ session });
 
+    /* 8️⃣ UPDATE APPLICATION */
     application.status = "approved";
     await application.save({ session });
 
+    /* ✅ COMMIT TRANSACTION */
     await session.commitTransaction();
     session.endSession();
 
-    res.json({
+    res.status(200).json({
       message: "Creator approved successfully",
+      creatorProfile,
     });
   } catch (err: any) {
     await session.abortTransaction();
     session.endSession();
+
+    console.error("Approve Creator Error:", err);
 
     res.status(400).json({
       message: err.message || "Approval failed",
@@ -173,7 +205,7 @@ export const rejectCreatorApplication = async (
     await session.commitTransaction();
     session.endSession();
 
-    res.json({
+    res.status(200).json({
       message: "Creator application rejected",
     });
   } catch (err: any) {
@@ -206,7 +238,7 @@ export const deleteCreatorApplication = async (
 
   await CreatorApplication.findByIdAndDelete(applicationId);
 
-  res.json({
+  res.status(200).json({
     message: "Application deleted successfully",
   });
 };

@@ -11,19 +11,14 @@ import { AppError } from "../utils/AppError";
 export const applyForCreator = async (req: Request, res: Response) => {
   const authUser = req.user;
 
-  if (!authUser) {
-    throw new AppError("Unauthorized", 401);
-  }
+  if (!authUser) throw new AppError("Unauthorized", 401);
 
   if (authUser.role !== ROLES.USER) {
     throw new AppError("Only users can apply to become creators", 403);
   }
 
   const fullUser = await User.findById(authUser.id);
-
-  if (!fullUser) {
-    throw new AppError("User not found", 404);
-  }
+  if (!fullUser) throw new AppError("User not found", 404);
 
   if (
     fullUser.creatorStatus === "pending" ||
@@ -66,10 +61,7 @@ export const applyForCreator = async (req: Request, res: Response) => {
   });
 
   if (existingApplication) {
-    throw new AppError(
-      "Creator application already exists",
-      400
-    );
+    throw new AppError("Creator application already exists", 400);
   }
 
   const {
@@ -77,10 +69,10 @@ export const applyForCreator = async (req: Request, res: Response) => {
     primaryCategory,
     services,
     publicBio,
-    verificationMedia,
     currency,
     country,
     city,
+    languages,
   } = req.body;
 
   if (
@@ -98,8 +90,8 @@ export const applyForCreator = async (req: Request, res: Response) => {
   }
 
   const normalizedServices = Array.isArray(services) ? services : [];
-  const normalizedMedia = Array.isArray(verificationMedia)
-    ? verificationMedia
+  const normalizedLanguages = Array.isArray(languages)
+    ? languages
     : [];
 
   const session = await mongoose.startSession();
@@ -118,7 +110,7 @@ export const applyForCreator = async (req: Request, res: Response) => {
           currency: currency.toUpperCase(),
           services: normalizedServices,
           publicBio,
-          verificationMedia: normalizedMedia,
+          languages: normalizedLanguages,
           status: "submitted",
         },
       ],
@@ -135,9 +127,14 @@ export const applyForCreator = async (req: Request, res: Response) => {
       message: "Creator application submitted",
       application: application[0],
     });
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    throw new AppError("Application submission failed", 400);
-  }
+  } catch (error: any) {
+  console.error("🔥 CREATOR APPLY ERROR:", error);
+  console.error("🔥 ERROR MESSAGE:", error?.message);
+  console.error("🔥 ERROR STACK:", error?.stack);
+
+  await session.abortTransaction();
+  session.endSession();
+
+  throw new AppError(error?.message || "Application submission failed", 400);
+}
 };
