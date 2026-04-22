@@ -8,6 +8,7 @@ import profileRoutes from "../profile.routes";
 import profileVerificationRoutes from "./profileVerification.routes";
 
 import creatorApplicationRoutes from "./creatorApplication.routes";
+import creatorProfileRoutes from "./creatorProfile.routes";
 import creatorDashboardRoutes from "./creator.dashboard.routes";
 import creatorSecureRoutes from "./creator.secure.routes";
 import creatorAvailabilityRoutes from "./creator.availability.routes";
@@ -45,6 +46,7 @@ router.use("/disputes", disputeRoutes);
 
 /* ================= CREATORS ================= */
 router.use("/creator-applications", creatorApplicationRoutes);
+router.use("/creator", creatorProfileRoutes);
 router.use("/creator", creatorSecureRoutes);
 router.use("/creator", creatorDashboardRoutes);
 router.use("/creator", creatorAvailabilityRoutes);

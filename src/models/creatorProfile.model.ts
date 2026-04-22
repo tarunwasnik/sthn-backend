@@ -1,7 +1,6 @@
 // backend/src/models/creatorProfile.model.ts
 
 import mongoose, { Schema, Document } from "mongoose";
-import { ZodNullableDef } from "zod/v3";
 
 export type CreatorStatus =
   | "active"
@@ -13,8 +12,9 @@ export interface CreatorProfileDocument extends Document {
 
   slug: string;
   displayName: string;
+
   avatarUrl?: string | null;
-  coverUrl:string | null;
+  coverUrl?: string | null; // ✅ FIXED
 
   media?: string[];
 
@@ -65,6 +65,12 @@ const CreatorProfileSchema = new Schema<CreatorProfileDocument>(
     },
 
     avatarUrl: {
+      type: String,
+      default: null,
+    },
+
+    // ✅ ADDED COVER FIELD (CRITICAL FIX)
+    coverUrl: {
       type: String,
       default: null,
     },
