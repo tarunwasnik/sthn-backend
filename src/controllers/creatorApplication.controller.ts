@@ -73,6 +73,11 @@ export const applyForCreator = async (req: Request, res: Response) => {
     country,
     city,
     languages,
+
+    /* ✅ NEW MEDIA INPUT */
+    avatarUrl,
+    coverUrl,
+    media,
   } = req.body;
 
   if (
@@ -111,6 +116,12 @@ export const applyForCreator = async (req: Request, res: Response) => {
           services: normalizedServices,
           publicBio,
           languages: normalizedLanguages,
+
+          /* ✅ SAVE MEDIA */
+          avatarUrl: avatarUrl || null,
+          coverUrl: coverUrl || null,
+          media: Array.isArray(media) ? media : [],
+
           status: "submitted",
         },
       ],
@@ -128,13 +139,16 @@ export const applyForCreator = async (req: Request, res: Response) => {
       application: application[0],
     });
   } catch (error: any) {
-  console.error("🔥 CREATOR APPLY ERROR:", error);
-  console.error("🔥 ERROR MESSAGE:", error?.message);
-  console.error("🔥 ERROR STACK:", error?.stack);
+    console.error("🔥 CREATOR APPLY ERROR:", error);
+    console.error("🔥 ERROR MESSAGE:", error?.message);
+    console.error("🔥 ERROR STACK:", error?.stack);
 
-  await session.abortTransaction();
-  session.endSession();
+    await session.abortTransaction();
+    session.endSession();
 
-  throw new AppError(error?.message || "Application submission failed", 400);
-}
+    throw new AppError(
+      error?.message || "Application submission failed",
+      400
+    );
+  }
 };

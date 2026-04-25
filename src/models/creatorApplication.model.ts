@@ -24,6 +24,11 @@ export interface CreatorApplicationDocument extends Document {
 
   languages: string[];
 
+  /* ✅ NEW MEDIA FIELDS */
+  avatarUrl?: string | null;
+  coverUrl?: string | null;
+  media?: string[];
+
   status: CreatorApplicationStatus;
 
   createdAt: Date;
@@ -85,6 +90,23 @@ const CreatorApplicationSchema =
       },
 
       languages: {
+        type: [String],
+        default: [],
+      },
+
+      /* ================= MEDIA ================= */
+
+      avatarUrl: {
+        type: String,
+        default: null,
+      },
+
+      coverUrl: {
+        type: String,
+        default: null,
+      },
+
+      media: {
         type: [String],
         default: [],
       },
