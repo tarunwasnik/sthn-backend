@@ -5,17 +5,15 @@ import mongoose from "mongoose";
 import { CreatorService } from "../models/creatorService.model";
 import { CreatorProfile } from "../models/creatorProfile.model";
 import { AppError } from "../utils/AppError";
+import cloudinary, { extractPublicId } from "../config/cloudinary";
 
 /**
- * POST /api/v1/creator/services
- * Create new service
+ * CREATE SERVICE
  */
 export const createCreatorService = async (req: Request, res: Response) => {
   const userId = req.user?.id;
 
-  if (!userId) {
-    throw new AppError("Unauthorized", 401);
-  }
+  if (!userId) throw new AppError("Unauthorized", 401);
 
   const creatorObjectId = new mongoose.Types.ObjectId(userId);
 
@@ -34,7 +32,11 @@ export const createCreatorService = async (req: Request, res: Response) => {
     throw new AppError("Missing required fields", 400);
   }
 
-  if (typeof durationMinutes !== "number" || durationMinutes < 15 || durationMinutes > 480) {
+  if (
+    typeof durationMinutes !== "number" ||
+    durationMinutes < 15 ||
+    durationMinutes > 480
+  ) {
     throw new AppError("Invalid durationMinutes", 400);
   }
 
@@ -42,15 +44,13 @@ export const createCreatorService = async (req: Request, res: Response) => {
     throw new AppError("Invalid price", 400);
   }
 
-  const normalizedMedia = Array.isArray(media) ? media : [];
-
   const service = await CreatorService.create({
     creatorId: creatorObjectId,
     title,
     description,
     durationMinutes,
     price,
-    media: normalizedMedia,
+    media: Array.isArray(media) ? media : [],
   });
 
   res.status(201).json({
@@ -60,15 +60,12 @@ export const createCreatorService = async (req: Request, res: Response) => {
 };
 
 /**
- * GET /api/v1/creator/services
- * List my services
+ * GET SERVICES
  */
 export const getMyServices = async (req: Request, res: Response) => {
   const userId = req.user?.id;
 
-  if (!userId) {
-    throw new AppError("Unauthorized", 401);
-  }
+  if (!userId) throw new AppError("Unauthorized", 401);
 
   const creatorObjectId = new mongoose.Types.ObjectId(userId);
 
@@ -82,16 +79,13 @@ export const getMyServices = async (req: Request, res: Response) => {
 };
 
 /**
- * PATCH /api/v1/creator/services/:serviceId
- * Update service
+ * UPDATE SERVICE (WITH MEDIA CLEANUP)
  */
 export const updateCreatorService = async (req: Request, res: Response) => {
   const userId = req.user?.id;
   const { serviceId } = req.params;
 
-  if (!userId) {
-    throw new AppError("Unauthorized", 401);
-  }
+  if (!userId) throw new AppError("Unauthorized", 401);
 
   if (!mongoose.Types.ObjectId.isValid(serviceId)) {
     throw new AppError("Invalid service ID", 400);
@@ -104,17 +98,55 @@ export const updateCreatorService = async (req: Request, res: Response) => {
     creatorId: creatorObjectId,
   });
 
-  if (!service) {
-    throw new AppError("Service not found", 404);
+  if (!service) throw new AppError("Service not found", 404);
+
+  const {
+    title,
+    description,
+    durationMinutes,
+    price,
+    media,
+    isActive,
+  } = req.body;
+
+  /* ================= MEDIA CLEANUP ================= */
+
+  if (media !== undefined) {
+    if (!Array.isArray(media)) {
+      throw new AppError("Media must be an array", 400);
+    }
+
+    const oldMedia = service.media || [];
+    const removedMedia = oldMedia.filter(
+      (url) => !media.includes(url)
+    );
+
+    for (const url of removedMedia) {
+      const publicId = extractPublicId(url);
+
+      if (publicId) {
+        try {
+          await cloudinary.uploader.destroy(publicId);
+        } catch (err) {
+          console.error("Cloudinary delete failed:", publicId);
+        }
+      }
+    }
+
+    service.media = media;
   }
 
-  const { title, description, durationMinutes, price, media, isActive } = req.body;
+  /* ================= OTHER FIELDS ================= */
 
   if (title !== undefined) service.title = title;
   if (description !== undefined) service.description = description;
 
   if (durationMinutes !== undefined) {
-    if (typeof durationMinutes !== "number" || durationMinutes < 15 || durationMinutes > 480) {
+    if (
+      typeof durationMinutes !== "number" ||
+      durationMinutes < 15 ||
+      durationMinutes > 480
+    ) {
       throw new AppError("Invalid durationMinutes", 400);
     }
     service.durationMinutes = durationMinutes;
@@ -125,13 +157,6 @@ export const updateCreatorService = async (req: Request, res: Response) => {
       throw new AppError("Invalid price", 400);
     }
     service.price = price;
-  }
-
-  if (media !== undefined) {
-    if (!Array.isArray(media)) {
-      throw new AppError("Media must be an array", 400);
-    }
-    service.media = media;
   }
 
   if (isActive !== undefined) {
@@ -147,16 +172,13 @@ export const updateCreatorService = async (req: Request, res: Response) => {
 };
 
 /**
- * DELETE /api/v1/creator/services/:serviceId
- * Soft delete
+ * DELETE SERVICE + MEDIA CLEANUP (HARD DELETE)
  */
 export const deleteCreatorService = async (req: Request, res: Response) => {
   const userId = req.user?.id;
   const { serviceId } = req.params;
 
-  if (!userId) {
-    throw new AppError("Unauthorized", 401);
-  }
+  if (!userId) throw new AppError("Unauthorized", 401);
 
   if (!mongoose.Types.ObjectId.isValid(serviceId)) {
     throw new AppError("Invalid service ID", 400);
@@ -169,14 +191,29 @@ export const deleteCreatorService = async (req: Request, res: Response) => {
     creatorId: creatorObjectId,
   });
 
-  if (!service) {
-    throw new AppError("Service not found", 404);
+  if (!service) throw new AppError("Service not found", 404);
+
+  /* ================= DELETE ALL MEDIA ================= */
+
+  if (service.media?.length) {
+    for (const url of service.media) {
+      const publicId = extractPublicId(url);
+
+      if (publicId) {
+        try {
+          await cloudinary.uploader.destroy(publicId);
+        } catch (err) {
+          console.error("Cloudinary delete failed:", publicId);
+        }
+      }
+    }
   }
 
-  service.isActive = false;
-  await service.save();
+  /* ================= HARD DELETE ================= */
+
+  await CreatorService.findByIdAndDelete(serviceId);
 
   res.status(200).json({
-    message: "Service disabled successfully",
+    message: "Service and media deleted successfully",
   });
 };
