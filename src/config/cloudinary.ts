@@ -14,16 +14,15 @@ cloudinary.config({
 
 export const extractPublicId = (url: string) => {
   try {
-    const urlObj = new URL(url);
-    const path = urlObj.pathname;
+    const parts = url.split("/upload/")[1];
 
-    const publicIdWithExtension = path
-      .split("/upload/")[1]
-      .split("/")
-      .slice(1)
-      .join("/");
+    if (!parts) return null;
 
-    return publicIdWithExtension.replace(/\.[^/.]+$/, "");
+    // remove version if exists (v123...)
+    const withoutVersion = parts.replace(/^v\d+\//, "");
+
+    // remove file extension
+    return withoutVersion.replace(/\.[^/.]+$/, "");
   } catch {
     return null;
   }
