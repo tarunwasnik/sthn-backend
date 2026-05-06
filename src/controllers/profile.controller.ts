@@ -5,6 +5,8 @@ import { UserProfile } from "../models/userProfile.model";
 import User from "../models/User";
 import { AppError } from "../utils/AppError";
 import { catchAsync } from "../utils/catchAsync";
+import { v2 as cloudinary } from "cloudinary"; // ✅ ADDED
+import { extractPublicId } from "../utils/extractPublicId"; // ✅ ADDED
 
 /* ================= UTIL ================= */
 
@@ -86,6 +88,59 @@ export const upsertProfile = catchAsync(
     /* ================= UPDATE ================= */
 
     else {
+      /* 🔥 CLOUDINARY CLEANUP */
+
+      // Avatar
+      if (
+        avatar !== undefined &&
+        profile.avatar &&
+        avatar !== profile.avatar
+      ) {
+        try {
+          const publicId = extractPublicId(profile.avatar);
+          if (publicId) await cloudinary.uploader.destroy(publicId);
+        } catch (e) {
+          console.error("Avatar delete failed:", e);
+        }
+      }
+
+      // Cover
+      if (
+        cover !== undefined &&
+        profile.cover &&
+        cover !== profile.cover
+      ) {
+        try {
+          const publicId = extractPublicId(profile.cover);
+          if (publicId) await cloudinary.uploader.destroy(publicId);
+        } catch (e) {
+          console.error("Cover delete failed:", e);
+        }
+      }
+
+      // 🔥 GALLERY (STRICT SAME AS SERVICES)
+      if (profilePhotos !== undefined) {
+        const oldPhotos = profile.profilePhotos || [];
+        const newPhotos = Array.isArray(profilePhotos) ? profilePhotos : [];
+
+        const removedPhotos = oldPhotos.filter(
+          (oldUrl) => !newPhotos.includes(oldUrl)
+        );
+
+        for (const url of removedPhotos) {
+          try {
+            const publicId = extractPublicId(url);
+            if (publicId) {
+              await cloudinary.uploader.destroy(publicId);
+            }
+          } catch (err) {
+            console.error("Gallery delete failed:", err);
+          }
+        }
+      }
+
+      /* ================= ORIGINAL LOGIC ================= */
+
       if (username && username !== profile.username) {
         throw new AppError("Username cannot be changed", 400);
       }
@@ -208,7 +263,42 @@ export const updateMyProfile = catchAsync(
       throw new AppError("Profile not found", 404);
     }
 
-    /* ================= UPDATE ================= */
+    /* 🔥 CLOUDINARY CLEANUP */
+
+    if (avatar !== undefined && profile.avatar && avatar !== profile.avatar) {
+      try {
+        const publicId = extractPublicId(profile.avatar);
+        if (publicId) await cloudinary.uploader.destroy(publicId);
+      } catch (e) {
+        console.error("Avatar delete failed:", e);
+      }
+    }
+
+    if (cover !== undefined && profile.cover && cover !== profile.cover) {
+      try {
+        const publicId = extractPublicId(profile.cover);
+        if (publicId) await cloudinary.uploader.destroy(publicId);
+      } catch (e) {
+        console.error("Cover delete failed:", e);
+      }
+    }
+
+    if (profilePhotos && Array.isArray(profile.profilePhotos)) {
+      const removed = profile.profilePhotos.filter(
+        (img) => !profilePhotos.includes(img)
+      );
+
+      for (const img of removed) {
+        try {
+          const publicId = extractPublicId(img);
+          if (publicId) await cloudinary.uploader.destroy(publicId);
+        } catch (e) {
+          console.error("Gallery delete failed:", e);
+        }
+      }
+    }
+
+    /* ================= ORIGINAL ================= */
 
     if (bio !== undefined) profile.bio = bio;
 

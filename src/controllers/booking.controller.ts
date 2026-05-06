@@ -238,6 +238,16 @@ export const requestBooking = async (
       serviceId: service._id,
     }).session(session);
 
+    const now = new Date();
+
+for (const slot of slots) {
+
+  if (new Date(slot.startTime) < now) {
+    throw new Error("Cannot book expired slots");
+  }
+
+}
+
     if (slots.length !== slotIds.length)
       throw new Error("One or more slots not available");
 

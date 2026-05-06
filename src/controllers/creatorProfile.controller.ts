@@ -5,6 +5,8 @@ import mongoose from "mongoose";
 import { CreatorProfile } from "../models/creatorProfile.model";
 import { catchAsync } from "../utils/catchAsync";
 import { AppError } from "../utils/AppError";
+import { v2 as cloudinary } from "cloudinary";
+import { extractPublicId } from "../utils/extractPublicId";
 
 /* ================= GET CREATOR PROFILE ================= */
 
@@ -31,7 +33,7 @@ export const updateMyCreatorProfile = catchAsync(
     const {
       displayName,
       avatarUrl,
-      coverUrl, // ✅ ADDED
+      coverUrl,
       bio,
       languages,
       categories,
@@ -46,13 +48,61 @@ export const updateMyCreatorProfile = catchAsync(
       throw new AppError("Creator profile not found", 404);
     }
 
-    // ✅ FIELD UPDATES
+    /* 🔥 CLOUDINARY CLEANUP */
+
+    if (
+      avatarUrl !== undefined &&
+      profile.avatarUrl &&
+      avatarUrl !== profile.avatarUrl
+    ) {
+      try {
+        const publicId = extractPublicId(profile.avatarUrl);
+        if (publicId) await cloudinary.uploader.destroy(publicId);
+      } catch (e) {
+        console.error("Avatar delete failed:", e);
+      }
+    }
+
+    if (
+      coverUrl !== undefined &&
+      profile.coverUrl &&
+      coverUrl !== profile.coverUrl
+    ) {
+      try {
+        const publicId = extractPublicId(profile.coverUrl);
+        if (publicId) await cloudinary.uploader.destroy(publicId);
+      } catch (e) {
+        console.error("Cover delete failed:", e);
+      }
+    }
+
+     // 🔥 MEDIA (STRICT SAME AS SERVICES)
+    if (media !== undefined) {
+      const oldMedia = profile.media || [];
+      const newMedia = Array.isArray(media) ? media : [];
+
+      const removedMedia = oldMedia.filter(
+        (oldUrl) => !newMedia.includes(oldUrl)
+      );
+
+      for (const url of removedMedia) {
+        try {
+          const publicId = extractPublicId(url);
+          if (publicId) {
+            await cloudinary.uploader.destroy(publicId);
+          }
+        } catch (err) {
+          console.error("Media delete failed:", err);
+        }
+      }
+    }
+
+
+    /* ================= UPDATE ================= */
+
     if (displayName !== undefined) profile.displayName = displayName;
     if (avatarUrl !== undefined) profile.avatarUrl = avatarUrl;
-
-    // ✅ CRITICAL FIX (COVER)
     if (coverUrl !== undefined) profile.coverUrl = coverUrl;
-
     if (bio !== undefined) profile.bio = bio;
     if (languages !== undefined) profile.languages = languages;
     if (categories !== undefined) profile.categories = categories;

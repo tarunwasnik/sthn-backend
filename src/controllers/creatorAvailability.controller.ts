@@ -214,13 +214,16 @@ export const getCreatorAvailabilities = async (
     return res.status(401).json({ message: "Unauthorized" });
   }
 
-  const matchFilter: any = {
-    creatorId: new mongoose.Types.ObjectId(user.id),
-  };
+ const matchFilter: any = {
+  creatorId: new mongoose.Types.ObjectId(user.id),
+};
 
-  if (includeCancelled !== "true") {
-    matchFilter.status = "ACTIVE";
-  }
+if (includeCancelled !== "true") {
+  matchFilter.status = "ACTIVE";
+  matchFilter.date = {
+    $gte: new Date(new Date().setHours(0, 0, 0, 0)),
+  };
+}
 
   const availabilities = await Availability.aggregate([
 
@@ -460,10 +463,22 @@ export const getAvailableSlotsForCreator = async (
     },
     { $unwind: "$availability" },
     {
-      $match: {
-        "availability.status": "ACTIVE",
-      },
+  $match: {
+    "availability.status": "ACTIVE",
+  },
+},
+{
+  $addFields: {
+    slotDateTime: "$startTime",
+  },
+},
+{
+  $match: {
+    slotDateTime: {
+      $gte: new Date(),
     },
+  },
+},
     {
       $sort: { startTime: 1 },
     },
