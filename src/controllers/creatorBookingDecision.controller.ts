@@ -7,6 +7,7 @@ import { Slot } from "../models/slot.model";
 import { CreatorProfile } from "../models/creatorProfile.model";
 import { UserProfile } from "../models/userProfile.model";
 import { CREATOR_STATUS } from "../constants/creatorStatus";
+import { CreatorService } from "../models/creatorService.model";
 
 /* =========================================================
    GET CREATOR BOOKINGS (EXTENDED WITH USER + SLOTS)
@@ -75,36 +76,71 @@ export const getCreatorBookings = async (
 
     /* ================= SLOT ENRICH ================= */
 
-    const allSlotIds = bookings.flatMap(
-      (b) => b.slotIds || []
-    );
+const allSlotIds = bookings.flatMap(
+  (b: any) => b.slotIds || []
+);
 
-    const slots = await Slot.find({
-      _id: { $in: allSlotIds },
-    }).lean();
+const slots = await Slot.find({
+  _id: { $in: allSlotIds },
+}).lean();
 
-    const slotMap = new Map(
-      slots.map((s) => [String(s._id), s])
-    );
+const slotMap = new Map(
+  slots.map((s) => [String(s._id), s])
+);
 
-    /* ================= FINAL MERGE ================= */
+/* ================= SERVICE ENRICH ================= */
 
-    const enrichedBookings = bookings.map((b) => {
-      const profile = userMap.get(String(b.userId));
+const serviceIds = [
+  ...new Set(
+    bookings
+      .map((b: any) => String(b.serviceId))
+      .filter(Boolean)
+  ),
+];
 
-      return {
-        ...b,
+const services = await CreatorService.find({
+  _id: { $in: serviceIds },
+}).lean();
 
-        user: {
-          displayName: profile?.username || "Unknown",
-          avatarUrl: profile?.profilePhotos?.[0] || null,
-        },
+const serviceMap = new Map(
+  services.map((s) => [
+    String(s._id),
+    s,
+  ])
+);
 
-        slots: (b.slotIds || [])
-          .map((id: any) => slotMap.get(String(id)))
-          .filter(Boolean),
-      };
-    });
+/* ================= FINAL MERGE ================= */
+
+const enrichedBookings = bookings.map((b: any) => {
+  const profile = userMap.get(String(b.userId));
+
+  const service = serviceMap.get(
+    String(b.serviceId)
+  );
+
+  return {
+    ...b,
+
+    service: {
+      _id: service?._id || null,
+      title: service?.title || "Untitled",
+      media: service?.media || [],
+    },
+
+    user: {
+      _id: String(b.userId),
+      displayName: profile?.username || "Unknown",
+      avatarUrl:
+        profile?.profilePhotos?.[0] || null,
+    },
+
+    slots: (b.slotIds || [])
+      .map((id: any) =>
+        slotMap.get(String(id))
+      )
+      .filter(Boolean),
+  };
+});
 
     return res.status(200).json({
       bookings: enrichedBookings,
