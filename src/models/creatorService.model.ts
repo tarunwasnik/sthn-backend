@@ -11,6 +11,8 @@ export interface CreatorServiceDocument extends Document {
   durationMinutes: number;
   price: number;
 
+  currency: string;
+
   media?: string[];
 
   isActive: boolean;
@@ -51,6 +53,12 @@ const CreatorServiceSchema = new Schema<CreatorServiceDocument>(
       type: Number,
       required: true,
       min: 0,
+    },
+
+    currency: {
+      type: String,
+      required: true,
+      trim: true,
     },
 
     media: {

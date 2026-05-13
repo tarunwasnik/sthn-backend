@@ -50,6 +50,7 @@ export const createCreatorService = async (req: Request, res: Response) => {
     description,
     durationMinutes,
     price,
+    currency: creatorProfile.currency,
     media: Array.isArray(media) ? media : [],
   });
 
