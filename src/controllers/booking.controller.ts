@@ -293,7 +293,7 @@ for (const slot of slots) {
 
     const totalPrice = slots.reduce((sum, slot) => sum + slot.price, 0);
 
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + 180 * 60 * 1000);
 
     const booking = await Booking.create(
       [

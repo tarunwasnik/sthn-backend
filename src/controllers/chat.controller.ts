@@ -2,6 +2,8 @@
 
 import { Request, Response } from "express";
 import mongoose from "mongoose";
+import { UserProfile } from "../models/userProfile.model";
+import { CreatorProfile } from "../models/creatorProfile.model";
 import { Booking } from "../models/booking.model";
 import { Chat } from "../models/chat.model";
 import { Slot } from "../models/slot.model"; // ✅ ADDED
@@ -227,7 +229,7 @@ export const markChatAsSeen = async (
 };
 
 /* ======================================================
-   GET CONVERSATIONS (UNCHANGED)
+   GET CONVERSATIONS (UPDATED)
 ====================================================== */
 export const getConversations = async (
   req: Request,
@@ -235,44 +237,91 @@ export const getConversations = async (
 ) => {
   const user = req.user;
 
-  if (!user)
-    return res.status(401).json({ message: "Unauthorized" });
+  if (!user) {
+    return res
+      .status(401)
+      .json({ message: "Unauthorized" });
+  }
 
-  const actorId = new mongoose.Types.ObjectId(user.id);
+  const actorId = new mongoose.Types.ObjectId(
+    user.id
+  );
+
+  /* ======================================================
+     GET BOOKINGS
+  ====================================================== */
 
   const bookings = await Booking.find({
     status: "CONFIRMED",
-    $or: [{ userId: actorId }, { creatorId: actorId }],
-  }).lean();
+    $or: [
+      { userId: actorId },
+      { creatorId: actorId },
+    ],
+  })
+    .populate({
+      path: "userId",
+      select: "_id",
+    })
+    .lean();
 
-  const bookingIds = bookings.map((b) => b._id);
+  const bookingIds = bookings.map(
+    (b: any) => b._id
+  );
 
   if (bookingIds.length === 0) {
-    return res.status(200).json({ conversations: [] });
+    return res.status(200).json({
+      conversations: [],
+    });
   }
 
+  /* ======================================================
+     LAST MESSAGE
+  ====================================================== */
+
   const lastMessages = await Chat.aggregate([
-    { $match: { bookingId: { $in: bookingIds } } },
-    { $sort: { createdAt: -1 } },
+    {
+      $match: {
+        bookingId: { $in: bookingIds },
+      },
+    },
+    {
+      $sort: {
+        createdAt: -1,
+      },
+    },
     {
       $group: {
         _id: "$bookingId",
         message: { $first: "$message" },
-        createdAt: { $first: "$createdAt" },
+        createdAt: {
+          $first: "$createdAt",
+        },
       },
     },
   ]);
 
   const lastMessageMap = new Map();
+
   lastMessages.forEach((m) => {
-    lastMessageMap.set(m._id.toString(), m);
+    lastMessageMap.set(
+      m._id.toString(),
+      m
+    );
   });
+
+  /* ======================================================
+     UNREAD COUNTS
+  ====================================================== */
 
   const unreadCounts = await Chat.aggregate([
     {
       $match: {
-        bookingId: { $in: bookingIds },
-        seenBy: { $ne: actorId },
+        bookingId: {
+          $in: bookingIds,
+        },
+        seenBy: {
+          $ne: actorId,
+        },
       },
     },
     {
@@ -284,75 +333,134 @@ export const getConversations = async (
   ]);
 
   const unreadMap = new Map();
+
   unreadCounts.forEach((u) => {
-    unreadMap.set(u._id.toString(), u.count);
+    unreadMap.set(
+      u._id.toString(),
+      u.count
+    );
   });
 
-  const creatorIds = bookings.map((b) => b.creatorId);
+  /* ======================================================
+     CREATOR PROFILES
+  ====================================================== */
 
-  const creators = await mongoose
-    .model("CreatorProfile")
-    .find({ userId: { $in: creatorIds } })
-    .lean();
+  const creatorIds = bookings.map(
+    (b: any) => b.creatorId
+  );
+
+  const creators = await CreatorProfile.find({
+    userId: { $in: creatorIds },
+  }).lean();
 
   const creatorMap = new Map();
+
   creators.forEach((c: any) => {
-    creatorMap.set(c.userId.toString(), c);
+    creatorMap.set(
+      c.userId.toString(),
+      c
+    );
   });
 
-  const conversations = bookings
-    .map((booking) => {
-      const lastMessage = lastMessageMap.get(
+  /* ======================================================
+     USER PROFILES
+  ====================================================== */
+
+  const userIds = bookings.map
+    ( (b: any) => 
+      typeof b.userId === "object" 
+      ? b.userId._id.toString() 
+      : b.userId.toString() );
+
+  const userProfiles = await UserProfile.find({
+    userId: { $in: userIds },
+  }).lean();
+
+  const userProfileMap = new Map();
+
+  userProfiles.forEach((u: any) => {
+    userProfileMap.set(
+      u.userId.toString(),
+      u
+    );
+  });
+
+
+/* ======================================================
+   BUILD CONVERSATIONS
+====================================================== */
+
+const conversations = bookings
+  .map((booking: any) => {
+    const lastMessage =
+      lastMessageMap.get(
         booking._id.toString()
       );
 
-      if (!lastMessage) return null;
+    if (!lastMessage) return null;
 
-      const isUser =
-        booking.userId.toString() === actorId.toString();
+    const bookingUserId =
+      typeof booking.userId === "object"
+        ? booking.userId._id.toString()
+        : booking.userId.toString();
 
-      let otherUser: any = {
-        id: "",
-        displayName: "Unknown",
-        avatarUrl: null,
-      };
+    const bookingCreatorId =
+      typeof booking.creatorId === "object"
+        ? booking.creatorId._id.toString()
+        : booking.creatorId.toString();
 
-      if (isUser) {
-        const creator = creatorMap.get(
-          booking.creatorId.toString()
-        );
+    const isUser =
+      bookingUserId ===
+      actorId.toString();
 
-        if (creator) {
-          otherUser = {
-            id: creator.userId,
-            displayName: creator.displayName,
-            avatarUrl: creator.avatarUrl,
-          };
-        }
-      } else {
-        otherUser = {
-          id: booking.userId,
-          displayName: "User",
-          avatarUrl: null,
-        };
-      }
+    const otherUserId = isUser
+      ? bookingCreatorId
+      : bookingUserId;
 
-      return {
-        bookingId: booking._id,
-        lastMessage: lastMessage.message,
-        lastMessageAt: lastMessage.createdAt,
-        otherUser,
-        unreadCount:
-          unreadMap.get(booking._id.toString()) || 0,
-      };
-    })
-    .filter(Boolean);
+    /* ======================================================
+       SAME STRUCTURE AS MY BOOKINGS
+    ====================================================== */
 
-  conversations.sort(
-    (a, b) =>
-      new Date(b!.lastMessageAt).getTime() -
-      new Date(a!.lastMessageAt).getTime()
-  );
+    const otherUserProfile =
+      creatorMap.get(otherUserId) ||
+      userProfileMap.get(otherUserId) ||
+      null;
 
-  return res.status(200).json({ conversations });
+    return {
+      bookingId: booking._id,
+
+      lastMessage:
+        lastMessage.message,
+
+      lastMessageAt:
+        lastMessage.createdAt,
+
+     otherUser: { _id: otherUserId, profile: otherUserProfile, },
+
+      unreadCount:
+        unreadMap.get(
+          booking._id.toString()
+        ) || 0,
+    };
+  })
+  .filter(Boolean);
+
+/* ======================================================
+   SORT LATEST FIRST
+====================================================== */
+
+conversations.sort(
+  (a: any, b: any) =>
+    new Date(
+      b.lastMessageAt
+    ).getTime() -
+    new Date(
+      a.lastMessageAt
+    ).getTime()
+);
+
+return res.status(200).json({
+  conversations,
+});
+
 };
