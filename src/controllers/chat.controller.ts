@@ -258,10 +258,6 @@ export const getConversations = async (
       { creatorId: actorId },
     ],
   })
-    .populate({
-      path: "userId",
-      select: "_id",
-    })
     .lean();
 
   const bookingIds = bookings.map(
@@ -286,6 +282,7 @@ export const getConversations = async (
     },
     {
       $sort: {
+        bookingId: 1,
         createdAt: -1,
       },
     },
@@ -318,6 +315,9 @@ export const getConversations = async (
       $match: {
         bookingId: {
           $in: bookingIds,
+        },
+        senderId: {
+          $ne: actorId, 
         },
         seenBy: {
           $ne: actorId,
@@ -427,21 +427,31 @@ const conversations = bookings
       null;
 
     return {
-      bookingId: booking._id,
+  bookingId: booking._id,
 
-      lastMessage:
-        lastMessage.message,
+  service: {
+    _id: booking.serviceId,
+    title:
+      booking.serviceTitle ||
+      "Service",
+  },
 
-      lastMessageAt:
-        lastMessage.createdAt,
+  lastMessage:
+    lastMessage.message,
 
-     otherUser: { _id: otherUserId, profile: otherUserProfile, },
+  lastMessageAt:
+    lastMessage.createdAt,
 
-      unreadCount:
-        unreadMap.get(
-          booking._id.toString()
-        ) || 0,
-    };
+  otherUser: {
+    _id: otherUserId,
+    profile: otherUserProfile,
+  },
+
+  unreadCount:
+    unreadMap.get(
+      booking._id.toString()
+    ) || 0,
+};
   })
   .filter(Boolean);
 
