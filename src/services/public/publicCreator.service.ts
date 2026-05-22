@@ -92,21 +92,35 @@ export const getPublicCreatorsData = async (query: any = {}) => {
       },
     },
 
-    { $match: { availableSlots: { $ne: [] } } },
 
     /* ================= PRICE + SLOT INFO ================= */
 
     {
-      $addFields: {
-        startingPrice: { $min: "$activeServices.price" },
-        nextAvailableSlot: {
-          $arrayElemAt: ["$availableSlots.startTime", 0],
-        },
-        isAvailable: {
-          $gt: [{ $size: "$availableSlots" }, 0],
-        },
-      },
+  $addFields: {
+    startingPrice: {
+      $min: "$activeServices.price",
     },
+
+    nextAvailableSlot: {
+      $ifNull: [
+        {
+          $arrayElemAt: [
+            "$availableSlots.startTime",
+            0,
+          ],
+        },
+        null,
+      ],
+    },
+
+    isAvailable: {
+      $gt: [
+        { $size: "$availableSlots" },
+        0,
+      ],
+    },
+  },
+},
 
     /* ================= JOIN USER PROFILE FOR AGE ================= */
 
@@ -158,24 +172,52 @@ export const getPublicCreatorsData = async (query: any = {}) => {
 
   /* ================= SORTING ================= */
 
-  const sortOption = query.sort || "recommended";
+const sortOption =
+  query.sort || "recommended";
 
-  if (sortOption === "price_asc") {
-    basePipeline.push({ $sort: { startingPrice: 1 } });
+if (sortOption === "price_asc") {
+  basePipeline.push({
+    $sort: {
+      isAvailable: -1,
+      startingPrice: 1,
+    },
+  });
 
-  } else if (sortOption === "price_desc") {
-    basePipeline.push({ $sort: { startingPrice: -1 } });
+} else if (
+  sortOption === "price_desc"
+) {
+  basePipeline.push({
+    $sort: {
+      isAvailable: -1,
+      startingPrice: -1,
+    },
+  });
 
-  } else if (sortOption === "rating") {
-    basePipeline.push({
-      $sort: { rating: -1, reviewCount: -1 },
-    });
+} else if (
+  sortOption === "rating"
+) {
+  basePipeline.push({
+    $sort: {
+      isAvailable: -1,
+      rating: -1,
+      reviewCount: -1,
+    },
+  });
 
-  } else {
-    basePipeline.push({
-      $sort: { rating: -1, reviewCount: -1 },
-    });
-  }
+} else {
+  /* DEFAULT:
+     AVAILABLE creators first
+  */
+
+  basePipeline.push({
+    $sort: {
+      isAvailable: -1,
+      rating: -1,
+      reviewCount: -1,
+      createdAt: -1,
+    },
+  });
+}
 
   /* ================= COUNT ================= */
 
