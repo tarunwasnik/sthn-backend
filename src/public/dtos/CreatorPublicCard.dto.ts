@@ -11,17 +11,17 @@ export interface CreatorPublicCardDTO {
 
   primaryCategory: string;
 
+  categories: string[];
+
   rating: number;
 
   reviewCount: number;
 
-  /* ================= NEW ================= */
-
-  age?: number | null;
-
   city?: string | null;
 
   country?: string | null;
+
+  age?: number | null;
 
   currency?: string | null;
 
