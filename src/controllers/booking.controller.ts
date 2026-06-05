@@ -36,16 +36,16 @@ const cleanupExpiredBookings = async (
     booking.status = "EXPIRED";
     await booking.save({ session });
   }
-};
+ };
 
-/* =========================================================
+ /* =========================================================
    GET USER BOOKINGS  ✅ NEW
-========================================================= */
+ ========================================================= */
 
-export const getUserBookings = async (
+ export const getUserBookings = async (
   req: Request,
   res: Response
-) => {
+ ) => {
   const user = req.user;
 
   if (!user) {
@@ -56,9 +56,7 @@ export const getUserBookings = async (
     const bookings = await Booking.find({ userId: user.id })
       .sort({ createdAt: -1 })
       .lean();
-
-    const bookingIds = bookings.map((b) => b._id);
-
+      
     const allSlotIds = bookings.flatMap((b) => b.slotIds);
 
     const slots = await Slot.find({
@@ -106,37 +104,38 @@ export const getUserBookings = async (
         );
 
       return {
-        _id: booking._id,
+  _id: booking._id,
 
-        status: booking.status,
-        paymentStatus: booking.paymentStatus,
+  status: booking.status,
+  paymentStatus: booking.paymentStatus,
 
-        price: booking.price,
-        currency: booking.currency,
-        durationMinutes: booking.durationMinutes,
+  price: booking.price,
+  currency: booking.currency,
+  durationMinutes: booking.durationMinutes,
 
-        expiresAt: booking.expiresAt,
-        createdAt: booking.createdAt,
+  expiresAt: booking.expiresAt,
+  createdAt: booking.createdAt,
+  completedAt: booking.completedAt,
 
-        service: {
-          _id: booking.serviceId,
-          title: booking.serviceTitle,
-          data: serviceMap.get(String(booking.serviceId)) || null,
-        },
+  service: {
+    _id: booking.serviceId,
+    title: booking.serviceTitle,
+    data: serviceMap.get(String(booking.serviceId)) || null,
+  },
 
-        creator: {
-          _id: booking.creatorId,
-          profile: creatorMap.get(String(booking.creatorId)) || null,
-        },
+  creator: {
+    _id: booking.creatorId,
+    profile: creatorMap.get(String(booking.creatorId)) || null,
+  },
 
-        slots: bookingSlots.map((slot) => ({
-          _id: slot!._id,
-          startTime: slot!.startTime,
-          endTime: slot!.endTime,
-          status: slot!.status,
-          price: slot!.price,
-        })),
-      };
+  slots: bookingSlots.map((slot) => ({
+    _id: slot!._id,
+    startTime: slot!.startTime,
+    endTime: slot!.endTime,
+    status: slot!.status,
+    price: slot!.price,
+  })),
+ };
     });
 
     return res.status(200).json({
