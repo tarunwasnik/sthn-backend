@@ -4,10 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-  "dev": "nodemon --exec ts-node src/server.ts",
-  "build": "tsc",
-  "start": "node dist/server.js"
-},
+    "dev": "nodemon --exec ts-node src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -22,6 +22,7 @@
     "google-auth-library": "^10.6.1",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.575.0",
+    "luxon": "^3.7.2",
     "mongoose": "^9.1.2",
     "multer": "^2.1.1",
     "socket.io": "^4.8.3",
@@ -33,6 +34,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/luxon": "^3.7.1",
     "@types/multer": "^2.1.0",
     "@types/node": "^25.0.3",
     "@types/socket.io": "^3.0.2",

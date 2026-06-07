@@ -23,18 +23,25 @@ export const createAvailability = async (
   }
 
   const {
-    serviceId,
-    date,
-    startTime,
-    endTime,
-    slotDurationMinutes
-  } = req.body;
+  serviceId,
+  date,
+  startTime,
+  endTime,
+  timezone,
+  slotDurationMinutes
+} = req.body;
 
-  if (!serviceId || !date || !startTime || !endTime) {
+  if (
+  !serviceId ||
+  !date ||
+  !startTime ||
+  !endTime ||
+  !timezone
+) {
     return res.status(400).json({
-      message:
-        "serviceId, date, startTime and endTime are required",
-    });
+  message:
+    "serviceId, date, startTime, endTime and timezone are required",
+});
   }
 
   if (!mongoose.Types.ObjectId.isValid(serviceId)) {
@@ -72,57 +79,121 @@ const availabilityDate = new Date(
     return h * 60 + m;
   };
 
-  const newStart = toMinutes(startTime);
-  const newEnd = toMinutes(endTime);
+const newStart = toMinutes(startTime);
+const newEnd = toMinutes(endTime);
 
-  const existingAvailabilities = await Availability.find({
-    creatorId: user.id,
-    date: availabilityDate,
-    status: "ACTIVE",
-  });
+console.log("NEW AVAILABILITY REQUEST");
+console.log({
+  creatorId: user.id,
+  date: availabilityDate,
+  startTime,
+  endTime,
+  serviceId,
+  timezone,
+});
 
-  for (const existing of existingAvailabilities) {
+const existingAvailabilities = await Availability.find({
+  creatorId: user.id,
+  serviceId,
+  date: availabilityDate,
+  status: "ACTIVE",
+});
 
-    const existingStart = toMinutes(existing.startTime);
-    const existingEnd = toMinutes(existing.endTime);
+console.log(
+  "MATCHING ACTIVE AVAILABILITIES:",
+  existingAvailabilities.map(a => ({
+    id: a._id,
+    date: a.date,
+    startTime: a.startTime,
+    endTime: a.endTime,
+    status: a.status,
+  }))
+);
 
-    const overlaps =
-      newStart < existingEnd && newEnd > existingStart;
+for (const existing of existingAvailabilities) {
+  const existingStart = toMinutes(existing.startTime);
+  const existingEnd = toMinutes(existing.endTime);
 
-    if (overlaps) {
-      return res.status(400).json({
-        message:
-          "Availability overlaps with an existing active window",
-      });
-    }
+  const overlaps =
+    newStart < existingEnd &&
+    newEnd > existingStart;
+
+  if (overlaps) {
+    return res.status(400).json({
+      message:
+        "Availability overlaps with an existing active window",
+    });
   }
+}
 
-  const availability = await Availability.create({
-    creatorId: user.id,
-    serviceId,
-    date: availabilityDate,
-    startTime,
-    endTime,
-    slotDurationMinutes:
-      slotDurationMinutes || service.durationMinutes,
-    status: "ACTIVE",
-  });
+  const session = await mongoose.startSession();
+
+try {
+
+  session.startTransaction();
+
+  const availability = await Availability.create(
+    [
+      {
+        creatorId: user.id,
+        serviceId,
+        date: availabilityDate,
+        startTime,
+        endTime,
+        timezone,
+        slotDurationMinutes:
+          slotDurationMinutes || service.durationMinutes,
+        status: "ACTIVE",
+      },
+    ],
+    { session }
+  );
 
   await generateSlotsForAvailability({
-    availabilityId: availability._id as mongoose.Types.ObjectId,
-    creatorId: new mongoose.Types.ObjectId(user.id),
-    serviceId: service._id,
+    availabilityId:
+      availability[0]._id as mongoose.Types.ObjectId,
+
+    creatorId:
+      new mongoose.Types.ObjectId(user.id),
+
+    serviceId:
+      service._id as mongoose.Types.ObjectId,
+
     date: availabilityDate,
     startTime,
     endTime,
-    slotDurationMinutes: availability.slotDurationMinutes,
+    timezone,
+
+    slotDurationMinutes:
+      availability[0].slotDurationMinutes,
+
     price: service.price,
+
+    session,
   });
+
+  await session.commitTransaction();
 
   return res.status(201).json({
     message: "Availability created successfully",
-    availability,
+    availability: availability[0],
   });
+
+} catch (err: any) {
+
+  await session.abortTransaction();
+
+  return res.status(400).json({
+    message:
+      err.message ||
+      "Failed to create availability",
+  });
+
+} finally {
+
+  session.endSession();
+
+}
 
 };
 
@@ -214,20 +285,36 @@ export const getCreatorAvailabilities = async (
     return res.status(401).json({ message: "Unauthorized" });
   }
 
- const matchFilter: any = {
-  creatorId: new mongoose.Types.ObjectId(user.id),
-};
-
-if (includeCancelled !== "true") {
-  matchFilter.status = "ACTIVE";
-  matchFilter.date = {
-    $gte: new Date(new Date().setHours(0, 0, 0, 0)),
+  const matchFilter: any = {
+    creatorId: new mongoose.Types.ObjectId(user.id),
   };
-}
+
+  if (includeCancelled !== "true") {
+    matchFilter.status = "ACTIVE";
+    matchFilter.date = {
+      $gte: new Date(new Date().setHours(0, 0, 0, 0)),
+    };
+  }
 
   const availabilities = await Availability.aggregate([
 
     { $match: matchFilter },
+
+    {
+      $lookup: {
+        from: "creatorservices",
+        localField: "serviceId",
+        foreignField: "_id",
+        as: "service",
+      },
+    },
+
+    {
+      $unwind: {
+        path: "$service",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
 
     {
       $lookup: {
@@ -241,14 +328,20 @@ if (includeCancelled !== "true") {
     {
       $addFields: {
 
-        totalSlots: { $size: "$slots" },
+        serviceTitle: "$service.title",
+
+        totalSlots: {
+          $size: "$slots",
+        },
 
         availableSlots: {
           $size: {
             $filter: {
               input: "$slots",
               as: "slot",
-              cond: { $eq: ["$$slot.status", "AVAILABLE"] },
+              cond: {
+                $eq: ["$$slot.status", "AVAILABLE"],
+              },
             },
           },
         },
@@ -258,7 +351,9 @@ if (includeCancelled !== "true") {
             $filter: {
               input: "$slots",
               as: "slot",
-              cond: { $eq: ["$$slot.status", "LOCKED"] },
+              cond: {
+                $eq: ["$$slot.status", "LOCKED"],
+              },
             },
           },
         },
@@ -268,7 +363,9 @@ if (includeCancelled !== "true") {
             $filter: {
               input: "$slots",
               as: "slot",
-              cond: { $eq: ["$$slot.status", "BOOKED"] },
+              cond: {
+                $eq: ["$$slot.status", "BOOKED"],
+              },
             },
           },
         },
@@ -278,7 +375,9 @@ if (includeCancelled !== "true") {
             $filter: {
               input: "$slots",
               as: "slot",
-              cond: { $eq: ["$$slot.status", "CANCELLED"] },
+              cond: {
+                $eq: ["$$slot.status", "CANCELLED"],
+              },
             },
           },
         },
@@ -286,9 +385,18 @@ if (includeCancelled !== "true") {
       },
     },
 
-    { $project: { slots: 0 } },
+    {
+      $project: {
+        slots: 0,
+        service: 0,
+      },
+    },
 
-    { $sort: { date: -1 } },
+    {
+      $sort: {
+        date: -1,
+      },
+    },
 
   ]);
 
@@ -296,6 +404,7 @@ if (includeCancelled !== "true") {
     count: availabilities.length,
     availabilities,
   });
+
 };
 
 /* =========================================================

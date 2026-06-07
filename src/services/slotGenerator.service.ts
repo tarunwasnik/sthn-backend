@@ -2,6 +2,7 @@
 
 import { Slot } from "../models/slot.model";
 import mongoose from "mongoose";
+import { DateTime } from "luxon";
 
 interface GenerateSlotsInput {
   availabilityId: mongoose.Types.ObjectId;
@@ -12,10 +13,13 @@ interface GenerateSlotsInput {
   startTime: string; // "18:00"
   endTime: string;   // "22:00"
 
+  timezone: string;
+
   slotDurationMinutes: number;
 
   // 💰 Pricing (comes from service)
   price: number;
+  session?: mongoose.ClientSession;
 }
 
 const MIN_SLOT_DURATION = 30;
@@ -28,8 +32,10 @@ export const generateSlotsForAvailability = async ({
   date,
   startTime,
   endTime,
+  timezone,
   slotDurationMinutes,
   price,
+  session,
 }: GenerateSlotsInput) => {
 
   /* =========================================================
@@ -61,42 +67,85 @@ export const generateSlotsForAvailability = async ({
 
   const slots = [];
 
-  const [startHour, startMinute] = startTime.split(":").map(Number);
-  const [endHour, endMinute] = endTime.split(":").map(Number);
+ const availabilityDate = DateTime.fromJSDate(date);
 
-  const startTotalMinutes = startHour * 60 + startMinute;
-  const endTotalMinutes = endHour * 60 + endMinute;
+const [startHour, startMinute] = startTime
+  .split(":")
+  .map(Number);
 
-  let currentMinutes = startTotalMinutes;
+const [endHour, endMinute] = endTime
+  .split(":")
+  .map(Number);
 
-  while (currentMinutes + slotDurationMinutes <= endTotalMinutes) {
-    const slotStart = new Date(date);
-    slotStart.setHours(
-      Math.floor(currentMinutes / 60),
-      currentMinutes % 60,
-      0,
-      0
-    );
+console.log("timezone:", timezone);
+console.log("date:", date);
 
-    const slotEnd = new Date(slotStart);
-    slotEnd.setMinutes(slotEnd.getMinutes() + slotDurationMinutes);
+console.log(
+  "fromJSDate:",
+  DateTime.fromJSDate(date).toISO()
+);
 
-    slots.push({
-      availabilityId,
-      creatorId,
-      serviceId,
-      startTime: slotStart,
-      endTime: slotEnd,
-      status: "AVAILABLE",
-      price,
-    });
+console.log(
+  "setZone:",
+  DateTime.fromJSDate(date)
+    .setZone(timezone)
+    .toISO()
+);
 
-    currentMinutes += slotDurationMinutes;
-  }
+let currentSlotStart = DateTime.fromObject(
+  {
+    year: availabilityDate.year,
+    month: availabilityDate.month,
+    day: availabilityDate.day,
+    hour: startHour,
+    minute: startMinute,
+  },
+  { zone: timezone }
+);
+
+const availabilityEnd = DateTime.fromObject(
+  {
+    year: availabilityDate.year,
+    month: availabilityDate.month,
+    day: availabilityDate.day,
+    hour: endHour,
+    minute: endMinute,
+  },
+  { zone: timezone }
+);
+
+while (
+  currentSlotStart.plus({
+    minutes: slotDurationMinutes,
+  }) <= availabilityEnd
+) {
+
+  const currentSlotEnd = currentSlotStart.plus({
+    minutes: slotDurationMinutes,
+  });
+
+  slots.push({
+    availabilityId,
+    creatorId,
+    serviceId,
+
+    startTime: currentSlotStart.toUTC().toJSDate(),
+    endTime: currentSlotEnd.toUTC().toJSDate(),
+
+    timezone,
+
+    status: "AVAILABLE",
+    price,
+  });
+
+  currentSlotStart = currentSlotEnd;
+}
 
   if (slots.length > 0) {
-    await Slot.insertMany(slots, { ordered: false });
-  }
+  await Slot.insertMany(slots, {
+  session,
+});
+}
 
   return slots;
 };

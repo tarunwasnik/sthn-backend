@@ -12,7 +12,7 @@ export const getPublicCreatorSlots = async (
 ) => {
   try {
     const { slug } = req.params;
-    const { date } = req.query;
+    const { date, serviceId } = req.query;
 
     if (!slug) {
       return res.status(400).json({
@@ -23,6 +23,12 @@ export const getPublicCreatorSlots = async (
     if (!date) {
       return res.status(400).json({
         message: "Date query parameter is required",
+      });
+    }
+
+    if (!serviceId) {
+      return res.status(400).json({
+      message: "serviceId query parameter is required",
       });
     }
 
@@ -50,10 +56,14 @@ export const getPublicCreatorSlots = async (
     );
 
     const availability = await Availability.find({
-      creatorId: creator.userId,
-      date: { $gte: startOfDay, $lte: endOfDay },
-      status: "ACTIVE",
-    });
+  creatorId: creator.userId,
+  serviceId,
+  date: {
+    $gte: startOfDay,
+    $lte: endOfDay,
+  },
+  status: "ACTIVE",
+});
 
     if (availability.length === 0) {
       return res.json({ slots: [] });

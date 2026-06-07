@@ -8,6 +8,8 @@ export interface IAvailability extends Document {
 
   date: Date;
 
+  timezone: string;
+
   startTime: string;
   endTime: string;
 
@@ -49,6 +51,12 @@ const AvailabilitySchema = new Schema<IAvailability>(
     endTime: {
       type: String,
       required: true,
+    },
+
+    timezone: {
+      type: String,
+      required: true,
+      default: "UTC",
     },
 
     slotDurationMinutes: {

@@ -10,6 +10,8 @@ export interface ISlot extends Document {
   startTime: Date;
   endTime: Date;
 
+  timezone: string;
+
   status: "AVAILABLE" | "LOCKED" | "BOOKED" | "CANCELLED";
 
   price: number;
@@ -52,6 +54,13 @@ const SlotSchema = new Schema<ISlot>(
       required: true,
     },
 
+    timezone: {
+     type: String,
+      required: true,
+      default: "UTC",
+      index: true,
+      },
+
     status: {
       type: String,
       enum: ["AVAILABLE", "LOCKED", "BOOKED", "CANCELLED"],
@@ -69,14 +78,7 @@ const SlotSchema = new Schema<ISlot>(
   { timestamps: true }
 );
 
-/**
- * 🔐 HARD SAFETY GUARANTEE
- * Prevent duplicate slot start times for the same creator
- */
-SlotSchema.index(
-  { creatorId: 1, startTime: 1 },
-  { unique: true }
-);
+
 
 /**
  * ⚡ Discovery & Availability Queries
