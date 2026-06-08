@@ -320,7 +320,7 @@ export const updateMyProfile = catchAsync(
     }
 
     if (profilePhotos && Array.isArray(profilePhotos)) {
-      if (profilePhotos.length < 2 || profilePhotos.length > 6) {
+      if (profilePhotos.length < 2 || profilePhotos.length > 20) {
         throw new AppError("Profile must have 2–6 photos", 400);
       }
 
