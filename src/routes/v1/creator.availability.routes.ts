@@ -8,6 +8,7 @@ import { requireActiveCreator } from "../../middlewares/creator.middleware";
 import {
   createAvailability,
   cancelAvailability,
+  deleteAvailability,
   getCreatorAvailabilities,
   getAvailabilitySlots,
   disableSlot,
@@ -36,6 +37,14 @@ router.delete(
   protect,
   requireActiveCreator,
   cancelAvailability
+);
+
+
+router.delete(
+  "/availability/:availabilityId/permanent",
+  protect,
+  requireActiveCreator,
+  deleteAvailability
 );
 
 router.get(

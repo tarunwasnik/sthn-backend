@@ -102,6 +102,7 @@ export const getPublicCreatorSlots = async (
         durationMinutes: service?.durationMinutes || null,
         startTime: slot.startTime,
         endTime: slot.endTime,
+        timezone: slot.timezone,
       };
     });
 

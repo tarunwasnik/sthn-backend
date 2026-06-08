@@ -6,6 +6,7 @@ import { Availability } from "../models/availability.model";
 import { CreatorService } from "../models/creatorService.model";
 import { generateSlotsForAvailability } from "../services/slotGenerator.service";
 import { Slot } from "../models/slot.model";
+import { DateTime } from "luxon";
 
 /* =========================================================
    CREATE AVAILABILITY
@@ -28,7 +29,6 @@ export const createAvailability = async (
   startTime,
   endTime,
   timezone,
-  slotDurationMinutes
 } = req.body;
 
   if (
@@ -73,6 +73,42 @@ export const createAvailability = async (
 const availabilityDate = new Date(
   Date.UTC(year, month - 1, day)
 );
+const creatorNow = DateTime.now().setZone(
+  timezone
+);
+
+const availabilityStartDateTime =
+  DateTime.fromObject(
+    {
+      year,
+      month,
+      day,
+      hour: Number(startTime.split(":")[0]),
+      minute: Number(startTime.split(":")[1]),
+    },
+    {
+      zone: timezone,
+    }
+  );
+
+console.log(
+  "CREATOR NOW:",
+  creatorNow.toISO()
+);
+
+console.log(
+  "AVAILABILITY START:",
+  availabilityStartDateTime.toISO()
+);
+
+if (
+  availabilityStartDateTime <= creatorNow
+) {
+  return res.status(400).json({
+    message:
+      "Availability must start in the future",
+  });
+}
 
   const toMinutes = (time: string) => {
     const [h, m] = time.split(":").map(Number);
@@ -142,7 +178,7 @@ try {
         endTime,
         timezone,
         slotDurationMinutes:
-          slotDurationMinutes || service.durationMinutes,
+          service.durationMinutes,
         status: "ACTIVE",
       },
     ],
@@ -237,6 +273,24 @@ export const cancelAvailability = async (
       );
     }
 
+    const slots = await Slot.find({
+  availabilityId: availability._id,
+}).session(session);
+
+const hasLockedSlots = slots.some(
+  (slot) => slot.status === "LOCKED"
+);
+
+const hasBookedSlots = slots.some(
+  (slot) => slot.status === "BOOKED"
+);
+
+if (hasLockedSlots || hasBookedSlots) {
+  throw new Error(
+    "Availability can only be cancelled when all slots are free"
+  );
+}
+
     await Slot.updateMany(
       {
         availabilityId: availability._id,
@@ -269,6 +323,113 @@ export const cancelAvailability = async (
   }
 };
 
+export const deleteAvailability = async (
+  req: Request,
+  res: Response
+) => {
+
+  const user = req.user;
+  const { availabilityId } = req.params;
+
+  if (!user) {
+    return res.status(401).json({
+      message: "Unauthorized",
+    });
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(availabilityId)) {
+    return res.status(400).json({
+      message: "Invalid availabilityId",
+    });
+  }
+
+  const session = await mongoose.startSession();
+
+  try {
+
+    session.startTransaction();
+
+    const availability = await Availability.findOne({
+      _id: availabilityId,
+      creatorId: user.id,
+    }).session(session);
+
+    if (!availability) {
+      throw new Error("Availability not found");
+    }
+
+    console.log(
+      "DELETE AVAILABILITY STATUS:",
+      availability.status
+    );
+
+    const availabilityDate = new Date(
+      availability.date
+    );
+
+    const [endHour, endMinute] =
+      availability.endTime
+        .split(":")
+        .map(Number);
+
+    availabilityDate.setUTCHours(
+      endHour,
+      endMinute + 30,
+      0,
+      0
+    );
+
+    const isHistoryAvailability =
+      availability.status === "CANCELLED" ||
+      availabilityDate <= new Date();
+
+    if (!isHistoryAvailability) {
+      throw new Error(
+        "Only history availabilities can be deleted"
+      );
+    }
+
+    await Slot.deleteMany(
+      {
+        availabilityId: availability._id,
+      },
+      { session }
+    );
+
+    await Availability.deleteOne(
+      {
+        _id: availability._id,
+      },
+      { session }
+    );
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      message:
+        "Availability deleted successfully",
+    });
+
+  } catch (err: any) {
+
+    await session.abortTransaction();
+
+    return res.status(400).json({
+      message:
+        err.message ||
+        "Failed to delete availability",
+    });
+
+  } finally {
+
+    session.endSession();
+
+  }
+
+};
+
+
+
 /* =========================================================
    GET CREATOR AVAILABILITIES (DASHBOARD)
 ========================================================= */
@@ -282,23 +443,18 @@ export const getCreatorAvailabilities = async (
   const { includeCancelled } = req.query;
 
   if (!user) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-
-  const matchFilter: any = {
-    creatorId: new mongoose.Types.ObjectId(user.id),
-  };
-
-  if (includeCancelled !== "true") {
-    matchFilter.status = "ACTIVE";
-    matchFilter.date = {
-      $gte: new Date(new Date().setHours(0, 0, 0, 0)),
-    };
+    return res.status(401).json({
+      message: "Unauthorized",
+    });
   }
 
   const availabilities = await Availability.aggregate([
 
-    { $match: matchFilter },
+    {
+      $match: {
+        creatorId: new mongoose.Types.ObjectId(user.id),
+      },
+    },
 
     {
       $lookup: {
@@ -385,10 +541,85 @@ export const getCreatorAvailabilities = async (
       },
     },
 
+    /* ============================================
+       AVAILABILITY END DATETIME
+    ============================================ */
+
+    {
+      $addFields: {
+
+        availabilityEndDateTime: {
+          $dateFromString: {
+            dateString: {
+              $concat: [
+                {
+                  $dateToString: {
+                    format: "%Y-%m-%d",
+                    date: "$date",
+                  },
+                },
+                "T",
+                "$endTime",
+                ":00",
+              ],
+            },
+          },
+        },
+
+      },
+    },
+
+    /* ============================================
+       30 MIN BUFFER
+    ============================================ */
+
+    {
+      $addFields: {
+
+        availabilityEndWithBuffer: {
+          $dateAdd: {
+            startDate: "$availabilityEndDateTime",
+            unit: "minute",
+            amount: 30,
+          },
+        },
+
+      },
+    },
+
+    /* ============================================
+       ACTIVE TAB / HISTORY TAB
+    ============================================ */
+
+    {
+      $match:
+        includeCancelled === "true"
+          ? {
+              $or: [
+                {
+                  status: "CANCELLED",
+                },
+                {
+                  availabilityEndWithBuffer: {
+                    $lte: new Date(),
+                  },
+                },
+              ],
+            }
+          : {
+              status: "ACTIVE",
+              availabilityEndWithBuffer: {
+                $gt: new Date(),
+              },
+            },
+    },
+
     {
       $project: {
         slots: 0,
         service: 0,
+        availabilityEndDateTime: 0,
+        availabilityEndWithBuffer: 0,
       },
     },
 
