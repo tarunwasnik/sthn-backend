@@ -390,14 +390,13 @@ export const getConversations = async (
    BUILD CONVERSATIONS
 ====================================================== */
 
-const conversations = bookings
-  .map((booking: any) => {
+const conversations = bookings.map(
+  (booking: any) => {
+
     const lastMessage =
       lastMessageMap.get(
         booking._id.toString()
       );
-
-    if (!lastMessage) return null;
 
     const bookingUserId =
       typeof booking.userId === "object"
@@ -417,43 +416,40 @@ const conversations = bookings
       ? bookingCreatorId
       : bookingUserId;
 
-    /* ======================================================
-       SAME STRUCTURE AS MY BOOKINGS
-    ====================================================== */
-
     const otherUserProfile =
       creatorMap.get(otherUserId) ||
       userProfileMap.get(otherUserId) ||
       null;
 
     return {
-  bookingId: booking._id,
+      bookingId: booking._id,
 
-  service: {
-    _id: booking.serviceId,
-    title:
-      booking.serviceTitle ||
-      "Service",
-  },
+      service: {
+        _id: booking.serviceId,
+        title:
+          booking.serviceTitle ||
+          "Service",
+      },
 
-  lastMessage:
-    lastMessage.message,
+      lastMessage:
+        lastMessage?.message || "",
 
-  lastMessageAt:
-    lastMessage.createdAt,
+      lastMessageAt:
+        lastMessage?.createdAt ||
+        booking.createdAt,
 
-  otherUser: {
-    _id: otherUserId,
-    profile: otherUserProfile,
-  },
+      otherUser: {
+        _id: otherUserId,
+        profile: otherUserProfile,
+      },
 
-  unreadCount:
-    unreadMap.get(
-      booking._id.toString()
-    ) || 0,
-};
-  })
-  .filter(Boolean);
+      unreadCount:
+        unreadMap.get(
+          booking._id.toString()
+        ) || 0,
+    };
+  }
+);
 
 /* ======================================================
    SORT LATEST FIRST
