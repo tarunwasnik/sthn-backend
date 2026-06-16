@@ -1,8 +1,14 @@
 //backend/src/services/entryResolver.service.ts
 
 export type EntryResult = {
-  entryType: "ADMIN" | "CREATOR" | "USER" | "ONBOARDING" | "CREATOR_PENDING";
+  entryType:
+    | "ADMIN"
+    | "CREATOR"
+    | "USER"
+    | "ONBOARDING"
+    | "CREATOR_PENDING";
   entryRoute: string;
+  userId: string;
 };
 
 export const resolveEntry = (user: any): EntryResult => {
@@ -13,6 +19,8 @@ export const resolveEntry = (user: any): EntryResult => {
   const status = user.status.toLowerCase();
   const role = user.role.toUpperCase();
   const creatorStatus = user.creatorStatus?.toLowerCase?.() ?? "none";
+  const userId = user._id.toString();
+
 
   // 🚫 Hard blocks
   if (status === "suspended") {
@@ -26,32 +34,36 @@ export const resolveEntry = (user: any): EntryResult => {
   // 🧬 Profile onboarding gate
   if (status === "pending_profile") {
     return {
-      entryType: "ONBOARDING",
-      entryRoute: "/onboarding",
-    };
+  entryType: "ONBOARDING",
+  entryRoute: "/onboarding",
+  userId,
+};
   }
 
   // 👑 Admin routing
   if (role === "ADMIN") {
-    return {
-      entryType: "ADMIN",
-      entryRoute: "/admin/entry",
-    };
+   return {
+  entryType: "ADMIN",
+  entryRoute: "/admin/entry",
+  userId,
+};
   }
 
   // 🎯 Approved creators
   if (role === "CREATOR") {
     return {
-      entryType: "CREATOR",
-      entryRoute: "/dashboard/creator",
-    };
+  entryType: "CREATOR",
+  entryRoute: "/dashboard/creator",
+  userId,
+};
   }
 
 
 
   // 👤 Default user dashboard
   return {
-    entryType: "USER",
-    entryRoute: "/dashboard/user",
-  };
+  entryType: "USER",
+  entryRoute: "/dashboard/user",
+  userId,
+};
 };

@@ -106,6 +106,10 @@ const cleanupExpiredBookings = async (
       return {
   _id: booking._id,
 
+  userId: booking.userId,
+  creatorId: booking.creatorId,
+  serviceId: booking.serviceId,
+
   status: booking.status,
   paymentStatus: booking.paymentStatus,
 
@@ -135,7 +139,7 @@ const cleanupExpiredBookings = async (
     status: slot!.status,
     price: slot!.price,
   })),
- };
+};
     });
 
     return res.status(200).json({
