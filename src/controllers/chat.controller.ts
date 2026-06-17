@@ -147,13 +147,14 @@ export const sendMessage = async (
   }
 
   io.to(`booking:${bookingId}`).emit("chat:message", {
-    _id: chat._id,
-    bookingId: chat.bookingId,
-    senderId: chat.senderId,
-    senderRole: chat.senderRole,
-    message: chat.message,
-    createdAt: chat.createdAt,
-  });
+  _id: chat._id,
+  bookingId: chat.bookingId,
+  senderId: chat.senderId,
+  senderRole: chat.senderRole,
+  message: chat.message,
+  seenBy: chat.seenBy,
+  createdAt: chat.createdAt,
+});
 
   return res.status(201).json({ chat });
 };
