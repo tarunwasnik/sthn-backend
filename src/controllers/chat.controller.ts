@@ -159,6 +159,92 @@ export const sendMessage = async (
   return res.status(201).json({ chat });
 };
 
+
+
+/* ======================================================
+   DELETE MESSAGE
+====================================================== */
+export const deleteMessage = async (
+  req: Request,
+  res: Response
+) => {
+  const user = req.user;
+  const { messageId } = req.params;
+
+  if (!user) {
+    return res.status(401).json({
+      message: "Unauthorized",
+    });
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(messageId)) {
+    return res.status(400).json({
+      message: "Invalid messageId",
+    });
+  }
+
+  const actorId = new mongoose.Types.ObjectId(
+    user.id
+  );
+
+  const chat = await Chat.findById(messageId);
+
+  if (!chat) {
+    return res.status(404).json({
+      message: "Message not found",
+    });
+  }
+
+  // Only sender can delete
+  if (!chat.senderId.equals(actorId)) {
+    return res.status(403).json({
+      message: "You can only delete your own messages",
+    });
+  }
+
+  // Already deleted
+  if (chat.isDeleted) {
+    return res.status(400).json({
+      message: "Message already deleted",
+    });
+  }
+
+  // 15 minute limit
+  const FIFTEEN_MINUTES =
+    15 * 60 * 1000;
+
+  const messageAge =
+    Date.now() -
+    new Date(chat.createdAt).getTime();
+
+  if (messageAge > FIFTEEN_MINUTES) {
+    return res.status(400).json({
+      message:
+        "Messages can only be deleted within 15 minutes",
+    });
+  }
+
+  chat.isDeleted = true;
+  chat.deletedAt = new Date();
+
+  await chat.save();
+
+  io.to(`booking:${chat.bookingId}`).emit(
+    "chat:deleted",
+    {
+      messageId: chat._id,
+      bookingId: chat.bookingId,
+      deletedAt: chat.deletedAt,
+    }
+  );
+
+  return res.status(200).json({
+    message: "Message deleted",
+    chat,
+  });
+};
+
+
 /* ======================================================
    GET CHAT HISTORY (UNCHANGED)
 ====================================================== */

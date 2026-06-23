@@ -7,6 +7,7 @@ import {
   getChatHistory,
   markChatAsSeen,
   getConversations,
+  deleteMessage,
 } from "../../controllers/chat.controller";
 
 const router = Router();
@@ -34,6 +35,12 @@ router.get(
   "/conversations",
   protect,
   getConversations
+);
+
+router.delete(
+  "/message/:messageId",
+  protect,
+  deleteMessage
 );
 
 export default router;

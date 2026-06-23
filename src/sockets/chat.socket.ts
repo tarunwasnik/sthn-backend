@@ -196,6 +196,44 @@ socket.on(
   }
 );
 
+/* ======================================================
+   DELIVERED
+====================================================== */
+
+socket.on(
+  "chat:delivered",
+  ({
+    bookingId,
+    messageId,
+    userId,
+  }: {
+    bookingId: string;
+    messageId: string;
+    userId: string;
+  }) => {
+
+
+    console.log(
+      "SERVER DELIVERED",
+      bookingId,
+      messageId,
+      userId
+    );
+
+    io.to(
+  `booking:${bookingId}`
+).emit(
+      "chat:delivered",
+      {
+        bookingId,
+        messageId,
+        userId,
+      }
+    );
+
+  }
+);
+
 
       /* ======================================================
          DISCONNECT
