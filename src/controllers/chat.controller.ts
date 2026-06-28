@@ -23,7 +23,22 @@ export const sendMessage = async (
 ) => {
   const user = req.user;
   const { bookingId } = req.params;
-  const { message } = req.body;
+  const {
+  message,
+  type = "text",
+  location,
+} = req.body;
+
+const allowedTypes = [
+  "text",
+  "location",
+];
+
+if (!allowedTypes.includes(type)) {
+  return res.status(400).json({
+    message: "Invalid message type",
+  });
+}
 
   if (!user) return res.status(401).json({ message: "Unauthorized" });
 
@@ -31,9 +46,27 @@ export const sendMessage = async (
     return res.status(400).json({ message: "Invalid bookingId" });
   }
 
+  if (type === "text") {
   if (!message || !message.trim()) {
-    return res.status(400).json({ message: "Message cannot be empty" });
+    return res.status(400).json({
+      message: "Message cannot be empty",
+    });
   }
+}
+
+if (type === "location") {
+  if (
+    !location ||
+    typeof location.latitude !== "number" ||
+    typeof location.longitude !== "number" ||
+    !location.name ||
+    !location.address
+  ) {
+    return res.status(400).json({
+      message: "Valid meeting location is required",
+    });
+  }
+}
 
   const booking = await Booking.findById(bookingId);
   if (!booking) {
@@ -85,7 +118,13 @@ export const sendMessage = async (
      EXISTING LOGIC (UNCHANGED)
   ====================================================== */
 
-  const moderation = await moderateMessage(message);
+  const moderation =
+  type === "text"
+    ? await moderateMessage(message)
+    : {
+        flags: [],
+        hasContactIntent: false,
+      };
 
   let abuseScore: number = 0;
 
@@ -131,13 +170,33 @@ export const sendMessage = async (
   }
 
   const chat = await Chat.create({
-    bookingId,
-    senderId: actorId,
-    senderRole: isUser ? "USER" : "CREATOR",
-    message,
-    seenBy: [actorId],
-    aiFlags: moderation.flags,
-  });
+  bookingId,
+  senderId: actorId,
+  senderRole: isUser ? "USER" : "CREATOR",
+
+  type,
+
+  message:
+  type === "location"
+    ? "📍 Meeting Location"
+    : message,
+
+  location:
+  type === "location"
+    ? {
+        latitude: location.latitude,
+        longitude: location.longitude,
+
+        name: location.name,
+        address: location.address,
+
+        placeId: location.placeId,
+      }
+    : undefined,
+
+  seenBy: [actorId],
+  aiFlags: moderation.flags,
+});
 
   if (moderationQueueId) {
     await ModerationQueue.findByIdAndUpdate(
@@ -146,12 +205,17 @@ export const sendMessage = async (
     );
   }
 
-  io.to(`booking:${bookingId}`).emit("chat:message", {
+ io.to(`booking:${bookingId}`).emit("chat:message", {
   _id: chat._id,
   bookingId: chat.bookingId,
+
   senderId: chat.senderId,
   senderRole: chat.senderRole,
+
+  type: chat.type,
   message: chat.message,
+  location: chat.location,
+
   seenBy: chat.seenBy,
   createdAt: chat.createdAt,
 });
@@ -243,6 +307,105 @@ export const deleteMessage = async (
     chat,
   });
 };
+
+
+
+/* ======================================================
+   REACT TO MESSAGE
+====================================================== */
+export const reactToMessage = async (
+  req: Request,
+  res: Response
+) => {
+  const user = req.user;
+  const { messageId } = req.params;
+  const { emoji } = req.body;
+
+  if (!user) {
+    return res.status(401).json({
+      message: "Unauthorized",
+    });
+  }
+
+  if (!emoji) {
+    return res.status(400).json({
+      message: "Emoji is required",
+    });
+  }
+
+  const chat = await Chat.findById(
+    messageId
+  );
+
+  if (!chat) {
+    return res.status(404).json({
+      message: "Message not found",
+    });
+  }
+
+  const actorId =
+    new mongoose.Types.ObjectId(
+      user.id
+    );
+
+  const existingReaction =
+    chat.reactions.find(
+      (reaction) =>
+        reaction.userId.toString() ===
+        actorId.toString()
+    );
+
+  if (!existingReaction) {
+
+    chat.reactions.push({
+      userId: actorId,
+      emoji,
+    } as any);
+
+  } else if (
+    existingReaction.emoji === emoji
+  ) {
+
+    chat.reactions =
+      chat.reactions.filter(
+        (reaction) =>
+          reaction.userId.toString() !==
+          actorId.toString()
+      );
+
+  } else {
+
+    existingReaction.emoji =
+      emoji;
+  }
+
+  await chat.save();
+
+  io.to(
+    `booking:${chat.bookingId}`
+  ).emit(
+    "chat:reaction",
+    {
+      bookingId:
+        chat.bookingId,
+      messageId:
+        chat._id,
+      reactions:
+        chat.reactions,
+    }
+  );
+
+  return res.status(200).json({
+    message:
+      "Reaction updated",
+    reactions:
+      chat.reactions,
+  });
+};
+
+
+
+
 
 
 /* ======================================================

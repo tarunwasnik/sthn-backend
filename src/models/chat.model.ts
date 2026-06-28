@@ -2,6 +2,21 @@
 
 import mongoose, { Schema, Document } from "mongoose";
 
+interface IReaction {
+  userId: mongoose.Types.ObjectId;
+  emoji: string;
+}
+
+interface ILocation {
+  latitude: number;
+  longitude: number;
+
+  name: string;
+  address: string;
+
+  placeId?: string;
+}
+
 export interface IChat extends Document {
   bookingId: mongoose.Types.ObjectId;
   senderId: mongoose.Types.ObjectId;
@@ -17,11 +32,15 @@ export interface IChat extends Document {
 
   message: string;
 
+  location?: ILocation;
+
   seenBy: mongoose.Types.ObjectId[];
   aiFlags: string[];
 
   isDeleted: boolean;
   deletedAt?: Date;
+
+  reactions: IReaction[];
 
   createdAt: Date;
   updatedAt: Date;
@@ -67,6 +86,31 @@ const ChatSchema = new Schema<IChat>(
       trim: true,
     },
 
+    location: {
+  latitude: {
+    type: Number,
+  },
+
+  longitude: {
+    type: Number,
+  },
+
+  name: {
+    type: String,
+    trim: true,
+  },
+
+  address: {
+    type: String,
+    trim: true,
+  },
+
+  placeId: {
+    type: String,
+    trim: true,
+  },
+},
+
     seenBy: [
       {
         type: Schema.Types.ObjectId,
@@ -87,6 +131,24 @@ const ChatSchema = new Schema<IChat>(
     deletedAt: {
       type: Date,
       default: null,
+    },
+
+    reactions: {
+      type: [
+        {
+          userId: {
+            type: Schema.Types.ObjectId,
+            ref: "User",
+            required: true,
+          },
+
+          emoji: {
+            type: String,
+            required: true,
+          },
+        },
+      ],
+      default: [],
     },
   },
   { timestamps: true }

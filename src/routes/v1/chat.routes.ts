@@ -8,6 +8,7 @@ import {
   markChatAsSeen,
   getConversations,
   deleteMessage,
+   reactToMessage,
 } from "../../controllers/chat.controller";
 
 const router = Router();
@@ -41,6 +42,12 @@ router.delete(
   "/message/:messageId",
   protect,
   deleteMessage
+);
+
+router.post(
+  "/message/:messageId/react",
+  protect,
+  reactToMessage
 );
 
 export default router;
