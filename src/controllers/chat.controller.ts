@@ -12,6 +12,7 @@ import { applyAbuseScore } from "../services/abuseScore.service";
 import { classifySeverity } from "../services/moderationSeverity.service";
 import { ModerationQueue } from "../models/moderationQueue.model";
 import { emitSoftWarning } from "../services/softWarning.service";
+import { uploadToCloudinary } from "../utils/uploadToCloudinary";
 import { io } from "../server";
 
 /* ======================================================
@@ -223,6 +224,328 @@ if (type === "location") {
   return res.status(201).json({ chat });
 };
 
+/* ======================================================
+   Documents Message
+====================================================== */
+
+export const sendDocumentMessage = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const user = req.user;
+    const { bookingId } = req.params;
+
+    if (!user) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        message: "Document is required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      return res.status(400).json({
+        message: "Invalid bookingId",
+      });
+    }
+
+    const booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+      return res.status(404).json({
+        message: "Booking not found",
+      });
+    }
+
+    const actorId = new mongoose.Types.ObjectId(user.id);
+
+    const isUser = booking.userId.equals(actorId);
+    const isCreator = booking.creatorId.equals(actorId);
+
+    if (!isUser && !isCreator) {
+      return res.status(403).json({
+        message: "Access denied",
+      });
+    }
+
+    if (booking.status !== "CONFIRMED") {
+      return res.status(400).json({
+        message: "Chat allowed only for confirmed bookings",
+      });
+    }
+
+    const slots = await Slot.find({
+      _id: { $in: booking.slotIds },
+    }).lean();
+
+    if (!slots.length) {
+      return res.status(400).json({
+        message: "No slots found for booking",
+      });
+    }
+
+    const latestEndTime = Math.max(
+      ...slots.map((slot) => new Date(slot.endTime).getTime())
+    );
+
+    if (Date.now() > latestEndTime) {
+      return res.status(400).json({
+        message: "Chat is closed. Booking time has ended.",
+      });
+    }
+
+    const uploaded = await uploadToCloudinary(
+      req.file.buffer,
+      "chat_documents",
+      "raw"
+    );
+
+    if (!booking.hasInteracted) {
+      booking.hasInteracted = true;
+      booking.interactionStartedAt = new Date();
+      await booking.save();
+    }
+
+    const chat = await Chat.create({
+      bookingId,
+      senderId: actorId,
+      senderRole: isUser ? "USER" : "CREATOR",
+
+      type: "document",
+
+      message: req.file.originalname,
+
+      attachment: {
+        url: uploaded.secure_url,
+        publicId: uploaded.public_id,
+        fileName: uploaded.original_filename,
+        originalFileName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        fileSize: req.file.size,
+        resourceType: "raw",
+      },
+
+      seenBy: [actorId],
+      aiFlags: [],
+    });
+
+    io.to(`booking:${bookingId}`).emit("chat:message", {
+      _id: chat._id,
+      bookingId: chat.bookingId,
+      senderId: chat.senderId,
+      senderRole: chat.senderRole,
+      type: chat.type,
+      message: chat.message,
+      attachment: chat.attachment,
+      seenBy: chat.seenBy,
+      createdAt: chat.createdAt,
+    });
+
+    return res.status(201).json({
+      chat,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Failed to upload document",
+    });
+  }
+};
+
+
+/* ======================================================
+   IMAGE MESSAGE
+====================================================== */
+
+export const sendImageMessage = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const user = req.user;
+    const { bookingId } = req.params;
+
+    if (!user) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        message: "Image is required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      return res.status(400).json({
+        message: "Invalid bookingId",
+      });
+    }
+
+    const booking = await Booking.findById(
+      bookingId
+    );
+
+    if (!booking) {
+      return res.status(404).json({
+        message: "Booking not found",
+      });
+    }
+
+    const actorId =
+      new mongoose.Types.ObjectId(user.id);
+
+    const isUser =
+      booking.userId.equals(actorId);
+
+    const isCreator =
+      booking.creatorId.equals(actorId);
+
+    if (!isUser && !isCreator) {
+      return res.status(403).json({
+        message: "Access denied",
+      });
+    }
+
+    if (booking.status !== "CONFIRMED") {
+      return res.status(400).json({
+        message:
+          "Chat allowed only for confirmed bookings",
+      });
+    }
+
+    const slots = await Slot.find({
+      _id: {
+        $in: booking.slotIds,
+      },
+    }).lean();
+
+    if (!slots.length) {
+      return res.status(400).json({
+        message: "No slots found",
+      });
+    }
+
+    const latestEndTime = Math.max(
+      ...slots.map((slot) =>
+        new Date(slot.endTime).getTime()
+      )
+    );
+
+    if (Date.now() > latestEndTime) {
+      return res.status(400).json({
+        message:
+          "Chat is closed. Booking time has ended.",
+      });
+    }
+
+    const uploaded =
+      await uploadToCloudinary(
+        req.file.buffer,
+        "chat_images",
+        "image"
+      );
+
+    if (!booking.hasInteracted) {
+      booking.hasInteracted = true;
+      booking.interactionStartedAt =
+        new Date();
+
+      await booking.save();
+    }
+
+    const chat = await Chat.create({
+      bookingId,
+
+      senderId: actorId,
+
+      senderRole: isUser
+        ? "USER"
+        : "CREATOR",
+
+      type: "image",
+
+      message:
+        req.file.originalname,
+
+      attachment: {
+        url: uploaded.secure_url,
+
+        publicId:
+          uploaded.public_id,
+
+        fileName:
+          uploaded.original_filename,
+
+        originalFileName:
+          req.file.originalname,
+
+        mimeType:
+          req.file.mimetype,
+
+        fileSize:
+          req.file.size,
+
+        resourceType:
+          "image",
+      },
+
+      seenBy: [actorId],
+
+      aiFlags: [],
+    });
+
+    io.to(
+      `booking:${bookingId}`
+    ).emit("chat:message", {
+      _id: chat._id,
+
+      bookingId:
+        chat.bookingId,
+
+      senderId:
+        chat.senderId,
+
+      senderRole:
+        chat.senderRole,
+
+      type: chat.type,
+
+      message:
+        chat.message,
+
+      attachment:
+        chat.attachment,
+
+      seenBy:
+        chat.seenBy,
+
+      createdAt:
+        chat.createdAt,
+    });
+
+    return res.status(201).json({
+      chat,
+    });
+
+  } catch (error) {
+
+    console.error(error);
+
+    return res.status(500).json({
+      message:
+        "Failed to upload image",
+    });
+
+  }
+};
 
 
 /* ======================================================

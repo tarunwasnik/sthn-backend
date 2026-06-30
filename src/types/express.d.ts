@@ -1,6 +1,7 @@
 // backend/src/types/express.d.ts
 
 import { Role } from "../constants/roles";
+import type { Multer } from "multer";
 
 declare global {
   namespace Express {
@@ -8,8 +9,10 @@ declare global {
       user?: {
         id: string;
         role: Role;
-        status: string; // lifecycle state
+        status: string;
       };
+
+      file?: Multer.File;
     }
   }
 }

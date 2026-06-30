@@ -17,6 +17,19 @@ interface ILocation {
   placeId?: string;
 }
 
+interface IAttachment {
+  url: string;
+  publicId: string;
+
+  fileName: string;
+  originalFileName: string;
+
+  mimeType: string;
+  fileSize: number;
+
+  resourceType: "raw" | "image" | "video";
+}
+
 export interface IChat extends Document {
   bookingId: mongoose.Types.ObjectId;
   senderId: mongoose.Types.ObjectId;
@@ -33,6 +46,8 @@ export interface IChat extends Document {
   message: string;
 
   location?: ILocation;
+
+  attachment?: IAttachment;
 
   seenBy: mongoose.Types.ObjectId[];
   aiFlags: string[];
@@ -87,29 +102,65 @@ const ChatSchema = new Schema<IChat>(
     },
 
     location: {
-  latitude: {
-    type: Number,
-  },
+      latitude: {
+        type: Number,
+      },
 
-  longitude: {
-    type: Number,
-  },
+      longitude: {
+        type: Number,
+      },
 
-  name: {
-    type: String,
-    trim: true,
-  },
+      name: {
+        type: String,
+        trim: true,
+      },
 
-  address: {
-    type: String,
-    trim: true,
-  },
+      address: {
+        type: String,
+        trim: true,
+      },
 
-  placeId: {
-    type: String,
-    trim: true,
-  },
-},
+      placeId: {
+        type: String,
+        trim: true,
+      },
+    },
+
+    attachment: {
+      url: {
+        type: String,
+        trim: true,
+      },
+
+      publicId: {
+        type: String,
+        trim: true,
+      },
+
+      fileName: {
+        type: String,
+        trim: true,
+      },
+
+      originalFileName: {
+        type: String,
+        trim: true,
+      },
+
+      mimeType: {
+        type: String,
+        trim: true,
+      },
+
+      fileSize: {
+        type: Number,
+      },
+
+      resourceType: {
+        type: String,
+        enum: ["raw", "image", "video"],
+      },
+    },
 
     seenBy: [
       {
@@ -151,7 +202,12 @@ const ChatSchema = new Schema<IChat>(
       default: [],
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-export const Chat = mongoose.model<IChat>("Chat", ChatSchema);
+export const Chat = mongoose.model<IChat>(
+  "Chat",
+  ChatSchema
+);
