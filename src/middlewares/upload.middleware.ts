@@ -142,33 +142,19 @@ const imageExtensions = new Set([
    DOCUMENT FILTER
 ====================================================== */
 
-const documentFileFilter: multer.Options["fileFilter"] = (
-  _req,
-  file,
-  cb
-) => {
+const documentFileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
+  const extension = path.extname(file.originalname).toLowerCase();
 
-  const extension = path
-    .extname(file.originalname)
-    .toLowerCase();
+  const mimeAllowed = documentMimeTypes.has(file.mimetype);
 
-  const mimeAllowed =
-    documentMimeTypes.has(file.mimetype);
+  const extensionAllowed = documentExtensions.has(extension);
 
-  const extensionAllowed =
-    documentExtensions.has(extension);
-
-  if (
-    mimeAllowed ||
-    extensionAllowed
-  ) {
+  if (mimeAllowed || extensionAllowed) {
     return cb(null, true);
   }
 
   return cb(
-    new Error(
-      `Unsupported document type (${extension || file.mimetype}).`
-    )
+    new Error(`Unsupported document type (${extension || file.mimetype}).`),
   );
 };
 
@@ -176,33 +162,19 @@ const documentFileFilter: multer.Options["fileFilter"] = (
    IMAGE FILTER
 ====================================================== */
 
-const imageFileFilter: multer.Options["fileFilter"] = (
-  _req,
-  file,
-  cb
-) => {
+const imageFileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
+  const extension = path.extname(file.originalname).toLowerCase();
 
-  const extension = path
-    .extname(file.originalname)
-    .toLowerCase();
+  const mimeAllowed = imageMimeTypes.has(file.mimetype);
 
-  const mimeAllowed =
-    imageMimeTypes.has(file.mimetype);
+  const extensionAllowed = imageExtensions.has(extension);
 
-  const extensionAllowed =
-    imageExtensions.has(extension);
-
-  if (
-    mimeAllowed ||
-    extensionAllowed
-  ) {
+  if (mimeAllowed || extensionAllowed) {
     return cb(null, true);
   }
 
   return cb(
-    new Error(
-      `Unsupported image type (${extension || file.mimetype}).`
-    )
+    new Error(`Unsupported image type (${extension || file.mimetype}).`),
   );
 };
 
@@ -228,7 +200,7 @@ export const chatDocumentUpload = multer({
 
   limits: {
     fileSize: 10 * 1024 * 1024,
-    files: 1,
+    files: 20,
   },
 });
 
@@ -243,6 +215,6 @@ export const chatImageUpload = multer({
 
   limits: {
     fileSize: 10 * 1024 * 1024,
-    files: 1,
+    files: 20,
   },
 });

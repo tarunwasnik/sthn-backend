@@ -24,11 +24,7 @@ const router = Router();
    TEXT / LOCATION
 ====================================================== */
 
-router.post(
-  "/:bookingId/messages",
-  protect,
-  sendMessage
-);
+router.post("/:bookingId/messages", protect, sendMessage);
 
 /* ======================================================
    DOCUMENTS
@@ -38,20 +34,14 @@ router.post(
   "/:bookingId/documents",
   protect,
   chatDocumentUpload.single("file"),
-  sendDocumentMessage
+  sendDocumentMessage,
 );
-
 
 /* ======================================================
    DOWNLOAD DOCUMENT
 ====================================================== */
 
-router.get(
-  "/document/:messageId/download",
-  protect,
-  downloadDocument
-);
-
+router.get("/document/:messageId/download", protect, downloadDocument);
 
 /* ======================================================
    IMAGES
@@ -60,58 +50,38 @@ router.get(
 router.post(
   "/:bookingId/images",
   protect,
-  chatImageUpload.single("file"),
-  sendImageMessage
+  chatImageUpload.array("files", 20),
+  sendImageMessage,
 );
 
 /* ======================================================
    HISTORY
 ====================================================== */
 
-router.get(
-  "/:bookingId/messages",
-  protect,
-  getChatHistory
-);
+router.get("/:bookingId/messages", protect, getChatHistory);
 
 /* ======================================================
    SEEN
 ====================================================== */
 
-router.post(
-  "/:bookingId/seen",
-  protect,
-  markChatAsSeen
-);
+router.post("/:bookingId/seen", protect, markChatAsSeen);
 
 /* ======================================================
    CONVERSATIONS
 ====================================================== */
 
-router.get(
-  "/conversations",
-  protect,
-  getConversations
-);
+router.get("/conversations", protect, getConversations);
 
 /* ======================================================
    DELETE
 ====================================================== */
 
-router.delete(
-  "/message/:messageId",
-  protect,
-  deleteMessage
-);
+router.delete("/message/:messageId", protect, deleteMessage);
 
 /* ======================================================
    REACTIONS
 ====================================================== */
 
-router.post(
-  "/message/:messageId/react",
-  protect,
-  reactToMessage
-);
+router.post("/message/:messageId/react", protect, reactToMessage);
 
 export default router;

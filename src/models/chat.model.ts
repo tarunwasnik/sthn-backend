@@ -35,19 +35,18 @@ export interface IChat extends Document {
   senderId: mongoose.Types.ObjectId;
   senderRole: "USER" | "CREATOR";
 
-  type:
-    | "text"
-    | "location"
-    | "document"
-    | "image"
-    | "voice"
-    | "video";
+  type: "text" | "location" | "document" | "image" | "voice" | "video";
 
   message: string;
 
   location?: ILocation;
 
   attachment?: IAttachment;
+  /**
+   * Shared identifier for media uploaded in the same batch.
+   * Present only for grouped media messages.
+   */
+  groupId?: string;
 
   seenBy: mongoose.Types.ObjectId[];
   aiFlags: string[];
@@ -84,14 +83,7 @@ const ChatSchema = new Schema<IChat>(
 
     type: {
       type: String,
-      enum: [
-        "text",
-        "location",
-        "document",
-        "image",
-        "voice",
-        "video",
-      ],
+      enum: ["text", "location", "document", "image", "voice", "video"],
       default: "text",
     },
 
@@ -162,6 +154,13 @@ const ChatSchema = new Schema<IChat>(
       },
     },
 
+    groupId: {
+      type: String,
+      trim: true,
+      default: null,
+      index: true,
+    },
+
     seenBy: [
       {
         type: Schema.Types.ObjectId,
@@ -204,10 +203,7 @@ const ChatSchema = new Schema<IChat>(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-export const Chat = mongoose.model<IChat>(
-  "Chat",
-  ChatSchema
-);
+export const Chat = mongoose.model<IChat>("Chat", ChatSchema);

@@ -18,28 +18,18 @@ import { io } from "../server";
 /* ======================================================
    SEND MESSAGE (UPDATED WITH TIME CHECK)
 ====================================================== */
-export const sendMessage = async (
-  req: Request,
-  res: Response
-) => {
+export const sendMessage = async (req: Request, res: Response) => {
   const user = req.user;
   const { bookingId } = req.params;
-  const {
-  message,
-  type = "text",
-  location,
-} = req.body;
+  const { message, type = "text", location } = req.body;
 
-const allowedTypes = [
-  "text",
-  "location",
-];
+  const allowedTypes = ["text", "location"];
 
-if (!allowedTypes.includes(type)) {
-  return res.status(400).json({
-    message: "Invalid message type",
-  });
-}
+  if (!allowedTypes.includes(type)) {
+    return res.status(400).json({
+      message: "Invalid message type",
+    });
+  }
 
   if (!user) return res.status(401).json({ message: "Unauthorized" });
 
@@ -48,26 +38,26 @@ if (!allowedTypes.includes(type)) {
   }
 
   if (type === "text") {
-  if (!message || !message.trim()) {
-    return res.status(400).json({
-      message: "Message cannot be empty",
-    });
+    if (!message || !message.trim()) {
+      return res.status(400).json({
+        message: "Message cannot be empty",
+      });
+    }
   }
-}
 
-if (type === "location") {
-  if (
-    !location ||
-    typeof location.latitude !== "number" ||
-    typeof location.longitude !== "number" ||
-    !location.name ||
-    !location.address
-  ) {
-    return res.status(400).json({
-      message: "Valid meeting location is required",
-    });
+  if (type === "location") {
+    if (
+      !location ||
+      typeof location.latitude !== "number" ||
+      typeof location.longitude !== "number" ||
+      !location.name ||
+      !location.address
+    ) {
+      return res.status(400).json({
+        message: "Valid meeting location is required",
+      });
+    }
   }
-}
 
   const booking = await Booking.findById(bookingId);
   if (!booking) {
@@ -104,7 +94,7 @@ if (type === "location") {
 
   // Get latest endTime among all slots
   const latestEndTime = Math.max(
-    ...slots.map((s) => new Date(s.endTime).getTime())
+    ...slots.map((s) => new Date(s.endTime).getTime()),
   );
 
   const currentTime = Date.now();
@@ -120,12 +110,12 @@ if (type === "location") {
   ====================================================== */
 
   const moderation =
-  type === "text"
-    ? await moderateMessage(message)
-    : {
-        flags: [],
-        hasContactIntent: false,
-      };
+    type === "text"
+      ? await moderateMessage(message)
+      : {
+          flags: [],
+          hasContactIntent: false,
+        };
 
   let abuseScore: number = 0;
 
@@ -134,22 +124,14 @@ if (type === "location") {
       isUser ? booking.userId : booking.creatorId,
       booking.hasInteracted
         ? "USER_CANCEL_AFTER_INTERACTION"
-        : "USER_CANCEL_EARLY"
+        : "USER_CANCEL_EARLY",
     );
   }
 
-  const severityResult = classifySeverity(
-    moderation.flags,
-    abuseScore
-  );
+  const severityResult = classifySeverity(moderation.flags, abuseScore);
 
   if (severityResult.severity !== "LOW") {
-    emitSoftWarning(
-      io,
-      bookingId,
-      actorId.toString(),
-      severityResult.severity
-    );
+    emitSoftWarning(io, bookingId, actorId.toString(), severityResult.severity);
   }
 
   let moderationQueueId: mongoose.Types.ObjectId | null = null;
@@ -171,55 +153,51 @@ if (type === "location") {
   }
 
   const chat = await Chat.create({
-  bookingId,
-  senderId: actorId,
-  senderRole: isUser ? "USER" : "CREATOR",
+    bookingId,
+    senderId: actorId,
+    senderRole: isUser ? "USER" : "CREATOR",
 
-  type,
+    type,
 
-  message:
-  type === "location"
-    ? "📍 Meeting Location"
-    : message,
+    message: type === "location" ? "📍 Meeting Location" : message,
 
-  location:
-  type === "location"
-    ? {
-        latitude: location.latitude,
-        longitude: location.longitude,
+    location:
+      type === "location"
+        ? {
+            latitude: location.latitude,
+            longitude: location.longitude,
 
-        name: location.name,
-        address: location.address,
+            name: location.name,
+            address: location.address,
 
-        placeId: location.placeId,
-      }
-    : undefined,
+            placeId: location.placeId,
+          }
+        : undefined,
 
-  seenBy: [actorId],
-  aiFlags: moderation.flags,
-});
+    seenBy: [actorId],
+    aiFlags: moderation.flags,
+  });
 
   if (moderationQueueId) {
-    await ModerationQueue.findByIdAndUpdate(
-      moderationQueueId,
-      { chatId: chat._id }
-    );
+    await ModerationQueue.findByIdAndUpdate(moderationQueueId, {
+      chatId: chat._id,
+    });
   }
 
- io.to(`booking:${bookingId}`).emit("chat:message", {
-  _id: chat._id,
-  bookingId: chat.bookingId,
+  io.to(`booking:${bookingId}`).emit("chat:message", {
+    _id: chat._id,
+    bookingId: chat.bookingId,
 
-  senderId: chat.senderId,
-  senderRole: chat.senderRole,
+    senderId: chat.senderId,
+    senderRole: chat.senderRole,
 
-  type: chat.type,
-  message: chat.message,
-  location: chat.location,
+    type: chat.type,
+    message: chat.message,
+    location: chat.location,
 
-  seenBy: chat.seenBy,
-  createdAt: chat.createdAt,
-});
+    seenBy: chat.seenBy,
+    createdAt: chat.createdAt,
+  });
 
   return res.status(201).json({ chat });
 };
@@ -228,10 +206,7 @@ if (type === "location") {
    Documents Message
 ====================================================== */
 
-export const sendDocumentMessage = async (
-  req: Request,
-  res: Response
-) => {
+export const sendDocumentMessage = async (req: Request, res: Response) => {
   try {
     const user = req.user;
     const { bookingId } = req.params;
@@ -290,7 +265,7 @@ export const sendDocumentMessage = async (
     }
 
     const latestEndTime = Math.max(
-      ...slots.map((slot) => new Date(slot.endTime).getTime())
+      ...slots.map((slot) => new Date(slot.endTime).getTime()),
     );
 
     if (Date.now() > latestEndTime) {
@@ -302,7 +277,7 @@ export const sendDocumentMessage = async (
     const uploaded = await uploadToCloudinary(
       req.file.buffer,
       "chat_documents",
-      "raw"
+      "raw",
     );
 
     if (!booking.hasInteracted) {
@@ -358,15 +333,11 @@ export const sendDocumentMessage = async (
   }
 };
 
-
 /* ======================================================
    IMAGE MESSAGE
 ====================================================== */
 
-export const sendImageMessage = async (
-  req: Request,
-  res: Response
-) => {
+export const sendImageMessage = async (req: Request, res: Response) => {
   try {
     const user = req.user;
     const { bookingId } = req.params;
@@ -377,9 +348,11 @@ export const sendImageMessage = async (
       });
     }
 
-    if (!req.file) {
+    const files = (req.files as Express.Multer.File[]) || [];
+
+    if (!files.length) {
       return res.status(400).json({
-        message: "Image is required",
+        message: "At least one image is required",
       });
     }
 
@@ -389,9 +362,7 @@ export const sendImageMessage = async (
       });
     }
 
-    const booking = await Booking.findById(
-      bookingId
-    );
+    const booking = await Booking.findById(bookingId);
 
     if (!booking) {
       return res.status(404).json({
@@ -399,14 +370,11 @@ export const sendImageMessage = async (
       });
     }
 
-    const actorId =
-      new mongoose.Types.ObjectId(user.id);
+    const actorId = new mongoose.Types.ObjectId(user.id);
 
-    const isUser =
-      booking.userId.equals(actorId);
+    const isUser = booking.userId.equals(actorId);
 
-    const isCreator =
-      booking.creatorId.equals(actorId);
+    const isCreator = booking.creatorId.equals(actorId);
 
     if (!isUser && !isCreator) {
       return res.status(403).json({
@@ -416,8 +384,7 @@ export const sendImageMessage = async (
 
     if (booking.status !== "CONFIRMED") {
       return res.status(400).json({
-        message:
-          "Chat allowed only for confirmed bookings",
+        message: "Chat allowed only for confirmed bookings",
       });
     }
 
@@ -434,127 +401,116 @@ export const sendImageMessage = async (
     }
 
     const latestEndTime = Math.max(
-      ...slots.map((slot) =>
-        new Date(slot.endTime).getTime()
-      )
+      ...slots.map((slot) => new Date(slot.endTime).getTime()),
     );
 
     if (Date.now() > latestEndTime) {
       return res.status(400).json({
-        message:
-          "Chat is closed. Booking time has ended.",
+        message: "Chat is closed. Booking time has ended.",
       });
     }
 
-    const uploaded =
-      await uploadToCloudinary(
-        req.file.buffer,
-        "chat_images",
-        "image"
-      );
-
     if (!booking.hasInteracted) {
       booking.hasInteracted = true;
-      booking.interactionStartedAt =
-        new Date();
+
+      booking.interactionStartedAt = new Date();
 
       await booking.save();
     }
 
-    const chat = await Chat.create({
-      bookingId,
+    const groupId = new mongoose.Types.ObjectId().toString();
 
-      senderId: actorId,
+    const uploads = await Promise.all(
+      files.map((file) =>
+        uploadToCloudinary(file.buffer, "chat_images", "image"),
+      ),
+    );
 
-      senderRole: isUser
-        ? "USER"
-        : "CREATOR",
+    const chatDocuments = files.map((file, index) => {
+      const uploaded = uploads[index];
 
-      type: "image",
+      return {
+        bookingId,
 
-      message:
-        req.file.originalname,
+        senderId: actorId,
 
-      attachment: {
-        url: uploaded.secure_url,
+        senderRole: isUser ? "USER" : "CREATOR",
 
-        publicId:
-          uploaded.public_id,
+        type: "image",
 
-        fileName:
-          uploaded.original_filename,
+        message: file.originalname,
 
-        originalFileName:
-          req.file.originalname,
+        groupId,
 
-        mimeType:
-          req.file.mimetype,
+        attachment: {
+          url: uploaded.secure_url,
 
-        fileSize:
-          req.file.size,
+          publicId: uploaded.public_id,
 
-        resourceType:
-          "image",
-      },
+          fileName: uploaded.original_filename,
 
-      seenBy: [actorId],
+          originalFileName: file.originalname,
 
-      aiFlags: [],
+          mimeType: file.mimetype,
+
+          fileSize: file.size,
+
+          resourceType: "image",
+        },
+
+        seenBy: [actorId],
+
+        aiFlags: [],
+      };
     });
 
-    io.to(
-      `booking:${bookingId}`
-    ).emit("chat:message", {
-      _id: chat._id,
+    const chats = await Chat.insertMany(chatDocuments);
 
-      bookingId:
-        chat.bookingId,
+    io.to(`booking:${bookingId}`).emit("chat:image-group", {
+      bookingId,
+      messages: chats.map((chat) => ({
+        _id: chat._id,
 
-      senderId:
-        chat.senderId,
+        bookingId: chat.bookingId,
 
-      senderRole:
-        chat.senderRole,
+        senderId: chat.senderId,
 
-      type: chat.type,
+        senderRole: chat.senderRole,
 
-      message:
-        chat.message,
+        type: chat.type,
 
-      attachment:
-        chat.attachment,
+        message: chat.message,
 
-      seenBy:
-        chat.seenBy,
+        groupId: chat.groupId,
 
-      createdAt:
-        chat.createdAt,
+        attachment: chat.attachment,
+
+        seenBy: chat.seenBy,
+
+        aiFlags: chat.aiFlags,
+
+        createdAt: chat.createdAt,
+
+        updatedAt: chat.updatedAt,
+      })),
     });
 
     return res.status(201).json({
-      chat,
+      messages: chats,
     });
-
   } catch (error) {
-
     console.error(error);
 
     return res.status(500).json({
-      message:
-        "Failed to upload image",
+      message: "Failed to upload image",
     });
-
   }
 };
-
 
 /* ======================================================
    DELETE MESSAGE
 ====================================================== */
-export const deleteMessage = async (
-  req: Request,
-  res: Response
-) => {
+export const deleteMessage = async (req: Request, res: Response) => {
   const user = req.user;
   const { messageId } = req.params;
 
@@ -570,9 +526,7 @@ export const deleteMessage = async (
     });
   }
 
-  const actorId = new mongoose.Types.ObjectId(
-    user.id
-  );
+  const actorId = new mongoose.Types.ObjectId(user.id);
 
   const chat = await Chat.findById(messageId);
 
@@ -597,17 +551,13 @@ export const deleteMessage = async (
   }
 
   // 15 minute limit
-  const FIFTEEN_MINUTES =
-    15 * 60 * 1000;
+  const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
-  const messageAge =
-    Date.now() -
-    new Date(chat.createdAt).getTime();
+  const messageAge = Date.now() - new Date(chat.createdAt).getTime();
 
   if (messageAge > FIFTEEN_MINUTES) {
     return res.status(400).json({
-      message:
-        "Messages can only be deleted within 15 minutes",
+      message: "Messages can only be deleted within 15 minutes",
     });
   }
 
@@ -616,14 +566,11 @@ export const deleteMessage = async (
 
   await chat.save();
 
-  io.to(`booking:${chat.bookingId}`).emit(
-    "chat:deleted",
-    {
-      messageId: chat._id,
-      bookingId: chat.bookingId,
-      deletedAt: chat.deletedAt,
-    }
-  );
+  io.to(`booking:${chat.bookingId}`).emit("chat:deleted", {
+    messageId: chat._id,
+    bookingId: chat.bookingId,
+    deletedAt: chat.deletedAt,
+  });
 
   return res.status(200).json({
     message: "Message deleted",
@@ -631,15 +578,10 @@ export const deleteMessage = async (
   });
 };
 
-
-
 /* ======================================================
    REACT TO MESSAGE
 ====================================================== */
-export const reactToMessage = async (
-  req: Request,
-  res: Response
-) => {
+export const reactToMessage = async (req: Request, res: Response) => {
   const user = req.user;
   const { messageId } = req.params;
   const { emoji } = req.body;
@@ -656,9 +598,7 @@ export const reactToMessage = async (
     });
   }
 
-  const chat = await Chat.findById(
-    messageId
-  );
+  const chat = await Chat.findById(messageId);
 
   if (!chat) {
     return res.status(404).json({
@@ -666,78 +606,43 @@ export const reactToMessage = async (
     });
   }
 
-  const actorId =
-    new mongoose.Types.ObjectId(
-      user.id
-    );
+  const actorId = new mongoose.Types.ObjectId(user.id);
 
-  const existingReaction =
-    chat.reactions.find(
-      (reaction) =>
-        reaction.userId.toString() ===
-        actorId.toString()
-    );
+  const existingReaction = chat.reactions.find(
+    (reaction) => reaction.userId.toString() === actorId.toString(),
+  );
 
   if (!existingReaction) {
-
     chat.reactions.push({
       userId: actorId,
       emoji,
     } as any);
-
-  } else if (
-    existingReaction.emoji === emoji
-  ) {
-
-    chat.reactions =
-      chat.reactions.filter(
-        (reaction) =>
-          reaction.userId.toString() !==
-          actorId.toString()
-      );
-
+  } else if (existingReaction.emoji === emoji) {
+    chat.reactions = chat.reactions.filter(
+      (reaction) => reaction.userId.toString() !== actorId.toString(),
+    );
   } else {
-
-    existingReaction.emoji =
-      emoji;
+    existingReaction.emoji = emoji;
   }
 
   await chat.save();
 
-  io.to(
-    `booking:${chat.bookingId}`
-  ).emit(
-    "chat:reaction",
-    {
-      bookingId:
-        chat.bookingId,
-      messageId:
-        chat._id,
-      reactions:
-        chat.reactions,
-    }
-  );
+  io.to(`booking:${chat.bookingId}`).emit("chat:reaction", {
+    bookingId: chat.bookingId,
+    messageId: chat._id,
+    reactions: chat.reactions,
+  });
 
   return res.status(200).json({
-    message:
-      "Reaction updated",
-    reactions:
-      chat.reactions,
+    message: "Reaction updated",
+    reactions: chat.reactions,
   });
 };
-
-
-
-
-
 
 /* ======================================================
    GET CHAT HISTORY (UNCHANGED)
 ====================================================== */
-export const getChatHistory = async (
-  req: Request,
-  res: Response
-) => {
+export const getChatHistory = async (req: Request, res: Response) => {
   const user = req.user;
   const { bookingId } = req.params;
 
@@ -754,16 +659,11 @@ export const getChatHistory = async (
 
   const actorId = new mongoose.Types.ObjectId(user.id);
 
-  if (
-    !booking.userId.equals(actorId) &&
-    !booking.creatorId.equals(actorId)
-  ) {
+  if (!booking.userId.equals(actorId) && !booking.creatorId.equals(actorId)) {
     return res.status(403).json({ message: "Access denied" });
   }
 
-  const chats = await Chat.find({ bookingId })
-    .sort({ createdAt: 1 })
-    .lean();
+  const chats = await Chat.find({ bookingId }).sort({ createdAt: 1 }).lean();
 
   return res.status(200).json({ chats });
 };
@@ -771,10 +671,7 @@ export const getChatHistory = async (
 /* ======================================================
    MARK CHAT AS SEEN (UNCHANGED)
 ====================================================== */
-export const markChatAsSeen = async (
-  req: Request,
-  res: Response
-) => {
+export const markChatAsSeen = async (req: Request, res: Response) => {
   const user = req.user;
   const { bookingId } = req.params;
 
@@ -788,7 +685,7 @@ export const markChatAsSeen = async (
 
   await Chat.updateMany(
     { bookingId, seenBy: { $ne: actorId } },
-    { $push: { seenBy: actorId } }
+    { $push: { seenBy: actorId } },
   );
 
   io.to(`booking:${bookingId}`).emit("chat:seen", {
@@ -796,29 +693,20 @@ export const markChatAsSeen = async (
     seenBy: actorId,
   });
 
-  return res
-    .status(200)
-    .json({ message: "Messages marked as seen" });
+  return res.status(200).json({ message: "Messages marked as seen" });
 };
 
 /* ======================================================
    GET CONVERSATIONS (UPDATED)
 ====================================================== */
-export const getConversations = async (
-  req: Request,
-  res: Response
-) => {
+export const getConversations = async (req: Request, res: Response) => {
   const user = req.user;
 
   if (!user) {
-    return res
-      .status(401)
-      .json({ message: "Unauthorized" });
+    return res.status(401).json({ message: "Unauthorized" });
   }
 
-  const actorId = new mongoose.Types.ObjectId(
-    user.id
-  );
+  const actorId = new mongoose.Types.ObjectId(user.id);
 
   /* ======================================================
      GET BOOKINGS
@@ -826,16 +714,10 @@ export const getConversations = async (
 
   const bookings = await Booking.find({
     status: "CONFIRMED",
-    $or: [
-      { userId: actorId },
-      { creatorId: actorId },
-    ],
-  })
-    .lean();
+    $or: [{ userId: actorId }, { creatorId: actorId }],
+  }).lean();
 
-  const bookingIds = bookings.map(
-    (b: any) => b._id
-  );
+  const bookingIds = bookings.map((b: any) => b._id);
 
   if (bookingIds.length === 0) {
     return res.status(200).json({
@@ -873,10 +755,7 @@ export const getConversations = async (
   const lastMessageMap = new Map();
 
   lastMessages.forEach((m) => {
-    lastMessageMap.set(
-      m._id.toString(),
-      m
-    );
+    lastMessageMap.set(m._id.toString(), m);
   });
 
   /* ======================================================
@@ -890,7 +769,7 @@ export const getConversations = async (
           $in: bookingIds,
         },
         senderId: {
-          $ne: actorId, 
+          $ne: actorId,
         },
         seenBy: {
           $ne: actorId,
@@ -908,19 +787,14 @@ export const getConversations = async (
   const unreadMap = new Map();
 
   unreadCounts.forEach((u) => {
-    unreadMap.set(
-      u._id.toString(),
-      u.count
-    );
+    unreadMap.set(u._id.toString(), u.count);
   });
 
   /* ======================================================
      CREATOR PROFILES
   ====================================================== */
 
-  const creatorIds = bookings.map(
-    (b: any) => b.creatorId
-  );
+  const creatorIds = bookings.map((b: any) => b.creatorId);
 
   const creators = await CreatorProfile.find({
     userId: { $in: creatorIds },
@@ -929,21 +803,18 @@ export const getConversations = async (
   const creatorMap = new Map();
 
   creators.forEach((c: any) => {
-    creatorMap.set(
-      c.userId.toString(),
-      c
-    );
+    creatorMap.set(c.userId.toString(), c);
   });
 
   /* ======================================================
      USER PROFILES
   ====================================================== */
 
-  const userIds = bookings.map
-    ( (b: any) => 
-      typeof b.userId === "object" 
-      ? b.userId._id.toString() 
-      : b.userId.toString() );
+  const userIds = bookings.map((b: any) =>
+    typeof b.userId === "object"
+      ? b.userId._id.toString()
+      : b.userId.toString(),
+  );
 
   const userProfiles = await UserProfile.find({
     userId: { $in: userIds },
@@ -952,24 +823,15 @@ export const getConversations = async (
   const userProfileMap = new Map();
 
   userProfiles.forEach((u: any) => {
-    userProfileMap.set(
-      u.userId.toString(),
-      u
-    );
+    userProfileMap.set(u.userId.toString(), u);
   });
 
-
-/* ======================================================
+  /* ======================================================
    BUILD CONVERSATIONS
 ====================================================== */
 
-const conversations = bookings.map(
-  (booking: any) => {
-
-    const lastMessage =
-      lastMessageMap.get(
-        booking._id.toString()
-      );
+  const conversations = bookings.map((booking: any) => {
+    const lastMessage = lastMessageMap.get(booking._id.toString());
 
     const bookingUserId =
       typeof booking.userId === "object"
@@ -981,65 +843,44 @@ const conversations = bookings.map(
         ? booking.creatorId._id.toString()
         : booking.creatorId.toString();
 
-    const isUser =
-      bookingUserId ===
-      actorId.toString();
+    const isUser = bookingUserId === actorId.toString();
 
-    const otherUserId = isUser
-      ? bookingCreatorId
-      : bookingUserId;
+    const otherUserId = isUser ? bookingCreatorId : bookingUserId;
 
     const otherUserProfile =
-      creatorMap.get(otherUserId) ||
-      userProfileMap.get(otherUserId) ||
-      null;
+      creatorMap.get(otherUserId) || userProfileMap.get(otherUserId) || null;
 
     return {
       bookingId: booking._id,
 
       service: {
         _id: booking.serviceId,
-        title:
-          booking.serviceTitle ||
-          "Service",
+        title: booking.serviceTitle || "Service",
       },
 
-      lastMessage:
-        lastMessage?.message || "",
+      lastMessage: lastMessage?.message || "",
 
-      lastMessageAt:
-        lastMessage?.createdAt ||
-        booking.createdAt,
+      lastMessageAt: lastMessage?.createdAt || booking.createdAt,
 
       otherUser: {
         _id: otherUserId,
         profile: otherUserProfile,
       },
 
-      unreadCount:
-        unreadMap.get(
-          booking._id.toString()
-        ) || 0,
+      unreadCount: unreadMap.get(booking._id.toString()) || 0,
     };
-  }
-);
+  });
 
-/* ======================================================
+  /* ======================================================
    SORT LATEST FIRST
 ====================================================== */
 
-conversations.sort(
-  (a: any, b: any) =>
-    new Date(
-      b.lastMessageAt
-    ).getTime() -
-    new Date(
-      a.lastMessageAt
-    ).getTime()
-);
+  conversations.sort(
+    (a: any, b: any) =>
+      new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime(),
+  );
 
-return res.status(200).json({
-  conversations,
-});
-
+  return res.status(200).json({
+    conversations,
+  });
 };
