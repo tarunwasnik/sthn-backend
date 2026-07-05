@@ -21,7 +21,7 @@ import { io } from "../server";
 export const sendMessage = async (req: Request, res: Response) => {
   const user = req.user;
   const { bookingId } = req.params;
-  const { message, type = "text", location } = req.body;
+  const { message, type = "text", location, replyTo } = req.body;
 
   const allowedTypes = ["text", "location"];
 
@@ -76,6 +76,27 @@ export const sendMessage = async (req: Request, res: Response) => {
     return res.status(400).json({
       message: "Chat allowed only for confirmed bookings",
     });
+  }
+
+  let replyMessage: any = null;
+
+  if (replyTo) {
+    if (!mongoose.Types.ObjectId.isValid(replyTo)) {
+      return res.status(400).json({
+        message: "Invalid reply message",
+      });
+    }
+
+    replyMessage = await Chat.findOne({
+      _id: replyTo,
+      bookingId,
+    }).lean();
+
+    if (!replyMessage) {
+      return res.status(404).json({
+        message: "Reply message not found",
+      });
+    }
   }
 
   /* ======================================================
@@ -174,6 +195,28 @@ export const sendMessage = async (req: Request, res: Response) => {
           }
         : undefined,
 
+    replyTo: replyMessage
+      ? {
+          messageId: replyMessage._id,
+
+          senderId: replyMessage.senderId,
+          senderRole: replyMessage.senderRole,
+
+          type: replyMessage.type,
+
+          message: replyMessage.message,
+
+          attachment: replyMessage.attachment
+            ? {
+                url: replyMessage.attachment.url,
+                fileName: replyMessage.attachment.fileName,
+                mimeType: replyMessage.attachment.mimeType,
+                resourceType: replyMessage.attachment.resourceType,
+              }
+            : undefined,
+        }
+      : undefined,
+
     seenBy: [actorId],
     aiFlags: moderation.flags,
   });
@@ -194,6 +237,7 @@ export const sendMessage = async (req: Request, res: Response) => {
     type: chat.type,
     message: chat.message,
     location: chat.location,
+    replyTo: chat.replyTo,
 
     seenBy: chat.seenBy,
     createdAt: chat.createdAt,
@@ -210,6 +254,7 @@ export const sendDocumentMessage = async (req: Request, res: Response) => {
   try {
     const user = req.user;
     const { bookingId } = req.params;
+    const { replyTo } = req.body;
 
     if (!user) {
       return res.status(401).json({
@@ -252,6 +297,27 @@ export const sendDocumentMessage = async (req: Request, res: Response) => {
       return res.status(400).json({
         message: "Chat allowed only for confirmed bookings",
       });
+    }
+
+    let replyMessage: any = null;
+
+    if (replyTo) {
+      if (!mongoose.Types.ObjectId.isValid(replyTo)) {
+        return res.status(400).json({
+          message: "Invalid reply message",
+        });
+      }
+
+      replyMessage = await Chat.findOne({
+        _id: replyTo,
+        bookingId,
+      }).lean();
+
+      if (!replyMessage) {
+        return res.status(404).json({
+          message: "Reply message not found",
+        });
+      }
     }
 
     const slots = await Slot.find({
@@ -304,6 +370,27 @@ export const sendDocumentMessage = async (req: Request, res: Response) => {
         fileSize: req.file.size,
         resourceType: "raw",
       },
+      replyTo: replyMessage
+        ? {
+            messageId: replyMessage._id,
+
+            senderId: replyMessage.senderId,
+            senderRole: replyMessage.senderRole,
+
+            type: replyMessage.type,
+
+            message: replyMessage.message,
+
+            attachment: replyMessage.attachment
+              ? {
+                  url: replyMessage.attachment.url,
+                  fileName: replyMessage.attachment.fileName,
+                  mimeType: replyMessage.attachment.mimeType,
+                  resourceType: replyMessage.attachment.resourceType,
+                }
+              : undefined,
+          }
+        : undefined,
 
       seenBy: [actorId],
       aiFlags: [],
@@ -317,6 +404,7 @@ export const sendDocumentMessage = async (req: Request, res: Response) => {
       type: chat.type,
       message: chat.message,
       attachment: chat.attachment,
+      replyTo: chat.replyTo,
       seenBy: chat.seenBy,
       createdAt: chat.createdAt,
     });
@@ -341,6 +429,7 @@ export const sendImageMessage = async (req: Request, res: Response) => {
   try {
     const user = req.user;
     const { bookingId } = req.params;
+    const { replyTo } = req.body;
 
     if (!user) {
       return res.status(401).json({
@@ -386,6 +475,27 @@ export const sendImageMessage = async (req: Request, res: Response) => {
       return res.status(400).json({
         message: "Chat allowed only for confirmed bookings",
       });
+    }
+
+    let replyMessage: any = null;
+
+    if (replyTo) {
+      if (!mongoose.Types.ObjectId.isValid(replyTo)) {
+        return res.status(400).json({
+          message: "Invalid reply message",
+        });
+      }
+
+      replyMessage = await Chat.findOne({
+        _id: replyTo,
+        bookingId,
+      }).lean();
+
+      if (!replyMessage) {
+        return res.status(404).json({
+          message: "Reply message not found",
+        });
+      }
     }
 
     const slots = await Slot.find({
@@ -458,6 +568,28 @@ export const sendImageMessage = async (req: Request, res: Response) => {
           resourceType: "image",
         },
 
+        replyTo: replyMessage
+          ? {
+              messageId: replyMessage._id,
+
+              senderId: replyMessage.senderId,
+              senderRole: replyMessage.senderRole,
+
+              type: replyMessage.type,
+
+              message: replyMessage.message,
+
+              attachment: replyMessage.attachment
+                ? {
+                    url: replyMessage.attachment.url,
+                    fileName: replyMessage.attachment.fileName,
+                    mimeType: replyMessage.attachment.mimeType,
+                    resourceType: replyMessage.attachment.resourceType,
+                  }
+                : undefined,
+            }
+          : undefined,
+
         seenBy: [actorId],
 
         aiFlags: [],
@@ -482,6 +614,8 @@ export const sendImageMessage = async (req: Request, res: Response) => {
         message: chat.message,
 
         groupId: chat.groupId,
+
+        replyTo: chat.replyTo,
 
         attachment: chat.attachment,
 

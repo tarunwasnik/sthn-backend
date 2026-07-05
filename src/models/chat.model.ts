@@ -30,6 +30,24 @@ interface IAttachment {
   resourceType: "raw" | "image" | "video";
 }
 
+interface IReplyTo {
+  messageId: mongoose.Types.ObjectId;
+
+  senderId: mongoose.Types.ObjectId;
+  senderRole: "USER" | "CREATOR";
+
+  type: "text" | "location" | "document" | "image" | "voice" | "video";
+
+  message: string;
+
+  attachment?: {
+    url: string;
+    fileName: string;
+    mimeType: string;
+    resourceType: "raw" | "image" | "video";
+  };
+}
+
 export interface IChat extends Document {
   bookingId: mongoose.Types.ObjectId;
   senderId: mongoose.Types.ObjectId;
@@ -47,6 +65,7 @@ export interface IChat extends Document {
    * Present only for grouped media messages.
    */
   groupId?: string;
+  replyTo?: IReplyTo;
 
   seenBy: mongoose.Types.ObjectId[];
   aiFlags: string[];
@@ -159,6 +178,55 @@ const ChatSchema = new Schema<IChat>(
       trim: true,
       default: null,
       index: true,
+    },
+
+    replyTo: {
+      messageId: {
+        type: Schema.Types.ObjectId,
+        ref: "Chat",
+      },
+
+      senderId: {
+        type: Schema.Types.ObjectId,
+        ref: "User",
+      },
+
+      senderRole: {
+        type: String,
+        enum: ["USER", "CREATOR"],
+      },
+
+      type: {
+        type: String,
+        enum: ["text", "location", "document", "image", "voice", "video"],
+      },
+
+      message: {
+        type: String,
+        trim: true,
+      },
+
+      attachment: {
+        url: {
+          type: String,
+          trim: true,
+        },
+
+        fileName: {
+          type: String,
+          trim: true,
+        },
+
+        mimeType: {
+          type: String,
+          trim: true,
+        },
+
+        resourceType: {
+          type: String,
+          enum: ["raw", "image", "video"],
+        },
+      },
     },
 
     seenBy: [
