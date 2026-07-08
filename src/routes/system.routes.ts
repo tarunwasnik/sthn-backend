@@ -1,5 +1,8 @@
-//backend/src/routes/system.routes.ts
+// backend/src/routes/system.routes.ts
+
 import { Router } from "express";
+import { protect } from "../middlewares/auth.middleware";
+import { authorizeRoles } from "../middlewares/authorize.middleware";
 import { systemModeOnly } from "../middlewares/systemMode.middleware";
 import { systemBootstrapController } from "../controllers/systemBootstrap.controller";
 
@@ -11,6 +14,14 @@ const router = Router();
  * - Admin only
  * - SYSTEM mode enforced
  */
+
+// Authentication
+router.use(protect);
+
+// Admin authorization
+router.use(authorizeRoles("admin"));
+
+// System mode enforcement
 router.use(systemModeOnly);
 
 /**

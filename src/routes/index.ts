@@ -7,7 +7,8 @@ import controlPlaneRoutes from "./controlPlane.routes";
 import systemRoutes from "./system.routes";
 import operationsRoutes from "./operations.routes";
 import { register, login } from "../controllers/auth.controller";
-import publicRoutes from "./public.routes"
+import publicRoutes from "./public.routes";
+import adminModeRoutes from "./adminMode.routes";
 const router = Router();
 
 router.use("/auth", authRoutes);
@@ -18,6 +19,8 @@ router.use("/v1", v1Routes);
 
 // Admin Control Plane
 router.use("/admin/control-plane", controlPlaneRoutes);
+
+router.use("/admin", adminModeRoutes);
 
 // System Dashboard (Phase 31.3)
 router.use("/admin/system", systemRoutes);
@@ -30,7 +33,5 @@ router.post("/register", register);
 
 // ✅ LOGIN
 router.post("/login", login);
-
-
 
 export default router;

@@ -10,9 +10,11 @@ import { getAdminMode } from "../services/adminMode.service";
 export const operationsModeOnly = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
+    console.log("========== OPERATIONS ==========");
+    console.log("req.user =", req.user);
     const user = req.user;
 
     if (!user) {
@@ -25,6 +27,8 @@ export const operationsModeOnly = async (
     }
 
     const mode = await getAdminMode(user.id);
+    console.log("User:", user.id);
+    console.log("Mode:", mode);
 
     if (mode !== "OPERATIONS") {
       return res.status(403).json({

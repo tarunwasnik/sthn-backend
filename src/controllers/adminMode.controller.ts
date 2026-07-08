@@ -1,6 +1,3 @@
-
-
-
 //backen/src/controllers/adminMode.controller.ts
 
 import { Request, Response } from "express";
@@ -11,10 +8,7 @@ import { AdminMode } from "../types/adminMode.types";
  * GET /admin/mode
  * Returns current admin mode (SYSTEM | OPERATIONS | null)
  */
-export const getAdminModeController = async (
-  req: Request,
-  res: Response
-) => {
+export const getAdminModeController = async (req: Request, res: Response) => {
   try {
     const user = req.user;
 
@@ -38,10 +32,7 @@ export const getAdminModeController = async (
  * POST /admin/mode
  * Body: { mode: "SYSTEM" | "OPERATIONS" }
  */
-export const setAdminModeController = async (
-  req: Request,
-  res: Response
-) => {
+export const setAdminModeController = async (req: Request, res: Response) => {
   try {
     const user = req.user;
     const { mode } = req.body as { mode: AdminMode };
@@ -67,4 +58,4 @@ export const setAdminModeController = async (
     });
   }
 };
-export{};
+export {};
