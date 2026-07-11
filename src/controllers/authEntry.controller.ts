@@ -1,7 +1,4 @@
-
-
-
-//backend/src/controllers/authEntrt.controller.ts
+//backend/src/controllers/authEntry.controller.ts
 import { Request, Response } from "express";
 import { resolveEntry } from "../services/entryResolver.service";
 

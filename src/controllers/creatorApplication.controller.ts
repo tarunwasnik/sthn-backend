@@ -26,7 +26,7 @@ export const applyForCreator = async (req: Request, res: Response) => {
   ) {
     throw new AppError(
       "Creator application already in progress or approved",
-      400
+      400,
     );
   }
 
@@ -35,10 +35,7 @@ export const applyForCreator = async (req: Request, res: Response) => {
   });
 
   if (!profile) {
-    throw new AppError(
-      "You must complete your profile before applying",
-      403
-    );
+    throw new AppError("You must complete your profile before applying", 403);
   }
 
   if (profile.profileStatus !== "verified") {
@@ -49,8 +46,7 @@ export const applyForCreator = async (req: Request, res: Response) => {
     }
 
     if (profile.profileStatus === "rejected") {
-      message =
-        "Your profile was rejected. Please update and resubmit.";
+      message = "Your profile was rejected. Please update and resubmit.";
     }
 
     throw new AppError(message, 403);
@@ -60,7 +56,7 @@ export const applyForCreator = async (req: Request, res: Response) => {
     userId: authUser.id,
   });
 
-  if (existingApplication) {
+  if (existingApplication && existingApplication.status !== "rejected") {
     throw new AppError("Creator application already exists", 400);
   }
 
@@ -88,45 +84,66 @@ export const applyForCreator = async (req: Request, res: Response) => {
     !country ||
     !city
   ) {
-    throw new AppError(
-      "Missing required creator application fields",
-      400
-    );
+    throw new AppError("Missing required creator application fields", 400);
   }
 
   const normalizedServices = Array.isArray(services) ? services : [];
-  const normalizedLanguages = Array.isArray(languages)
-    ? languages
-    : [];
+  const normalizedLanguages = Array.isArray(languages) ? languages : [];
 
   const session = await mongoose.startSession();
 
   try {
     session.startTransaction();
 
-    const application = await CreatorApplication.create(
-      [
-        {
-          userId: authUser.id,
-          displayName,
-          primaryCategory,
-          country,
-          city,
-          currency: currency.toUpperCase(),
-          services: normalizedServices,
-          publicBio,
-          languages: normalizedLanguages,
+    let application;
 
-          /* ✅ SAVE MEDIA */
-          avatarUrl: avatarUrl || null,
-          coverUrl: coverUrl || null,
-          media: Array.isArray(media) ? media : [],
+    if (!existingApplication) {
+      application = await CreatorApplication.create(
+        [
+          {
+            userId: authUser.id,
+            displayName,
+            primaryCategory,
+            country,
+            city,
+            currency: currency.toUpperCase(),
+            services: normalizedServices,
+            publicBio,
+            languages: normalizedLanguages,
 
-          status: "submitted",
-        },
-      ],
-      { session }
-    );
+            avatarUrl: avatarUrl || null,
+            coverUrl: coverUrl || null,
+            media: Array.isArray(media) ? media : [],
+
+            status: "submitted",
+          },
+        ],
+        { session },
+      );
+    } else {
+      existingApplication.displayName = displayName;
+      existingApplication.primaryCategory = primaryCategory;
+
+      existingApplication.country = country;
+      existingApplication.city = city;
+
+      existingApplication.currency = currency.toUpperCase();
+
+      existingApplication.services = normalizedServices;
+      existingApplication.publicBio = publicBio;
+
+      existingApplication.languages = normalizedLanguages;
+
+      existingApplication.avatarUrl = avatarUrl || null;
+      existingApplication.coverUrl = coverUrl || null;
+      existingApplication.media = Array.isArray(media) ? media : [];
+
+      existingApplication.status = "submitted";
+      existingApplication.rejectionReason = "";
+
+      await existingApplication.save({ session });
+      application = [existingApplication];
+    }
 
     fullUser.creatorStatus = "pending";
     await fullUser.save({ session });
@@ -136,7 +153,7 @@ export const applyForCreator = async (req: Request, res: Response) => {
 
     return res.status(201).json({
       message: "Creator application submitted",
-      application: application[0],
+      application: Array.isArray(application) ? application[0] : application,
     });
   } catch (error: any) {
     console.error("🔥 CREATOR APPLY ERROR:", error);
@@ -146,9 +163,27 @@ export const applyForCreator = async (req: Request, res: Response) => {
     await session.abortTransaction();
     session.endSession();
 
-    throw new AppError(
-      error?.message || "Application submission failed",
-      400
-    );
+    throw new AppError(error?.message || "Application submission failed", 400);
   }
+};
+export const getMyCreatorApplication = async (req: Request, res: Response) => {
+  const authUser = req.user;
+
+  if (!authUser) {
+    throw new AppError("Unauthorized", 401);
+  }
+
+  const application = await CreatorApplication.findOne({
+    userId: authUser.id,
+  });
+
+  if (!application) {
+    return res.status(200).json({
+      application: null,
+    });
+  }
+
+  return res.status(200).json({
+    application,
+  });
 };

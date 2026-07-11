@@ -12,7 +12,6 @@ export const listPendingProfiles = async (_req: Request, res: Response) => {
     .populate("userId", "name email")
     .lean();
 
-    
   res.json({ profiles });
 };
 
@@ -44,6 +43,8 @@ export const approveProfile = async (req: Request, res: Response) => {
 export const rejectProfile = async (req: Request, res: Response) => {
   const { profileId } = req.params;
 
+  const { reason } = req.body;
+
   const profile = await UserProfile.findById(profileId);
 
   if (!profile) {
@@ -54,9 +55,14 @@ export const rejectProfile = async (req: Request, res: Response) => {
     throw new AppError("Profile not eligible for rejection", 400);
   }
 
-  profile.profileStatus = "rejected";
-  await profile.save();
+  if (!reason || !reason.trim()) {
+    throw new AppError("Rejection reason is required", 400);
+  }
 
+  profile.profileStatus = "rejected";
+  profile.rejectionReason = reason.trim();
+
+  await profile.save();
   res.json({
     message: "Profile rejected",
   });

@@ -18,44 +18,123 @@ const calculateAge = (dob: Date) => {
 
 /* ================= CREATE / UPDATE PROFILE ================= */
 
-export const upsertProfile = catchAsync(
-  async (req: Request, res: Response) => {
-    const userId = req.user!.id;
+export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user!.id;
 
-    const {
+  const {
+    username,
+    dateOfBirth,
+    interests,
+    bio,
+    profilePhotos,
+    avatar,
+    cover,
+  } = req.body;
+
+  let profile = await UserProfile.findOne({ userId });
+  const isFirstSubmission = !profile;
+
+  /* ================= VALIDATION ================= */
+
+  if (!profilePhotos || profilePhotos.length < 2 || profilePhotos.length > 6) {
+    throw new AppError("Profile must have between 2 and 6 photos", 400);
+  }
+
+  if (!avatar) {
+    throw new AppError("Avatar is required", 400);
+  }
+
+  if (!cover) {
+    throw new AppError("Cover is required", 400);
+  }
+
+  /* ================= CREATE ================= */
+
+  if (!profile) {
+    if (!username || !dateOfBirth || !bio) {
+      throw new AppError("Required fields missing", 400);
+    }
+
+    const dob = new Date(dateOfBirth);
+    const age = calculateAge(dob);
+
+    if (age < 18) {
+      throw new AppError("Minimum age is 18", 403);
+    }
+
+    const existingUsername = await UserProfile.findOne({ username });
+    if (existingUsername) {
+      throw new AppError("Username already taken", 409);
+    }
+
+    profile = await UserProfile.create({
+      userId,
       username,
-      dateOfBirth,
-      interests,
+      dateOfBirth: dob,
+      interests: Array.isArray(interests)
+        ? interests
+        : interests
+          ? [interests]
+          : [],
       bio,
-      profilePhotos,
       avatar,
       cover,
-    } = req.body;
+      profilePhotos,
+      profileStatus: "pending_verification",
+    });
+  } else {
 
-    let profile = await UserProfile.findOne({ userId });
-    const isFirstSubmission = !profile;
+  /* ================= UPDATE ================= */
+    /* 🔥 CLOUDINARY CLEANUP */
 
-    /* ================= VALIDATION ================= */
-
-    if (!profilePhotos || profilePhotos.length < 2 || profilePhotos.length > 6) {
-      throw new AppError("Profile must have between 2 and 6 photos", 400);
-    }
-
-    if (!avatar) {
-      throw new AppError("Avatar is required", 400);
-    }
-
-    if (!cover) {
-      throw new AppError("Cover is required", 400);
-    }
-
-    /* ================= CREATE ================= */
-
-    if (!profile) {
-      if (!username || !dateOfBirth || !bio) {
-        throw new AppError("Required fields missing", 400);
+    // Avatar
+    if (avatar !== undefined && profile.avatar && avatar !== profile.avatar) {
+      try {
+        const publicId = extractPublicId(profile.avatar);
+        if (publicId) await cloudinary.uploader.destroy(publicId);
+      } catch (e) {
+        console.error("Avatar delete failed:", e);
       }
+    }
 
+    // Cover
+    if (cover !== undefined && profile.cover && cover !== profile.cover) {
+      try {
+        const publicId = extractPublicId(profile.cover);
+        if (publicId) await cloudinary.uploader.destroy(publicId);
+      } catch (e) {
+        console.error("Cover delete failed:", e);
+      }
+    }
+
+    // 🔥 GALLERY (STRICT SAME AS SERVICES)
+    if (profilePhotos !== undefined) {
+      const oldPhotos = profile.profilePhotos || [];
+      const newPhotos = Array.isArray(profilePhotos) ? profilePhotos : [];
+
+      const removedPhotos = oldPhotos.filter(
+        (oldUrl) => !newPhotos.includes(oldUrl),
+      );
+
+      for (const url of removedPhotos) {
+        try {
+          const publicId = extractPublicId(url);
+          if (publicId) {
+            await cloudinary.uploader.destroy(publicId);
+          }
+        } catch (err) {
+          console.error("Gallery delete failed:", err);
+        }
+      }
+    }
+
+    /* ================= ORIGINAL LOGIC ================= */
+
+    if (username && username !== profile.username) {
+      throw new AppError("Username cannot be changed", 400);
+    }
+
+    if (dateOfBirth) {
       const dob = new Date(dateOfBirth);
       const age = calculateAge(dob);
 
@@ -63,184 +142,90 @@ export const upsertProfile = catchAsync(
         throw new AppError("Minimum age is 18", 403);
       }
 
-      const existingUsername = await UserProfile.findOne({ username });
-      if (existingUsername) {
-        throw new AppError("Username already taken", 409);
-      }
-
-      profile = await UserProfile.create({
-        userId,
-        username,
-        dateOfBirth: dob,
-        interests: Array.isArray(interests)
-          ? interests
-          : interests
-          ? [interests]
-          : [],
-        bio,
-        avatar,
-        cover,
-        profilePhotos,
-        profileStatus: "pending_verification",
-      });
+      profile.dateOfBirth = dob;
     }
 
-    /* ================= UPDATE ================= */
+    if (bio !== undefined) profile.bio = bio;
 
-    else {
-      /* 🔥 CLOUDINARY CLEANUP */
-
-      // Avatar
-      if (
-        avatar !== undefined &&
-        profile.avatar &&
-        avatar !== profile.avatar
-      ) {
-        try {
-          const publicId = extractPublicId(profile.avatar);
-          if (publicId) await cloudinary.uploader.destroy(publicId);
-        } catch (e) {
-          console.error("Avatar delete failed:", e);
-        }
-      }
-
-      // Cover
-      if (
-        cover !== undefined &&
-        profile.cover &&
-        cover !== profile.cover
-      ) {
-        try {
-          const publicId = extractPublicId(profile.cover);
-          if (publicId) await cloudinary.uploader.destroy(publicId);
-        } catch (e) {
-          console.error("Cover delete failed:", e);
-        }
-      }
-
-      // 🔥 GALLERY (STRICT SAME AS SERVICES)
-      if (profilePhotos !== undefined) {
-        const oldPhotos = profile.profilePhotos || [];
-        const newPhotos = Array.isArray(profilePhotos) ? profilePhotos : [];
-
-        const removedPhotos = oldPhotos.filter(
-          (oldUrl) => !newPhotos.includes(oldUrl)
-        );
-
-        for (const url of removedPhotos) {
-          try {
-            const publicId = extractPublicId(url);
-            if (publicId) {
-              await cloudinary.uploader.destroy(publicId);
-            }
-          } catch (err) {
-            console.error("Gallery delete failed:", err);
-          }
-        }
-      }
-
-      /* ================= ORIGINAL LOGIC ================= */
-
-      if (username && username !== profile.username) {
-        throw new AppError("Username cannot be changed", 400);
-      }
-
-      if (dateOfBirth) {
-        const dob = new Date(dateOfBirth);
-        const age = calculateAge(dob);
-
-        if (age < 18) {
-          throw new AppError("Minimum age is 18", 403);
-        }
-
-        profile.dateOfBirth = dob;
-      }
-
-      if (bio !== undefined) profile.bio = bio;
-
-      if (interests !== undefined) {
-        profile.interests = Array.isArray(interests)
-          ? interests
-          : [interests];
-      }
-
-      if (profilePhotos && Array.isArray(profilePhotos)) {
-        if (profilePhotos.length < 2 || profilePhotos.length > 6) {
-          throw new AppError("Profile must have 2–6 photos", 400);
-        }
-
-        profile.profilePhotos = profilePhotos;
-      }
-
-      if (avatar !== undefined) {
-        profile.avatar = avatar;
-      }
-
-      if (cover !== undefined) {
-        profile.cover = cover;
-      }
-
-      if (profile.profileStatus === "rejected") {
-        profile.profileStatus = "pending_verification";
-      }
-
-      await profile.save();
+    if (interests !== undefined) {
+      profile.interests = Array.isArray(interests) ? interests : [interests];
     }
 
-    /* ================= ACTIVATE USER ================= */
-
-    if (isFirstSubmission) {
-      const user = await User.findById(userId);
-
-      if (!user) {
-        throw new AppError("User not found", 404);
+    if (profilePhotos && Array.isArray(profilePhotos)) {
+      if (profilePhotos.length < 2 || profilePhotos.length > 6) {
+        throw new AppError("Profile must have 2–6 photos", 400);
       }
 
-      if (user.status === "pending_profile") {
-        user.status = "active";
-        await user.save();
-      }
+      profile.profilePhotos = profilePhotos;
     }
 
-    res.status(200).json({
-      message: "Profile saved successfully",
-      profileStatus: profile.profileStatus,
-      profile,
-    });
+    if (avatar !== undefined) {
+      profile.avatar = avatar;
+    }
+
+    if (cover !== undefined) {
+      profile.cover = cover;
+    }
+
+    if (profile.profileStatus === "rejected") {
+      profile.profileStatus = "pending_verification";
+      profile.rejectionReason = "";
+    }
+
+    await profile.save();
   }
-);
+
+  /* ================= ACTIVATE USER ================= */
+
+  if (isFirstSubmission) {
+    const user = await User.findById(userId);
+
+    if (!user) {
+      throw new AppError("User not found", 404);
+    }
+
+    if (user.status === "pending_profile") {
+      user.status = "active";
+      await user.save();
+    }
+  }
+
+  res.status(200).json({
+    message: "Profile saved successfully",
+    profileStatus: profile.profileStatus,
+    profile,
+  });
+});
 
 /* ================= GET PROFILE ================= */
 
-export const getMyProfile = catchAsync(
-  async (req: Request, res: Response) => {
-    const userId = req.user!.id;
+export const getMyProfile = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user!.id;
 
-    let profile = await UserProfile.findOne({ userId });
+  let profile = await UserProfile.findOne({ userId });
 
-    if (!profile) {
-      profile = await UserProfile.create({
-        userId,
-        username: "",
-        bio: "",
-        interests: [],
-        avatar: "",
-        cover: "",
-        profilePhotos: [],
-        profileStatus: "incomplete",
-      });
-    }
-
-    const age = profile.dateOfBirth
-      ? calculateAge(new Date(profile.dateOfBirth))
-      : null;
-
-    res.json({
-      ...profile.toObject(),
-      age,
+  if (!profile) {
+    profile = await UserProfile.create({
+      userId,
+      username: "",
+      bio: "",
+      interests: [],
+      avatar: "",
+      cover: "",
+      profilePhotos: [],
+      profileStatus: "incomplete",
     });
   }
-);
+
+  const age = profile.dateOfBirth
+    ? calculateAge(new Date(profile.dateOfBirth))
+    : null;
+
+  res.json({
+    ...profile.toObject(),
+    age,
+  });
+});
 
 /* ================= EDIT PROFILE ================= */
 
@@ -248,14 +233,8 @@ export const updateMyProfile = catchAsync(
   async (req: Request, res: Response) => {
     const userId = req.user!.id;
 
-    const {
-      bio,
-      interests,
-      dateOfBirth,
-      profilePhotos,
-      avatar,
-      cover,
-    } = req.body;
+    const { bio, interests, dateOfBirth, profilePhotos, avatar, cover } =
+      req.body;
 
     const profile = await UserProfile.findOne({ userId });
 
@@ -285,7 +264,7 @@ export const updateMyProfile = catchAsync(
 
     if (profilePhotos && Array.isArray(profile.profilePhotos)) {
       const removed = profile.profilePhotos.filter(
-        (img) => !profilePhotos.includes(img)
+        (img) => !profilePhotos.includes(img),
       );
 
       for (const img of removed) {
@@ -303,9 +282,7 @@ export const updateMyProfile = catchAsync(
     if (bio !== undefined) profile.bio = bio;
 
     if (interests !== undefined) {
-      profile.interests = Array.isArray(interests)
-        ? interests
-        : [interests];
+      profile.interests = Array.isArray(interests) ? interests : [interests];
     }
 
     if (dateOfBirth) {
@@ -337,6 +314,7 @@ export const updateMyProfile = catchAsync(
 
     if (profile.profileStatus === "rejected") {
       profile.profileStatus = "pending_verification";
+      profile.rejectionReason = "";
     }
 
     await profile.save();
@@ -345,5 +323,5 @@ export const updateMyProfile = catchAsync(
       message: "Profile updated successfully",
       profile,
     });
-  }
+  },
 );

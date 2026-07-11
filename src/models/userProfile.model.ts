@@ -17,12 +17,13 @@ export interface UserProfileDocument extends Document {
   interests: string[];
   bio: string;
 
-  avatar: string;        // NEW
-  cover: string;         // NEW
+  avatar: string; // NEW
+  cover: string; // NEW
 
   profilePhotos: string[]; // gallery only (2–6)
 
   profileStatus: ProfileStatus;
+  rejectionReason: string;
 
   createdAt: Date;
   updatedAt: Date;
@@ -92,11 +93,16 @@ const UserProfileSchema = new Schema<UserProfileDocument>(
       default: "incomplete",
       index: true,
     },
+    rejectionReason: {
+      type: String,
+      default: "",
+      trim: true,
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export const UserProfile = mongoose.model<UserProfileDocument>(
   "UserProfile",
-  UserProfileSchema
+  UserProfileSchema,
 );

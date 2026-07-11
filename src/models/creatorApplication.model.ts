@@ -31,98 +31,104 @@ export interface CreatorApplicationDocument extends Document {
 
   status: CreatorApplicationStatus;
 
+  rejectionReason: string;
+
   createdAt: Date;
   updatedAt: Date;
 }
 
-const CreatorApplicationSchema =
-  new Schema<CreatorApplicationDocument>(
-    {
-      userId: {
-        type: Schema.Types.ObjectId,
-        ref: "User",
-        required: true,
-        unique: true,
-        index: true,
-      },
-
-      displayName: {
-        type: String,
-        required: true,
-        trim: true,
-      },
-
-      primaryCategory: {
-        type: String,
-        required: true,
-        index: true,
-      },
-
-      country: {
-        type: String,
-        required: true,
-        trim: true,
-        index: true,
-      },
-
-      city: {
-        type: String,
-        required: true,
-        trim: true,
-      },
-
-      currency: {
-        type: String,
-        required: true,
-        uppercase: true,
-        trim: true,
-      },
-
-      services: {
-        type: [String],
-        default: [],
-      },
-
-      publicBio: {
-        type: String,
-        required: true,
-        trim: true,
-      },
-
-      languages: {
-        type: [String],
-        default: [],
-      },
-
-      /* ================= MEDIA ================= */
-
-      avatarUrl: {
-        type: String,
-        default: null,
-      },
-
-      coverUrl: {
-        type: String,
-        default: null,
-      },
-
-      media: {
-        type: [String],
-        default: [],
-      },
-
-      status: {
-        type: String,
-        enum: ["draft", "submitted", "approved", "rejected"],
-        default: "draft",
-        index: true,
-      },
+const CreatorApplicationSchema = new Schema<CreatorApplicationDocument>(
+  {
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      unique: true,
+      index: true,
     },
-    { timestamps: true }
-  );
 
-export const CreatorApplication =
-  mongoose.model<CreatorApplicationDocument>(
-    "CreatorApplication",
-    CreatorApplicationSchema
-  );
+    displayName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    primaryCategory: {
+      type: String,
+      required: true,
+      index: true,
+    },
+
+    country: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
+
+    city: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    currency: {
+      type: String,
+      required: true,
+      uppercase: true,
+      trim: true,
+    },
+
+    services: {
+      type: [String],
+      default: [],
+    },
+
+    publicBio: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    languages: {
+      type: [String],
+      default: [],
+    },
+
+    /* ================= MEDIA ================= */
+
+    avatarUrl: {
+      type: String,
+      default: null,
+    },
+
+    coverUrl: {
+      type: String,
+      default: null,
+    },
+
+    media: {
+      type: [String],
+      default: [],
+    },
+
+    status: {
+      type: String,
+      enum: ["draft", "submitted", "approved", "rejected"],
+      default: "draft",
+      index: true,
+    },
+
+    rejectionReason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+  },
+  { timestamps: true },
+);
+
+export const CreatorApplication = mongoose.model<CreatorApplicationDocument>(
+  "CreatorApplication",
+  CreatorApplicationSchema,
+);
