@@ -6,7 +6,8 @@ import { protect } from "../../middlewares/auth.middleware";
 import {
   requestBooking,
   refundBooking,
-  getUserBookings, // ✅ NEW
+  getUserBookings,
+  checkCreatorJourneyEligibility,
 } from "../../controllers/booking.controller";
 
 import { cancelBookingByUser } from "../../controllers/userCancelBooking.controller";
@@ -21,10 +22,20 @@ import {
 const router = Router();
 
 /* =========================================================
-   USER BOOKINGS (NEW)
+   USER BOOKINGS
 ========================================================= */
 
 router.get("/user", protect, getUserBookings);
+
+/* =========================================================
+   CREATOR JOURNEY ELIGIBILITY
+========================================================= */
+
+router.get(
+  "/creator-journey-eligibility",
+  protect,
+  checkCreatorJourneyEligibility,
+);
 
 /* =========================================================
    BOOKING REQUEST
@@ -42,17 +53,9 @@ router.post("/:bookingId/interact", protect, markBookingInteracted);
    BOOKING COMPLETION
 ========================================================= */
 
-router.post(
-  "/:bookingId/complete/creator",
-  protect,
-  completeBookingByCreator
-);
+router.post("/:bookingId/complete/creator", protect, completeBookingByCreator);
 
-router.post(
-  "/:bookingId/complete/user",
-  protect,
-  completeBookingByUser
-);
+router.post("/:bookingId/complete/user", protect, completeBookingByUser);
 
 /* =========================================================
    BOOKING CANCELLATION

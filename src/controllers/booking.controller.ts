@@ -15,7 +15,7 @@ import { CreatorService } from "../models/creatorService.model";
 
 const cleanupExpiredBookings = async (
   creatorId: mongoose.Types.ObjectId,
-  session: mongoose.ClientSession
+  session: mongoose.ClientSession,
 ) => {
   const expiredBookings = await Booking.find({
     creatorId,
@@ -30,22 +30,19 @@ const cleanupExpiredBookings = async (
         status: "LOCKED",
       },
       { status: "AVAILABLE" },
-      { session }
+      { session },
     );
 
     booking.status = "EXPIRED";
     await booking.save({ session });
   }
- };
+};
 
- /* =========================================================
-   GET USER BOOKINGS  ✅ NEW
- ========================================================= */
+/* =========================================================
+   GET USER BOOKINGS
+========================================================= */
 
- export const getUserBookings = async (
-  req: Request,
-  res: Response
- ) => {
+export const getUserBookings = async (req: Request, res: Response) => {
   const user = req.user;
 
   if (!user) {
@@ -56,7 +53,7 @@ const cleanupExpiredBookings = async (
     const bookings = await Booking.find({ userId: user.id })
       .sort({ createdAt: -1 })
       .lean();
-      
+
     const allSlotIds = bookings.flatMap((b) => b.slotIds);
 
     const slots = await Slot.find({
@@ -65,33 +62,23 @@ const cleanupExpiredBookings = async (
       .sort({ startTime: 1 })
       .lean();
 
-    const slotMap = new Map(
-      slots.map((slot) => [String(slot._id), slot])
-    );
+    const slotMap = new Map(slots.map((slot) => [String(slot._id), slot]));
 
-    const creatorIds = [
-      ...new Set(bookings.map((b) => String(b.creatorId))),
-    ];
+    const creatorIds = [...new Set(bookings.map((b) => String(b.creatorId)))];
 
     const creators = await CreatorProfile.find({
       userId: { $in: creatorIds },
     }).lean();
 
-    const creatorMap = new Map(
-      creators.map((c) => [String(c.userId), c])
-    );
+    const creatorMap = new Map(creators.map((c) => [String(c.userId), c]));
 
-    const serviceIds = [
-      ...new Set(bookings.map((b) => String(b.serviceId))),
-    ];
+    const serviceIds = [...new Set(bookings.map((b) => String(b.serviceId)))];
 
     const services = await CreatorService.find({
       _id: { $in: serviceIds },
     }).lean();
 
-    const serviceMap = new Map(
-      services.map((s) => [String(s._id), s])
-    );
+    const serviceMap = new Map(services.map((s) => [String(s._id), s]));
 
     const formatted = bookings.map((booking) => {
       const bookingSlots = booking.slotIds
@@ -99,53 +86,51 @@ const cleanupExpiredBookings = async (
         .filter(Boolean)
         .sort(
           (a, b) =>
-            new Date(a!.startTime).getTime() -
-            new Date(b!.startTime).getTime()
+            new Date(a!.startTime).getTime() - new Date(b!.startTime).getTime(),
         );
 
       return {
-  _id: booking._id,
+        _id: booking._id,
 
-  userId: booking.userId,
-  creatorId: booking.creatorId,
-  serviceId: booking.serviceId,
+        userId: booking.userId,
+        creatorId: booking.creatorId,
+        serviceId: booking.serviceId,
 
-  status: booking.status,
-  paymentStatus: booking.paymentStatus,
+        status: booking.status,
+        paymentStatus: booking.paymentStatus,
 
-  price: booking.price,
-  currency: booking.currency,
-  durationMinutes: booking.durationMinutes,
+        price: booking.price,
+        currency: booking.currency,
+        durationMinutes: booking.durationMinutes,
 
-  expiresAt: booking.expiresAt,
-  createdAt: booking.createdAt,
-  completedAt: booking.completedAt,
+        expiresAt: booking.expiresAt,
+        createdAt: booking.createdAt,
+        completedAt: booking.completedAt,
 
-  service: {
-    _id: booking.serviceId,
-    title: booking.serviceTitle,
-    data: serviceMap.get(String(booking.serviceId)) || null,
-  },
+        service: {
+          _id: booking.serviceId,
+          title: booking.serviceTitle,
+          data: serviceMap.get(String(booking.serviceId)) || null,
+        },
 
-  creator: {
-    _id: booking.creatorId,
-    profile: creatorMap.get(String(booking.creatorId)) || null,
-  },
+        creator: {
+          _id: booking.creatorId,
+          profile: creatorMap.get(String(booking.creatorId)) || null,
+        },
 
-  slots: bookingSlots.map((slot) => ({
-    _id: slot!._id,
-    startTime: slot!.startTime,
-    endTime: slot!.endTime,
-    status: slot!.status,
-    price: slot!.price,
-  })),
-};
+        slots: bookingSlots.map((slot) => ({
+          _id: slot!._id,
+          startTime: slot!.startTime,
+          endTime: slot!.endTime,
+          status: slot!.status,
+          price: slot!.price,
+        })),
+      };
     });
 
     return res.status(200).json({
       bookings: formatted,
     });
-
   } catch (err: any) {
     return res.status(500).json({
       message: err.message || "Failed to fetch bookings",
@@ -154,13 +139,61 @@ const cleanupExpiredBookings = async (
 };
 
 /* =========================================================
+   CHECK CREATOR JOURNEY ELIGIBILITY
+========================================================= */
+
+export const checkCreatorJourneyEligibility = async (
+  req: Request,
+  res: Response,
+) => {
+  const user = req.user;
+
+  if (!user) {
+    return res.status(401).json({
+      message: "Unauthorized",
+    });
+  }
+
+  try {
+    const blockingBooking = await Booking.findOne({
+      userId: user.id,
+      status: {
+        $in: ["REQUESTED", "CONFIRMED"],
+      },
+    })
+      .select("_id status serviceTitle createdAt")
+      .lean();
+
+    if (blockingBooking) {
+      return res.status(200).json({
+        eligible: false,
+        message:
+          "You can't begin your Creator Journey while you have active or upcoming bookings. Please complete or resolve your current bookings before applying as a creator.",
+        blockingBooking: {
+          _id: blockingBooking._id,
+          status: blockingBooking.status,
+          serviceTitle: blockingBooking.serviceTitle,
+        },
+      });
+    }
+
+    return res.status(200).json({
+      eligible: true,
+      message: "You are eligible to begin your Creator Journey.",
+      blockingBooking: null,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      message: err.message || "Failed to check Creator Journey eligibility",
+    });
+  }
+};
+
+/* =========================================================
    REQUEST BOOKING
 ========================================================= */
 
-export const requestBooking = async (
-  req: Request,
-  res: Response
-) => {
+export const requestBooking = async (req: Request, res: Response) => {
   const user = req.user;
   const { serviceId, slotIds } = req.body;
 
@@ -193,18 +226,18 @@ export const requestBooking = async (
   }
 
   if (profile.profileStatus !== "verified") {
-  let message = "Profile verification required.";
+    let message = "Profile verification required.";
 
-  if (profile.profileStatus === "pending_verification") {
-    message = "Your profile is under verification.";
+    if (profile.profileStatus === "pending_verification") {
+      message = "Your profile is under verification.";
+    }
+
+    if (profile.profileStatus === "rejected") {
+      message = "Your profile was rejected. Please update and resubmit.";
+    }
+
+    return res.status(403).json({ message });
   }
-
-  if (profile.profileStatus === "rejected") {
-    message = "Your profile was rejected. Please update and resubmit.";
-  }
-
-  return res.status(403).json({ message });
-}
 
   const session = await mongoose.startSession();
 
@@ -227,12 +260,14 @@ export const requestBooking = async (
     }).session(session);
 
     if (!creatorProfile) throw new Error("Creator profile not found");
-    if (creatorProfile.status !== "active")
+
+    if (creatorProfile.status !== "active") {
       throw new Error("Creator is not active");
+    }
 
     await cleanupExpiredBookings(
       new mongoose.Types.ObjectId(creatorId),
-      session
+      session,
     );
 
     const slots = await Slot.find({
@@ -243,21 +278,20 @@ export const requestBooking = async (
 
     const now = new Date();
 
-for (const slot of slots) {
+    for (const slot of slots) {
+      if (new Date(slot.startTime) < now) {
+        throw new Error("Cannot book expired slots");
+      }
+    }
 
-  if (new Date(slot.startTime) < now) {
-    throw new Error("Cannot book expired slots");
-  }
-
-}
-
-    if (slots.length !== slotIds.length)
+    if (slots.length !== slotIds.length) {
       throw new Error("One or more slots not available");
+    }
 
     const totalMinutes = slots.reduce((sum, slot) => {
       const duration =
-        (slot.endTime.getTime() - slot.startTime.getTime()) /
-        (1000 * 60);
+        (slot.endTime.getTime() - slot.startTime.getTime()) / (1000 * 60);
+
       return sum + duration;
     }, 0);
 
@@ -266,7 +300,7 @@ for (const slot of slots) {
       totalMinutes % service.durationMinutes !== 0
     ) {
       throw new Error(
-        `Slots must be in multiples of ${service.durationMinutes} minutes`
+        `Slots must be in multiples of ${service.durationMinutes} minutes`,
       );
     }
 
@@ -287,7 +321,7 @@ for (const slot of slots) {
         serviceId: service._id,
       },
       { status: "LOCKED" },
-      { session }
+      { session },
     );
 
     if (lockResult.modifiedCount !== slotIds.length) {
@@ -314,7 +348,7 @@ for (const slot of slots) {
           expiresAt,
         },
       ],
-      { session }
+      { session },
     );
 
     await session.commitTransaction();
@@ -323,7 +357,6 @@ for (const slot of slots) {
       message: "Booking request sent",
       booking: booking[0],
     });
-
   } catch (err: any) {
     await session.abortTransaction();
 
@@ -339,26 +372,21 @@ for (const slot of slots) {
    REFUND (DISPUTE SAFE)
 ========================================================= */
 
-const REFUND_ALLOWED_STATUSES = [
-  "CANCELLED",
-  "EXPIRED",
-  "REJECTED",
-] as const;
+const REFUND_ALLOWED_STATUSES = ["CANCELLED", "EXPIRED", "REJECTED"] as const;
 
-export const refundBooking = async (
-  req: Request,
-  res: Response
-) => {
+export const refundBooking = async (req: Request, res: Response) => {
   const user = req.user;
   const { bookingId } = req.params;
 
-  if (!user)
+  if (!user) {
     return res.status(401).json({ message: "Unauthorized" });
+  }
 
   const booking = await Booking.findById(bookingId);
 
-  if (!booking)
+  if (!booking) {
     return res.status(404).json({ message: "Booking not found" });
+  }
 
   const openDispute = await Dispute.findOne({
     bookingId,

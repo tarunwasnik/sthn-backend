@@ -24,7 +24,8 @@ export interface CreatorApplicationDocument extends Document {
 
   languages: string[];
 
-  /* ✅ NEW MEDIA FIELDS */
+  /* ================= MEDIA ================= */
+
   avatarUrl?: string | null;
   coverUrl?: string | null;
   media?: string[];
@@ -32,6 +33,8 @@ export interface CreatorApplicationDocument extends Document {
   status: CreatorApplicationStatus;
 
   rejectionReason: string;
+
+  submittedForReviewAt?: Date | null;
 
   createdAt: Date;
   updatedAt: Date;
@@ -123,6 +126,12 @@ const CreatorApplicationSchema = new Schema<CreatorApplicationDocument>(
       type: String,
       trim: true,
       default: "",
+    },
+
+    submittedForReviewAt: {
+      type: Date,
+      default: null,
+      index: true,
     },
   },
   { timestamps: true },

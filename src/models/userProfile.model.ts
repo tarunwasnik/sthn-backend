@@ -1,4 +1,4 @@
-//backend/src/models/userProfile.model.ts
+// backend/src/models/userProfile.model.ts
 
 import mongoose, { Schema, Document } from "mongoose";
 
@@ -17,13 +17,15 @@ export interface UserProfileDocument extends Document {
   interests: string[];
   bio: string;
 
-  avatar: string; // NEW
-  cover: string; // NEW
+  avatar: string;
+  cover: string;
 
-  profilePhotos: string[]; // gallery only (2–6)
+  profilePhotos: string[];
 
   profileStatus: ProfileStatus;
   rejectionReason: string;
+
+  verificationSubmittedAt?: Date;
 
   createdAt: Date;
   updatedAt: Date;
@@ -64,7 +66,6 @@ const UserProfileSchema = new Schema<UserProfileDocument>(
       trim: true,
     },
 
-    // ✅ NEW FIELDS
     avatar: {
       type: String,
       required: true,
@@ -75,7 +76,6 @@ const UserProfileSchema = new Schema<UserProfileDocument>(
       required: true,
     },
 
-    // ✅ GALLERY ONLY
     profilePhotos: {
       type: [String],
       validate: {
@@ -93,10 +93,17 @@ const UserProfileSchema = new Schema<UserProfileDocument>(
       default: "incomplete",
       index: true,
     },
+
     rejectionReason: {
       type: String,
       default: "",
       trim: true,
+    },
+
+    verificationSubmittedAt: {
+      type: Date,
+      default: null,
+      index: true,
     },
   },
   { timestamps: true },

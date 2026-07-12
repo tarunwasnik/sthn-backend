@@ -1,5 +1,6 @@
-//frontend/src/controllers/adminCreatorApproval.controller.ts
-import { application, Request, Response } from "express";
+// backend/src/controllers/adminCreatorApproval.controller.ts
+
+import { Request, Response } from "express";
 import mongoose from "mongoose";
 import { CreatorApplication } from "../models/creatorApplication.model";
 import { CreatorProfile } from "../models/creatorProfile.model";
@@ -18,11 +19,17 @@ export const listCreatorApplications = async (req: Request, res: Response) => {
   const { status } = req.query;
 
   const filter: any = {};
-  if (status) filter.status = status;
+
+  if (status) {
+    filter.status = status;
+  }
 
   const applications = await CreatorApplication.find(filter)
     .populate("userId", "email")
-    .sort({ createdAt: -1 });
+    .sort({
+      submittedForReviewAt: -1,
+      createdAt: -1,
+    });
 
   res.status(200).json({
     applications,
@@ -45,6 +52,7 @@ export const approveCreatorApplication = async (
     session.startTransaction();
 
     /* 1️⃣ FIND APPLICATION */
+
     const application =
       await CreatorApplication.findById(applicationId).session(session);
 
@@ -57,6 +65,7 @@ export const approveCreatorApplication = async (
     }
 
     /* 2️⃣ GET USER */
+
     const user = await User.findById(application.userId).session(session);
 
     if (!user) {
@@ -64,6 +73,7 @@ export const approveCreatorApplication = async (
     }
 
     /* 3️⃣ CHECK EXISTING CREATOR PROFILE */
+
     const existingProfile = await CreatorProfile.findOne({
       userId: application.userId,
     }).session(session);
@@ -73,6 +83,7 @@ export const approveCreatorApplication = async (
     }
 
     /* 4️⃣ GET USER PROFILE */
+
     const userProfile = await UserProfile.findOne({
       userId: application.userId,
     }).session(session);
@@ -82,9 +93,11 @@ export const approveCreatorApplication = async (
     }
 
     /* 5️⃣ GENERATE UNIQUE SLUG */
+
     const slug = await generateUniqueCreatorSlug(application.displayName);
 
     /* 6️⃣ CREATE CREATOR PROFILE */
+
     const creatorProfile = new CreatorProfile({
       userId: application.userId,
       slug,
@@ -115,20 +128,27 @@ export const approveCreatorApplication = async (
     await creatorProfile.save({ session });
 
     /* 7️⃣ UPDATE USER */
+
     user.role = ROLES.CREATOR;
     user.creatorStatus = "approved";
+
     await user.save({ session });
 
     /* 8️⃣ UPDATE APPLICATION */
+
     application.status = "approved";
     application.rejectionReason = "";
+
     await application.save({ session });
 
     /* ✅ COMMIT TRANSACTION */
+
     await session.commitTransaction();
+
     session.endSession();
 
     /* 🔔 NOTIFY CONNECTED USER */
+
     emitIdentityChanged(user._id.toString());
 
     res.status(200).json({
@@ -137,6 +157,7 @@ export const approveCreatorApplication = async (
     });
   } catch (err: any) {
     await session.abortTransaction();
+
     session.endSession();
 
     console.error("Approve Creator Error:", err);
@@ -184,12 +205,15 @@ export const rejectCreatorApplication = async (req: Request, res: Response) => {
 
     application.status = "rejected";
     application.rejectionReason = reason.trim();
+
     await application.save({ session });
 
     user.creatorStatus = "rejected";
+
     await user.save({ session });
 
     await session.commitTransaction();
+
     session.endSession();
 
     res.status(200).json({
@@ -197,11 +221,11 @@ export const rejectCreatorApplication = async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     await session.abortTransaction();
+
     session.endSession();
 
     res.status(400).json({
       message: err.message || "Rejection failed",
-      application,
     });
   }
 };

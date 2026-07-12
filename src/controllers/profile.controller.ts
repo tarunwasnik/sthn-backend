@@ -5,8 +5,8 @@ import { UserProfile } from "../models/userProfile.model";
 import User from "../models/User";
 import { AppError } from "../utils/AppError";
 import { catchAsync } from "../utils/catchAsync";
-import { v2 as cloudinary } from "cloudinary"; // ✅ ADDED
-import { extractPublicId } from "../utils/extractPublicId"; // ✅ ADDED
+import { v2 as cloudinary } from "cloudinary";
+import { extractPublicId } from "../utils/extractPublicId";
 
 /* ================= UTIL ================= */
 
@@ -63,6 +63,7 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
     }
 
     const existingUsername = await UserProfile.findOne({ username });
+
     if (existingUsername) {
       throw new AppError("Username already taken", 409);
     }
@@ -81,17 +82,21 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
       cover,
       profilePhotos,
       profileStatus: "pending_verification",
+      verificationSubmittedAt: new Date(),
     });
   } else {
+    /* ================= UPDATE ================= */
 
-  /* ================= UPDATE ================= */
     /* 🔥 CLOUDINARY CLEANUP */
 
     // Avatar
     if (avatar !== undefined && profile.avatar && avatar !== profile.avatar) {
       try {
         const publicId = extractPublicId(profile.avatar);
-        if (publicId) await cloudinary.uploader.destroy(publicId);
+
+        if (publicId) {
+          await cloudinary.uploader.destroy(publicId);
+        }
       } catch (e) {
         console.error("Avatar delete failed:", e);
       }
@@ -101,7 +106,10 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
     if (cover !== undefined && profile.cover && cover !== profile.cover) {
       try {
         const publicId = extractPublicId(profile.cover);
-        if (publicId) await cloudinary.uploader.destroy(publicId);
+
+        if (publicId) {
+          await cloudinary.uploader.destroy(publicId);
+        }
       } catch (e) {
         console.error("Cover delete failed:", e);
       }
@@ -119,6 +127,7 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
       for (const url of removedPhotos) {
         try {
           const publicId = extractPublicId(url);
+
           if (publicId) {
             await cloudinary.uploader.destroy(publicId);
           }
@@ -145,7 +154,9 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
       profile.dateOfBirth = dob;
     }
 
-    if (bio !== undefined) profile.bio = bio;
+    if (bio !== undefined) {
+      profile.bio = bio;
+    }
 
     if (interests !== undefined) {
       profile.interests = Array.isArray(interests) ? interests : [interests];
@@ -170,6 +181,7 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
     if (profile.profileStatus === "rejected") {
       profile.profileStatus = "pending_verification";
       profile.rejectionReason = "";
+      profile.verificationSubmittedAt = new Date();
     }
 
     await profile.save();
@@ -247,7 +259,10 @@ export const updateMyProfile = catchAsync(
     if (avatar !== undefined && profile.avatar && avatar !== profile.avatar) {
       try {
         const publicId = extractPublicId(profile.avatar);
-        if (publicId) await cloudinary.uploader.destroy(publicId);
+
+        if (publicId) {
+          await cloudinary.uploader.destroy(publicId);
+        }
       } catch (e) {
         console.error("Avatar delete failed:", e);
       }
@@ -256,7 +271,10 @@ export const updateMyProfile = catchAsync(
     if (cover !== undefined && profile.cover && cover !== profile.cover) {
       try {
         const publicId = extractPublicId(profile.cover);
-        if (publicId) await cloudinary.uploader.destroy(publicId);
+
+        if (publicId) {
+          await cloudinary.uploader.destroy(publicId);
+        }
       } catch (e) {
         console.error("Cover delete failed:", e);
       }
@@ -270,7 +288,10 @@ export const updateMyProfile = catchAsync(
       for (const img of removed) {
         try {
           const publicId = extractPublicId(img);
-          if (publicId) await cloudinary.uploader.destroy(publicId);
+
+          if (publicId) {
+            await cloudinary.uploader.destroy(publicId);
+          }
         } catch (e) {
           console.error("Gallery delete failed:", e);
         }
@@ -279,7 +300,9 @@ export const updateMyProfile = catchAsync(
 
     /* ================= ORIGINAL ================= */
 
-    if (bio !== undefined) profile.bio = bio;
+    if (bio !== undefined) {
+      profile.bio = bio;
+    }
 
     if (interests !== undefined) {
       profile.interests = Array.isArray(interests) ? interests : [interests];
@@ -315,6 +338,7 @@ export const updateMyProfile = catchAsync(
     if (profile.profileStatus === "rejected") {
       profile.profileStatus = "pending_verification";
       profile.rejectionReason = "";
+      profile.verificationSubmittedAt = new Date();
     }
 
     await profile.save();

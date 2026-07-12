@@ -4,6 +4,7 @@ import { Request, Response } from "express";
 import mongoose from "mongoose";
 import { CreatorApplication } from "../models/creatorApplication.model";
 import { UserProfile } from "../models/userProfile.model";
+import { Booking } from "../models/booking.model";
 import User from "../models/User";
 import { ROLES } from "../constants/roles";
 import { AppError } from "../utils/AppError";
@@ -11,14 +12,19 @@ import { AppError } from "../utils/AppError";
 export const applyForCreator = async (req: Request, res: Response) => {
   const authUser = req.user;
 
-  if (!authUser) throw new AppError("Unauthorized", 401);
+  if (!authUser) {
+    throw new AppError("Unauthorized", 401);
+  }
 
   if (authUser.role !== ROLES.USER) {
     throw new AppError("Only users can apply to become creators", 403);
   }
 
   const fullUser = await User.findById(authUser.id);
-  if (!fullUser) throw new AppError("User not found", 404);
+
+  if (!fullUser) {
+    throw new AppError("User not found", 404);
+  }
 
   if (
     fullUser.creatorStatus === "pending" ||
@@ -52,6 +58,24 @@ export const applyForCreator = async (req: Request, res: Response) => {
     throw new AppError(message, 403);
   }
 
+  /* ================= ACTIVE BOOKING CHECK ================= */
+
+  const blockingBooking = await Booking.findOne({
+    userId: authUser.id,
+    status: {
+      $in: ["REQUESTED", "CONFIRMED"],
+    },
+  })
+    .select("_id status")
+    .lean();
+
+  if (blockingBooking) {
+    throw new AppError(
+      "You can't submit a creator application while you have active or upcoming bookings. Please complete or resolve your current bookings before applying as a creator.",
+      403,
+    );
+  }
+
   const existingApplication = await CreatorApplication.findOne({
     userId: authUser.id,
   });
@@ -70,7 +94,8 @@ export const applyForCreator = async (req: Request, res: Response) => {
     city,
     languages,
 
-    /* ✅ NEW MEDIA INPUT */
+    /* ================= MEDIA INPUT ================= */
+
     avatarUrl,
     coverUrl,
     media,
@@ -88,6 +113,7 @@ export const applyForCreator = async (req: Request, res: Response) => {
   }
 
   const normalizedServices = Array.isArray(services) ? services : [];
+
   const normalizedLanguages = Array.isArray(languages) ? languages : [];
 
   const session = await mongoose.startSession();
@@ -97,18 +123,25 @@ export const applyForCreator = async (req: Request, res: Response) => {
 
     let application;
 
+    /* ================= FIRST SUBMISSION ================= */
+
     if (!existingApplication) {
       application = await CreatorApplication.create(
         [
           {
             userId: authUser.id,
+
             displayName,
             primaryCategory,
+
             country,
             city,
+
             currency: currency.toUpperCase(),
+
             services: normalizedServices,
             publicBio,
+
             languages: normalizedLanguages,
 
             avatarUrl: avatarUrl || null,
@@ -116,11 +149,15 @@ export const applyForCreator = async (req: Request, res: Response) => {
             media: Array.isArray(media) ? media : [],
 
             status: "submitted",
+
+            submittedForReviewAt: new Date(),
           },
         ],
         { session },
       );
     } else {
+      /* ================= REJECTED RESUBMISSION ================= */
+
       existingApplication.displayName = displayName;
       existingApplication.primaryCategory = primaryCategory;
 
@@ -141,14 +178,19 @@ export const applyForCreator = async (req: Request, res: Response) => {
       existingApplication.status = "submitted";
       existingApplication.rejectionReason = "";
 
+      existingApplication.submittedForReviewAt = new Date();
+
       await existingApplication.save({ session });
+
       application = [existingApplication];
     }
 
     fullUser.creatorStatus = "pending";
+
     await fullUser.save({ session });
 
     await session.commitTransaction();
+
     session.endSession();
 
     return res.status(201).json({
@@ -161,11 +203,13 @@ export const applyForCreator = async (req: Request, res: Response) => {
     console.error("🔥 ERROR STACK:", error?.stack);
 
     await session.abortTransaction();
+
     session.endSession();
 
     throw new AppError(error?.message || "Application submission failed", 400);
   }
 };
+
 export const getMyCreatorApplication = async (req: Request, res: Response) => {
   const authUser = req.user;
 

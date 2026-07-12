@@ -1,4 +1,5 @@
-////backend/src/controllers/profileVerification.controller.ts
+// backend/src/controllers/profileVerification.controller.ts
+
 import { Request, Response } from "express";
 import { UserProfile } from "../models/userProfile.model";
 import { AppError } from "../utils/AppError";
@@ -10,6 +11,10 @@ export const listPendingProfiles = async (_req: Request, res: Response) => {
     profileStatus: "pending_verification",
   })
     .populate("userId", "name email")
+    .sort({
+      verificationSubmittedAt: -1,
+      createdAt: -1,
+    })
     .lean();
 
   res.json({ profiles });
@@ -31,6 +36,8 @@ export const approveProfile = async (req: Request, res: Response) => {
   }
 
   profile.profileStatus = "verified";
+  profile.rejectionReason = "";
+
   await profile.save();
 
   res.json({
@@ -63,6 +70,7 @@ export const rejectProfile = async (req: Request, res: Response) => {
   profile.rejectionReason = reason.trim();
 
   await profile.save();
+
   res.json({
     message: "Profile rejected",
   });
