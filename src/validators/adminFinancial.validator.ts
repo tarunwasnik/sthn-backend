@@ -1,0 +1,23 @@
+import mongoose from "mongoose";
+import { PaymentStatus } from "../enums/financial/paymentStatus.enum";
+import { PaymentProvider } from "../enums/financial/paymentProvider.enum";
+import { RefundStatus } from "../enums/financial/refundStatus.enum";
+import { SettlementStatus } from "../enums/financial/settlementStatus.enum";
+import { WithdrawalStatus } from "../enums/financial/withdrawalStatus.enum";
+import { PayoutStatus } from "../enums/financial/payoutStatus.enum";
+const scalar = (v: unknown, name: string) => { if (typeof v !== "string" || !v.trim() || v.length > 160) throw new Error(`Invalid ${name}`); return v.trim(); };
+const optional = (v: unknown, f: (x: unknown) => any) => v === undefined ? undefined : f(v);
+const int = (v: unknown, name: string, fallback: number, max: number) => { if (v === undefined) return fallback; const value = scalar(v, name); if (!/^\d+$/.test(value)) throw new Error(`Invalid ${name}`); const n = Number(value); if (!Number.isSafeInteger(n) || n < 1 || n > max) throw new Error(`Invalid ${name}`); return n; };
+const date = (v: unknown, name: string) => { const s = scalar(v, name); const d = new Date(s); if (Number.isNaN(d.valueOf())) throw new Error(`Invalid ${name}`); return d; };
+const object = (q: unknown) => { if (!q || typeof q !== "object" || Array.isArray(q)) throw new Error("Invalid query"); for (const v of Object.values(q as object)) if (typeof v !== "string" && v !== undefined) throw new Error("Query values must be scalar strings"); return q as Record<string, unknown>; };
+export const adminReference = (value: unknown) => scalar(value, "reference");
+export const adminObjectId = (value: unknown, name = "id") => { const id = scalar(value, name); if (!mongoose.Types.ObjectId.isValid(id)) throw new Error(`Invalid ${name}`); return id; };
+export const adminListQuery = (input: unknown, enums: Record<string, readonly string[]> = {}) => { const q = object(input); const allowed = new Set(["page","limit","dateFrom","dateTo","sortOrder",...Object.keys(enums),"creatorId","userId","bookingId","paymentId","withdrawalId","isActiveObligation"]); for (const key of Object.keys(q)) if (!allowed.has(key)) throw new Error(`Unsupported query field: ${key}`); const dateFrom = optional(q.dateFrom, x => date(x,"dateFrom")); const dateTo = optional(q.dateTo, x => date(x,"dateTo")); if (dateFrom && dateTo && dateFrom > dateTo) throw new Error("Invalid date range"); const result: any = { page: int(q.page,"page",1,100000), limit: int(q.limit,"limit",25,100), ...(dateFrom ? { dateFrom } : {}), ...(dateTo ? { dateTo } : {}) }; if (q.sortOrder !== undefined && !["ASC","DESC"].includes(scalar(q.sortOrder,"sortOrder").toUpperCase())) throw new Error("Invalid sortOrder"); for (const [key, values] of Object.entries(enums)) if (q[key] !== undefined) { const value = scalar(q[key],key).toUpperCase(); if (!values.includes(value)) throw new Error(`Invalid ${key}`); result[key] = value; }
+  for (const key of ["creatorId","userId","bookingId","paymentId","withdrawalId"]) if (q[key] !== undefined) result[key] = adminObjectId(q[key],key); if (q.isActiveObligation !== undefined) { if (q.isActiveObligation !== "true" && q.isActiveObligation !== "false") throw new Error("Invalid isActiveObligation"); result.isActiveObligation = q.isActiveObligation === "true"; } return result; };
+export const paymentQuery = (q: unknown) => adminListQuery(q,{ status:Object.values(PaymentStatus), provider:Object.values(PaymentProvider), currency:["INR","USD","EUR","THB"] });
+export const parseAdminPaymentListQuery = paymentQuery;
+export const parseAdminRefundListQuery = (q: unknown) => adminListQuery(q,{ status:Object.values(RefundStatus), currency:["INR","USD","EUR","THB"] });
+export const parseAdminSettlementListQuery = (q: unknown) => adminListQuery(q,{ status:Object.values(SettlementStatus), currency:["INR","USD","EUR","THB"] });
+export const parseAdminCreatorBalanceListQuery = (q: unknown) => adminListQuery(q,{ currency:["INR","USD","EUR","THB"] });
+export const parseAdminWithdrawalListQuery = (q: unknown) => adminListQuery(q,{ status:Object.values(WithdrawalStatus), currency:["INR","USD","EUR","THB"] });
+export const parseAdminPayoutListQuery = (q: unknown) => adminListQuery(q,{ status:Object.values(PayoutStatus), provider:Object.values(PaymentProvider), currency:["INR","USD","EUR","THB"] });

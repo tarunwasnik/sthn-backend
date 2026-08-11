@@ -15,6 +15,7 @@ import {
   resolveDispute,
   getEscalatedDisputes,
   decideAppeal,
+  getAuditLogs,
 } from "../../controllers/admin.controller";
 
 import {
@@ -27,6 +28,9 @@ import {
 import adminActionsRoutes from "./admin.actions.routes";
 import featureFlagTelemetryRoutes from "./featureFlagTelemetry.routes";
 import featureFlagDashboardRoutes from "./featureFlagDashboard.routes";
+
+import { simulatePayoutStatus } from "../../controllers/admin/providerSimulator.controller";
+import { applyPayoutDestinationVerificationDecision } from "../../controllers/admin/payoutDestinationVerification.controller";
 
 const router = Router();
 
@@ -43,6 +47,26 @@ router.get(
   (_req, res) => {
     res.json({ message: "Welcome Admin" });
   }
+);
+
+/* ================= PROVIDER SIMULATOR ================= */
+
+router.post(
+  "/provider-simulator/payouts/:providerPayoutId/status",
+  protect,
+  authorizeRoles("admin"),
+  simulatePayoutStatus,
+);
+
+router.get("/audit-logs", protect, authorizeRoles("admin"), getAuditLogs);
+
+/* ================= PAYOUT DESTINATION VERIFICATION ================= */
+
+router.post(
+  "/payout-destinations/:destinationReference/verification",
+  protect,
+  authorizeRoles("admin"),
+  applyPayoutDestinationVerificationDecision,
 );
 
 /* ================= USER MANAGEMENT ================= */

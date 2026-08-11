@@ -1,5 +1,5 @@
 "use strict";
-//backend/src/models/userProfile.model.ts
+// backend/src/models/userProfile.model.ts
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -65,14 +65,38 @@ const UserProfileSchema = new mongoose_1.Schema({
         required: true,
         trim: true,
     },
+    avatar: {
+        type: String,
+        required: true,
+    },
+    cover: {
+        type: String,
+        required: true,
+    },
     profilePhotos: {
         type: [String],
-        default: [],
+        validate: {
+            validator: function (value) {
+                return value.length >= 2 && value.length <= 6;
+            },
+            message: "Gallery must contain between 2 and 6 images",
+        },
+        required: true,
     },
     profileStatus: {
         type: String,
         enum: ["incomplete", "pending_verification", "verified", "rejected"],
         default: "incomplete",
+        index: true,
+    },
+    rejectionReason: {
+        type: String,
+        default: "",
+        trim: true,
+    },
+    verificationSubmittedAt: {
+        type: Date,
+        default: null,
         index: true,
     },
 }, { timestamps: true });

@@ -1,0 +1,17 @@
+import mongoose from "mongoose";
+import { AuditAction } from "../enums/financial/auditAction.enum";
+import { validateFinancialAuditInput } from "../services/auditLog.service";
+
+function expectThrows(fn: () => unknown, message: string) { try { fn(); } catch { return; } throw new Error(message); }
+const actor = new mongoose.Types.ObjectId();
+validateFinancialAuditInput({ action: AuditAction.PAYMENT_INITIALIZED, actor: { type: "USER", id: actor }, financialContext: { domain: "PAYMENT", primaryReference: "PAYMENT-1", amount: 105, currency: "inr" }, transition: { outcome: "PROCESSING" }, metadata: { reasonCode: "provider_pending" } });
+validateFinancialAuditInput({ action: AuditAction.PAYOUT_PROVIDER_SYNCHRONIZED, actor: { type: "PROVIDER", reference: "INTERNAL" }, financialContext: { domain: "PAYOUT", primaryReference: "PAYOUT-1" } });
+expectThrows(() => validateFinancialAuditInput({ action: AuditAction.PAYMENT_INITIALIZED, actor: { type: "SYSTEM" }, financialContext: { domain: "PAYMENT", primaryReference: "P" } }), "system actor without reference accepted");
+expectThrows(() => validateFinancialAuditInput({ action: AuditAction.PAYMENT_INITIALIZED, actor: { type: "USER", id: actor }, financialContext: { domain: "PAYMENT", primaryReference: "P", amount: -1 } }), "negative amount accepted");
+expectThrows(() => validateFinancialAuditInput({ action: AuditAction.PAYMENT_INITIALIZED, actor: { type: "USER", id: actor }, financialContext: { domain: "PAYMENT", primaryReference: "P" }, metadata: { encryptedPayload: "x" } }), "sensitive metadata accepted");
+expectThrows(() => validateFinancialAuditInput({ action: AuditAction.PAYMENT_INITIALIZED, actor: { type: "USER", id: actor }, financialContext: { domain: "PAYMENT", primaryReference: "P" }, metadata: { arbitrary: "x" } }), "unknown metadata accepted");
+if (new Set(Object.values(AuditAction)).size !== Object.values(AuditAction).length) throw new Error("Duplicate audit action value");
+for (const action of [AuditAction.PAYMENT_AUTHORIZED, AuditAction.PAYMENT_CAPTURED, AuditAction.PAYMENT_FAILED, AuditAction.PAYMENT_OUTCOME_UNKNOWN, AuditAction.PAYMENT_REPLAY_DETECTED, AuditAction.PAYOUT_PROCESS_REQUESTED, AuditAction.PAYOUT_PROCESSING_STARTED, AuditAction.PAYOUT_PROVIDER_REQUESTED, AuditAction.PAYOUT_PROVIDER_SYNCHRONIZED, AuditAction.PAYOUT_SUCCEEDED, AuditAction.PAYOUT_FAILED, AuditAction.PAYOUT_OUTCOME_UNKNOWN, AuditAction.PAYOUT_REPLAY_DETECTED, AuditAction.WITHDRAWAL_RECONCILIATION_APPLIED, AuditAction.WITHDRAWAL_RECONCILIATION_CONFLICT]) if (!Object.values(AuditAction).includes(action)) throw new Error(`Missing audit action ${action}`);
+validateFinancialAuditInput({ action: AuditAction.WITHDRAWAL_RECONCILIATION_APPLIED, actor: { type: "SYSTEM", reference: "withdrawal-reservation-reconciliation" }, financialContext: { domain: "WITHDRAWAL", primaryReference: "WITHDRAWAL-1", projectionOperationReference: "withdrawal:1:projection:migrate" }, transition: { outcome: "SUCCEEDED" }, metadata: { classification: "FULLY_RECONCILED", reasonCode: "LOCKED_TO_RESERVED_MIGRATION" } });
+expectThrows(() => validateFinancialAuditInput({ action: AuditAction.PAYOUT_PROVIDER_REQUESTED, actor: { type: "PROVIDER", reference: "INTERNAL" }, financialContext: { domain: "PAYOUT", primaryReference: "PAYOUT-1" }, metadata: { destinationDetails: "secret" } }), "destination details accepted");
+console.log("Phase 6A pure audit validation passed.");

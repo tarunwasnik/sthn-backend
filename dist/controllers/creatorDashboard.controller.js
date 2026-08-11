@@ -8,6 +8,7 @@ exports.getCreatorDashboard = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const creatorProfile_model_1 = require("../models/creatorProfile.model");
 const booking_model_1 = require("../models/booking.model");
+const slot_model_1 = require("../models/slot.model");
 const AppError_1 = require("../utils/AppError");
 /**
  * GET /api/v1/creator/dashboard
@@ -29,8 +30,10 @@ const getCreatorDashboard = async (req, res) => {
         throw new AppError_1.AppError("Creator profile is not active", 403);
     }
     /* ================= BOOKING STATS ================= */
-    const [totalBookings, pendingBookings, completedBookings] = await Promise.all([
-        booking_model_1.Booking.countDocuments({ creatorId: userObjectId }),
+    const [totalBookings, pendingBookings, completedBookings,] = await Promise.all([
+        booking_model_1.Booking.countDocuments({
+            creatorId: userObjectId,
+        }),
         booking_model_1.Booking.countDocuments({
             creatorId: userObjectId,
             status: "REQUESTED",
@@ -48,6 +51,48 @@ const getCreatorDashboard = async (req, res) => {
         .limit(5)
         .select("status paymentStatus creatorEarningSnapshot createdAt")
         .lean();
+    /* ================= NEXT UPCOMING BOOKING ================= */
+    const upcomingBookings = await booking_model_1.Booking.find({
+        creatorId: userObjectId,
+        status: {
+            $in: ["REQUESTED", "CONFIRMED"],
+        },
+    })
+        .select("serviceTitle status slotIds createdAt")
+        .lean();
+    const upcomingSlotIds = upcomingBookings.flatMap((booking) => booking.slotIds);
+    const upcomingSlots = await slot_model_1.Slot.find({
+        _id: { $in: upcomingSlotIds },
+    }).lean();
+    const upcomingSlotMap = new Map(upcomingSlots.map((slot) => [
+        String(slot._id),
+        slot,
+    ]));
+    const now = new Date();
+    const nextUpcomingBooking = upcomingBookings
+        .map((booking) => {
+        const bookingSlots = booking.slotIds
+            .map((id) => upcomingSlotMap.get(String(id)))
+            .filter(Boolean)
+            .sort((a, b) => new Date(a.startTime).getTime() -
+            new Date(b.startTime).getTime());
+        const firstSlot = bookingSlots[0];
+        if (!firstSlot)
+            return null;
+        if (new Date(firstSlot.startTime) < now) {
+            return null;
+        }
+        return {
+            id: booking._id,
+            serviceTitle: booking.serviceTitle,
+            status: booking.status,
+            startTime: firstSlot.startTime,
+            endTime: firstSlot.endTime,
+        };
+    })
+        .filter(Boolean)
+        .sort((a, b) => new Date(a.startTime).getTime() -
+        new Date(b.startTime).getTime())[0] ?? null;
     /* ================= MTD EARNINGS ================= */
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
@@ -64,11 +109,15 @@ const getCreatorDashboard = async (req, res) => {
         {
             $group: {
                 _id: null,
-                total: { $sum: "$creatorEarningSnapshot" },
+                total: {
+                    $sum: "$creatorEarningSnapshot",
+                },
             },
         },
     ]);
-    const mtdEarnings = earningsResult.length > 0 ? earningsResult[0].total : 0;
+    const mtdEarnings = earningsResult.length > 0
+        ? earningsResult[0].total
+        : 0;
     /* ================= RESPONSE ================= */
     res.status(200).json({
         creatorProfile: {
@@ -92,9 +141,11 @@ const getCreatorDashboard = async (req, res) => {
             id: booking._id,
             status: booking.status,
             paymentStatus: booking.paymentStatus,
-            earning: booking.creatorEarningSnapshot ?? 0,
+            earning: booking.creatorEarningSnapshot ??
+                0,
             createdAt: booking.createdAt,
         })),
+        nextUpcomingBooking,
     });
 };
 exports.getCreatorDashboard = getCreatorDashboard;

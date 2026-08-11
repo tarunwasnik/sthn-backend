@@ -4,11 +4,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMyProfile = exports.upsertProfile = void 0;
+exports.updateMyProfile = exports.getMyProfile = exports.upsertProfile = void 0;
 const userProfile_model_1 = require("../models/userProfile.model");
 const User_1 = __importDefault(require("../models/User"));
 const AppError_1 = require("../utils/AppError");
-const uploadToCloudinary_1 = require("../utils/uploadToCloudinary");
+const catchAsync_1 = require("../utils/catchAsync");
+const cloudinary_1 = require("cloudinary");
+const extractPublicId_1 = require("../utils/extractPublicId");
 /* ================= UTIL ================= */
 const calculateAge = (dob) => {
     const diff = Date.now() - dob.getTime();
@@ -16,23 +18,20 @@ const calculateAge = (dob) => {
     return Math.abs(ageDate.getUTCFullYear() - 1970);
 };
 /* ================= CREATE / UPDATE PROFILE ================= */
-const upsertProfile = async (req, res) => {
-    console.log("🔥 BODY:", req.body);
-    console.log("🔥 FILES:", req.files);
+exports.upsertProfile = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const userId = req.user.id;
-    const { username, dateOfBirth, interests, bio } = req.body;
-    const files = req.files;
+    const { username, dateOfBirth, interests, bio, profilePhotos, avatar, cover, } = req.body;
     let profile = await userProfile_model_1.UserProfile.findOne({ userId });
     const isFirstSubmission = !profile;
-    /* ================= FILE VALIDATION ================= */
-    if (!files || files.length < 2 || files.length > 6) {
+    /* ================= VALIDATION ================= */
+    if (!profilePhotos || profilePhotos.length < 2 || profilePhotos.length > 6) {
         throw new AppError_1.AppError("Profile must have between 2 and 6 photos", 400);
     }
-    /* ================= UPLOAD TO CLOUDINARY ================= */
-    const uploadedPhotos = [];
-    for (const file of files) {
-        const result = await (0, uploadToCloudinary_1.uploadToCloudinary)(file.buffer);
-        uploadedPhotos.push(result.secure_url);
+    if (!avatar) {
+        throw new AppError_1.AppError("Avatar is required", 400);
+    }
+    if (!cover) {
+        throw new AppError_1.AppError("Cover is required", 400);
     }
     /* ================= CREATE ================= */
     if (!profile) {
@@ -58,12 +57,58 @@ const upsertProfile = async (req, res) => {
                     ? [interests]
                     : [],
             bio,
-            profilePhotos: uploadedPhotos,
+            avatar,
+            cover,
+            profilePhotos,
             profileStatus: "pending_verification",
+            verificationSubmittedAt: new Date(),
         });
     }
-    /* ================= UPDATE ================= */
     else {
+        /* ================= UPDATE ================= */
+        /* 🔥 CLOUDINARY CLEANUP */
+        // Avatar
+        if (avatar !== undefined && profile.avatar && avatar !== profile.avatar) {
+            try {
+                const publicId = (0, extractPublicId_1.extractPublicId)(profile.avatar);
+                if (publicId) {
+                    await cloudinary_1.v2.uploader.destroy(publicId);
+                }
+            }
+            catch (e) {
+                console.error("Avatar delete failed:", e);
+            }
+        }
+        // Cover
+        if (cover !== undefined && profile.cover && cover !== profile.cover) {
+            try {
+                const publicId = (0, extractPublicId_1.extractPublicId)(profile.cover);
+                if (publicId) {
+                    await cloudinary_1.v2.uploader.destroy(publicId);
+                }
+            }
+            catch (e) {
+                console.error("Cover delete failed:", e);
+            }
+        }
+        // 🔥 GALLERY (STRICT SAME AS SERVICES)
+        if (profilePhotos !== undefined) {
+            const oldPhotos = profile.profilePhotos || [];
+            const newPhotos = Array.isArray(profilePhotos) ? profilePhotos : [];
+            const removedPhotos = oldPhotos.filter((oldUrl) => !newPhotos.includes(oldUrl));
+            for (const url of removedPhotos) {
+                try {
+                    const publicId = (0, extractPublicId_1.extractPublicId)(url);
+                    if (publicId) {
+                        await cloudinary_1.v2.uploader.destroy(publicId);
+                    }
+                }
+                catch (err) {
+                    console.error("Gallery delete failed:", err);
+                }
+            }
+        }
+        /* ================= ORIGINAL LOGIC ================= */
         if (username && username !== profile.username) {
             throw new AppError_1.AppError("Username cannot be changed", 400);
         }
@@ -75,18 +120,28 @@ const upsertProfile = async (req, res) => {
             }
             profile.dateOfBirth = dob;
         }
-        if (bio !== undefined)
+        if (bio !== undefined) {
             profile.bio = bio;
-        if (interests !== undefined) {
-            profile.interests = Array.isArray(interests)
-                ? interests
-                : [interests];
         }
-        if (files && files.length > 0) {
-            profile.profilePhotos = uploadedPhotos;
+        if (interests !== undefined) {
+            profile.interests = Array.isArray(interests) ? interests : [interests];
+        }
+        if (profilePhotos && Array.isArray(profilePhotos)) {
+            if (profilePhotos.length < 2 || profilePhotos.length > 6) {
+                throw new AppError_1.AppError("Profile must have 2–6 photos", 400);
+            }
+            profile.profilePhotos = profilePhotos;
+        }
+        if (avatar !== undefined) {
+            profile.avatar = avatar;
+        }
+        if (cover !== undefined) {
+            profile.cover = cover;
         }
         if (profile.profileStatus === "rejected") {
             profile.profileStatus = "pending_verification";
+            profile.rejectionReason = "";
+            profile.verificationSubmittedAt = new Date();
         }
         await profile.save();
     }
@@ -106,10 +161,9 @@ const upsertProfile = async (req, res) => {
         profileStatus: profile.profileStatus,
         profile,
     });
-};
-exports.upsertProfile = upsertProfile;
+});
 /* ================= GET PROFILE ================= */
-const getMyProfile = async (req, res) => {
+exports.getMyProfile = (0, catchAsync_1.catchAsync)(async (req, res) => {
     const userId = req.user.id;
     let profile = await userProfile_model_1.UserProfile.findOne({ userId });
     if (!profile) {
@@ -118,6 +172,8 @@ const getMyProfile = async (req, res) => {
             username: "",
             bio: "",
             interests: [],
+            avatar: "",
+            cover: "",
             profilePhotos: [],
             profileStatus: "incomplete",
         });
@@ -129,5 +185,87 @@ const getMyProfile = async (req, res) => {
         ...profile.toObject(),
         age,
     });
-};
-exports.getMyProfile = getMyProfile;
+});
+/* ================= EDIT PROFILE ================= */
+exports.updateMyProfile = (0, catchAsync_1.catchAsync)(async (req, res) => {
+    const userId = req.user.id;
+    const { bio, interests, dateOfBirth, profilePhotos, avatar, cover } = req.body;
+    const profile = await userProfile_model_1.UserProfile.findOne({ userId });
+    if (!profile) {
+        throw new AppError_1.AppError("Profile not found", 404);
+    }
+    /* 🔥 CLOUDINARY CLEANUP */
+    if (avatar !== undefined && profile.avatar && avatar !== profile.avatar) {
+        try {
+            const publicId = (0, extractPublicId_1.extractPublicId)(profile.avatar);
+            if (publicId) {
+                await cloudinary_1.v2.uploader.destroy(publicId);
+            }
+        }
+        catch (e) {
+            console.error("Avatar delete failed:", e);
+        }
+    }
+    if (cover !== undefined && profile.cover && cover !== profile.cover) {
+        try {
+            const publicId = (0, extractPublicId_1.extractPublicId)(profile.cover);
+            if (publicId) {
+                await cloudinary_1.v2.uploader.destroy(publicId);
+            }
+        }
+        catch (e) {
+            console.error("Cover delete failed:", e);
+        }
+    }
+    if (profilePhotos && Array.isArray(profile.profilePhotos)) {
+        const removed = profile.profilePhotos.filter((img) => !profilePhotos.includes(img));
+        for (const img of removed) {
+            try {
+                const publicId = (0, extractPublicId_1.extractPublicId)(img);
+                if (publicId) {
+                    await cloudinary_1.v2.uploader.destroy(publicId);
+                }
+            }
+            catch (e) {
+                console.error("Gallery delete failed:", e);
+            }
+        }
+    }
+    /* ================= ORIGINAL ================= */
+    if (bio !== undefined) {
+        profile.bio = bio;
+    }
+    if (interests !== undefined) {
+        profile.interests = Array.isArray(interests) ? interests : [interests];
+    }
+    if (dateOfBirth) {
+        const dob = new Date(dateOfBirth);
+        const age = calculateAge(dob);
+        if (age < 18) {
+            throw new AppError_1.AppError("Minimum age is 18", 403);
+        }
+        profile.dateOfBirth = dob;
+    }
+    if (profilePhotos && Array.isArray(profilePhotos)) {
+        if (profilePhotos.length < 2 || profilePhotos.length > 20) {
+            throw new AppError_1.AppError("Profile must have 2–6 photos", 400);
+        }
+        profile.profilePhotos = profilePhotos;
+    }
+    if (avatar !== undefined) {
+        profile.avatar = avatar;
+    }
+    if (cover !== undefined) {
+        profile.cover = cover;
+    }
+    if (profile.profileStatus === "rejected") {
+        profile.profileStatus = "pending_verification";
+        profile.rejectionReason = "";
+        profile.verificationSubmittedAt = new Date();
+    }
+    await profile.save();
+    res.status(200).json({
+        message: "Profile updated successfully",
+        profile,
+    });
+});

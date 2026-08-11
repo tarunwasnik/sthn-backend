@@ -1,0 +1,20 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.WalletConversionOperationalIssue = void 0;
+var WalletConversionOperationalIssue;
+(function (WalletConversionOperationalIssue) {
+    WalletConversionOperationalIssue["NONE"] = "NONE";
+    WalletConversionOperationalIssue["ACCOUNTING_COMPLETION_REPLAY_REQUIRED"] = "ACCOUNTING_COMPLETION_REPLAY_REQUIRED";
+    WalletConversionOperationalIssue["ACCOUNTING_REFERENCES_MISSING"] = "ACCOUNTING_REFERENCES_MISSING";
+    WalletConversionOperationalIssue["LEDGER_REFERENCES_MISSING"] = "LEDGER_REFERENCES_MISSING";
+    WalletConversionOperationalIssue["PROJECTION_REFERENCES_MISSING"] = "PROJECTION_REFERENCES_MISSING";
+    WalletConversionOperationalIssue["TERMINAL_AUDIT_MISSING"] = "TERMINAL_AUDIT_MISSING";
+    WalletConversionOperationalIssue["REQUEST_IDENTITY_CONFLICT"] = "REQUEST_IDENTITY_CONFLICT";
+    WalletConversionOperationalIssue["SNAPSHOT_CONFLICT"] = "SNAPSHOT_CONFLICT";
+    WalletConversionOperationalIssue["PROVIDER_CONFLICT"] = "PROVIDER_CONFLICT";
+    WalletConversionOperationalIssue["LEDGER_CONFLICT"] = "LEDGER_CONFLICT";
+    WalletConversionOperationalIssue["PROJECTION_CONFLICT"] = "PROJECTION_CONFLICT";
+    WalletConversionOperationalIssue["WALLET_INVARIANT_CONFLICT"] = "WALLET_INVARIANT_CONFLICT";
+    WalletConversionOperationalIssue["AUDIT_CONFLICT"] = "AUDIT_CONFLICT";
+    WalletConversionOperationalIssue["UNKNOWN_CONFLICT"] = "UNKNOWN_CONFLICT";
+})(WalletConversionOperationalIssue || (exports.WalletConversionOperationalIssue = WalletConversionOperationalIssue = {}));

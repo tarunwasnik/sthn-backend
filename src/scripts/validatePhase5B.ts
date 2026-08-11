@@ -1,0 +1,22 @@
+import assert from "node:assert/strict";
+import { paymentPricingService } from "../services/financial/paymentPricing.service";
+import { createBookingCompletionTiming, SETTLEMENT_HOLD_MS } from "../services/booking/bookingCompletionTiming.service";
+import { FINANCIAL_LIMITS } from "../constants/financial/financialLimits";
+
+const pricing = paymentPricingService.calculateStandardPricing({ serviceAmount: 100_000, currency: "INR" });
+assert.deepEqual(pricing.customerFeeAmount, 5_000);
+assert.deepEqual(pricing.grossEscrowAmount, 105_000);
+const odd = paymentPricingService.calculateStandardPricing({ serviceAmount: 101, currency: "INR" });
+assert.equal(odd.customerFeeAmount, 5);
+assert.equal(odd.grossEscrowAmount, 106);
+const minimum = paymentPricingService.calculateStandardPricing({ serviceAmount: FINANCIAL_LIMITS.MIN_TRANSACTION_AMOUNT, currency: "INR" });
+assert.equal(minimum.serviceAmount, FINANCIAL_LIMITS.MIN_TRANSACTION_AMOUNT);
+const maxAcceptedServiceAmount = 952_380_952_380;
+const maximum = paymentPricingService.calculateStandardPricing({ serviceAmount: maxAcceptedServiceAmount, currency: "INR" });
+assert.equal(maximum.grossEscrowAmount, FINANCIAL_LIMITS.MAX_TRANSACTION_AMOUNT);
+assert.throws(() => paymentPricingService.calculateStandardPricing({ serviceAmount: maxAcceptedServiceAmount + 1, currency: "INR" }));
+assert.throws(() => paymentPricingService.calculateStandardPricing({ serviceAmount: -1, currency: "INR" }));
+const completedAt = new Date("2026-01-01T00:00:00.000Z");
+const timing = createBookingCompletionTiming(completedAt);
+assert.equal(timing.settlementEligibleAt.getTime() - timing.completedAt.getTime(), SETTLEMENT_HOLD_MS);
+console.log("Phase 5B focused assertions passed.");

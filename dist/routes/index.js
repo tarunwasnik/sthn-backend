@@ -12,6 +12,7 @@ const system_routes_1 = __importDefault(require("./system.routes"));
 const operations_routes_1 = __importDefault(require("./operations.routes"));
 const auth_controller_1 = require("../controllers/auth.controller");
 const public_routes_1 = __importDefault(require("./public.routes"));
+const adminMode_routes_1 = __importDefault(require("./adminMode.routes"));
 const router = (0, express_1.Router)();
 router.use("/auth", auth_routes_1.default);
 // mount AFTER auth routes, BEFORE v1/admin
@@ -19,6 +20,7 @@ router.use("/public", public_routes_1.default);
 router.use("/v1", v1_1.default);
 // Admin Control Plane
 router.use("/admin/control-plane", controlPlane_routes_1.default);
+router.use("/admin", adminMode_routes_1.default);
 // System Dashboard (Phase 31.3)
 router.use("/admin/system", system_routes_1.default);
 // Operations Dashboard (Phase 31.4)

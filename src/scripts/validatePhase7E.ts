@@ -1,0 +1,3 @@
+import fs from "fs"; import path from "path";
+const root = path.resolve(__dirname, "../.."); const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8"); const need = (file: string, value: string) => { if (!read(file).includes(value)) throw new Error(`${file} missing ${value}`); };
+need("src/models/internalTopUpFunding.model.ts", "topUpRequestId"); need("src/services/financial/internalTopUpFunding.service.ts", "ProviderEventService.recordEvent"); need("src/services/financial/topUpFundingOrchestrator.service.ts", "startProcessingApproved"); need("src/routes/v1/admin.financial.routes.ts", "start-processing"); console.log("Phase 7E static validation passed.");

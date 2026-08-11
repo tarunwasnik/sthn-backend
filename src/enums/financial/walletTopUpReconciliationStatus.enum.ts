@@ -1,0 +1,8 @@
+export enum WalletTopUpReconciliationStatus {
+  OPEN = "OPEN",
+  RETRY_SCHEDULED = "RETRY_SCHEDULED",
+  IN_PROGRESS = "IN_PROGRESS",
+  RESOLVED = "RESOLVED",
+  ACKNOWLEDGED = "ACKNOWLEDGED",
+  FAILED = "FAILED",
+}

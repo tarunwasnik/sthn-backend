@@ -9,7 +9,7 @@ const creatorService_model_1 = require("../../models/creatorService.model");
 const getPublicCreatorSlots = async (req, res) => {
     try {
         const { slug } = req.params;
-        const { date } = req.query;
+        const { date, serviceId } = req.query;
         if (!slug) {
             return res.status(400).json({
                 message: "Creator slug is required",
@@ -18,6 +18,11 @@ const getPublicCreatorSlots = async (req, res) => {
         if (!date) {
             return res.status(400).json({
                 message: "Date query parameter is required",
+            });
+        }
+        if (!serviceId) {
+            return res.status(400).json({
+                message: "serviceId query parameter is required",
             });
         }
         const creator = await creatorProfile_model_1.CreatorProfile.findOne({
@@ -36,7 +41,11 @@ const getPublicCreatorSlots = async (req, res) => {
         const endOfDay = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
         const availability = await availability_model_1.Availability.find({
             creatorId: creator.userId,
-            date: { $gte: startOfDay, $lte: endOfDay },
+            serviceId,
+            date: {
+                $gte: startOfDay,
+                $lte: endOfDay,
+            },
             status: "ACTIVE",
         });
         if (availability.length === 0) {
@@ -66,6 +75,7 @@ const getPublicCreatorSlots = async (req, res) => {
                 durationMinutes: service?.durationMinutes || null,
                 startTime: slot.startTime,
                 endTime: slot.endTime,
+                timezone: slot.timezone,
             };
         });
         return res.json({

@@ -36,6 +36,9 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Booking = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
+const bookingTerminationType_enum_1 = require("../enums/booking/bookingTerminationType.enum");
+const paymentMethod_enum_1 = require("../enums/financial/paymentMethod.enum");
+const bookingWalletCaptureCause_enum_1 = require("../enums/financial/bookingWalletCaptureCause.enum");
 const BookingSchema = new mongoose_1.Schema({
     slotIds: [
         {
@@ -62,6 +65,18 @@ const BookingSchema = new mongoose_1.Schema({
         required: true,
         index: true,
     },
+    paymentId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "Payment",
+        index: true,
+    },
+    bookingReference: { type: String, trim: true, immutable: true },
+    paymentMethod: { type: String, enum: Object.values(paymentMethod_enum_1.PaymentMethod), immutable: true },
+    paymentReference: { type: String, trim: true },
+    reservationReference: { type: String, trim: true },
+    fundsReservedAt: { type: Date },
+    bookingRequestKey: { type: String, trim: true, immutable: true, select: false },
+    bookingRequestFingerprint: { type: String, trim: true, immutable: true, select: false },
     serviceTitle: {
         type: String,
         required: true,
@@ -138,10 +153,62 @@ const BookingSchema = new mongoose_1.Schema({
         type: Date,
         index: true,
     },
+    serviceAmount: {
+        type: Number, required: true, immutable: true, min: 1,
+        validate: { validator: Number.isSafeInteger,
+            message: "Service amount must be a safe integer." },
+    },
+    platformFeeAmount: {
+        type: Number, required: true, immutable: true, min: 0,
+        validate: { validator: Number.isSafeInteger,
+            message: "Platform fee amount must be a safe integer." },
+    },
+    commissionAmount: {
+        type: Number, required: true, immutable: true, min: 0,
+        validate: { validator: Number.isSafeInteger,
+            message: "Commission amount must be a safe integer." },
+    },
+    creatorAmount: {
+        type: Number, required: true, immutable: true, min: 1,
+        validate: { validator: Number.isSafeInteger,
+            message: "Creator amount must be a safe integer." },
+    },
+    totalAmount: {
+        type: Number, required: true, immutable: true, min: 1,
+        validate: { validator: Number.isSafeInteger,
+            message: "Total amount must be a safe integer." },
+    },
+    completionCause: { type: String, enum: Object.values(bookingWalletCaptureCause_enum_1.BookingWalletCaptureCause), index: true },
+    completedByType: { type: String, enum: Object.values(bookingWalletCaptureCause_enum_1.BookingCompletionActorType) },
+    completedById: { type: mongoose_1.Schema.Types.ObjectId, ref: "User" },
+    completionOperationKey: { type: String, trim: true },
+    settlementEligibleAt: { type: Date, index: true },
+    settlementId: { type: mongoose_1.Schema.Types.ObjectId, ref: "Settlement", index: true },
+    settledAt: { type: Date, index: true },
+    terminationType: { type: String, enum: Object.values(bookingTerminationType_enum_1.BookingTerminationType), index: true },
+    terminatedByType: { type: String, enum: Object.values(bookingTerminationType_enum_1.BookingTerminationActorType) },
+    terminatedById: { type: mongoose_1.Schema.Types.ObjectId, ref: "User" },
+    terminationReason: { type: String, trim: true, maxlength: 500 },
+    terminationOperationKey: { type: String, trim: true },
+    terminatedAt: { type: Date, index: true },
+    lifecycleVersion: { type: Number, required: true, default: 0, min: 0 },
 }, { timestamps: true });
 /* Indexes */
 BookingSchema.index({ creatorId: 1, status: 1 });
 BookingSchema.index({ userId: 1, status: 1 });
 BookingSchema.index({ slotIds: 1 });
-BookingSchema.index({ serviceId: 1 });
+BookingSchema.index({ userId: 1, bookingRequestKey: 1 }, {
+    unique: true,
+    partialFilterExpression: { bookingRequestKey: { $type: "string" } },
+});
+BookingSchema.index({ bookingReference: 1 }, {
+    unique: true,
+    partialFilterExpression: { bookingReference: { $type: "string" } },
+});
+BookingSchema.index({ reservationReference: 1 }, {
+    unique: true,
+    partialFilterExpression: { reservationReference: { $type: "string" } },
+});
+BookingSchema.index({ terminationOperationKey: 1 }, { unique: true, partialFilterExpression: { terminationOperationKey: { $type: "string" } } });
+BookingSchema.index({ completionOperationKey: 1 }, { unique: true, partialFilterExpression: { completionOperationKey: { $type: "string" } } });
 exports.Booking = mongoose_1.default.model("Booking", BookingSchema);

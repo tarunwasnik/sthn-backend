@@ -9,6 +9,8 @@ const adminMode_service_1 = require("../services/adminMode.service");
  */
 const operationsModeOnly = async (req, res, next) => {
     try {
+        console.log("========== OPERATIONS ==========");
+        console.log("req.user =", req.user);
         const user = req.user;
         if (!user) {
             return res.status(401).json({ message: "Unauthorized" });
@@ -18,6 +20,8 @@ const operationsModeOnly = async (req, res, next) => {
             return res.status(403).json({ message: "Admin access required" });
         }
         const mode = await (0, adminMode_service_1.getAdminMode)(user.id);
+        console.log("User:", user.id);
+        console.log("Mode:", mode);
         if (mode !== "OPERATIONS") {
             return res.status(403).json({
                 message: "OPERATIONS mode required",

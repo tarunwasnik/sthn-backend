@@ -9,9 +9,13 @@ const bookingInteraction_controller_1 = require("../../controllers/bookingIntera
 const completeBooking_controller_1 = require("../../controllers/completeBooking.controller");
 const router = (0, express_1.Router)();
 /* =========================================================
-   USER BOOKINGS (NEW)
+   USER BOOKINGS
 ========================================================= */
 router.get("/user", auth_middleware_1.protect, booking_controller_1.getUserBookings);
+/* =========================================================
+   CREATOR JOURNEY ELIGIBILITY
+========================================================= */
+router.get("/creator-journey-eligibility", auth_middleware_1.protect, booking_controller_1.checkCreatorJourneyEligibility);
 /* =========================================================
    BOOKING REQUEST
 ========================================================= */

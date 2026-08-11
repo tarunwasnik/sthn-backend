@@ -64,6 +64,11 @@ const CreatorServiceSchema = new mongoose_1.Schema({
         required: true,
         min: 0,
     },
+    currency: {
+        type: String,
+        required: true,
+        trim: true,
+    },
     media: {
         type: [String],
         default: [],

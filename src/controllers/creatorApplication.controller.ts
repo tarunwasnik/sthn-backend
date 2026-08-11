@@ -84,6 +84,8 @@ export const applyForCreator = async (req: Request, res: Response) => {
     throw new AppError("Creator application already exists", 400);
   }
 
+  /* ================= MEDIA INPUT ================= */
+
   const {
     displayName,
     primaryCategory,
@@ -93,9 +95,6 @@ export const applyForCreator = async (req: Request, res: Response) => {
     country,
     city,
     languages,
-
-    /* ================= MEDIA INPUT ================= */
-
     avatarUrl,
     coverUrl,
     media,

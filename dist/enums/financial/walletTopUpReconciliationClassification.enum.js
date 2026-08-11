@@ -1,0 +1,24 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.WalletTopUpReconciliationClassification = void 0;
+var WalletTopUpReconciliationClassification;
+(function (WalletTopUpReconciliationClassification) {
+    WalletTopUpReconciliationClassification["HEALTHY_COMPLETED"] = "HEALTHY_COMPLETED";
+    WalletTopUpReconciliationClassification["RETRYABLE_PROVIDER_PENDING"] = "RETRYABLE_PROVIDER_PENDING";
+    WalletTopUpReconciliationClassification["PROVIDER_FAILED"] = "PROVIDER_FAILED";
+    WalletTopUpReconciliationClassification["ACCOUNTING_NOT_STARTED"] = "ACCOUNTING_NOT_STARTED";
+    WalletTopUpReconciliationClassification["LEDGER_ONLY"] = "LEDGER_ONLY";
+    WalletTopUpReconciliationClassification["LEDGER_AND_PROJECTION"] = "LEDGER_AND_PROJECTION";
+    WalletTopUpReconciliationClassification["COMPLETION_PENDING"] = "COMPLETION_PENDING";
+    WalletTopUpReconciliationClassification["COMPLETED_VALID"] = "COMPLETED_VALID";
+    WalletTopUpReconciliationClassification["COMPLETED_CORRUPTED"] = "COMPLETED_CORRUPTED";
+    WalletTopUpReconciliationClassification["ORPHAN_PROJECTION"] = "ORPHAN_PROJECTION";
+    WalletTopUpReconciliationClassification["LEDGER_CONFLICT"] = "LEDGER_CONFLICT";
+    WalletTopUpReconciliationClassification["PROJECTION_CONFLICT"] = "PROJECTION_CONFLICT";
+    WalletTopUpReconciliationClassification["REQUEST_LINK_CONFLICT"] = "REQUEST_LINK_CONFLICT";
+    WalletTopUpReconciliationClassification["WALLET_CONFLICT"] = "WALLET_CONFLICT";
+    WalletTopUpReconciliationClassification["AMOUNT_CONFLICT"] = "AMOUNT_CONFLICT";
+    WalletTopUpReconciliationClassification["CURRENCY_CONFLICT"] = "CURRENCY_CONFLICT";
+    WalletTopUpReconciliationClassification["TRANSACTION_CONFLICT"] = "TRANSACTION_CONFLICT";
+    WalletTopUpReconciliationClassification["UNKNOWN_INTEGRITY_FAILURE"] = "UNKNOWN_INTEGRITY_FAILURE";
+})(WalletTopUpReconciliationClassification || (exports.WalletTopUpReconciliationClassification = WalletTopUpReconciliationClassification = {}));

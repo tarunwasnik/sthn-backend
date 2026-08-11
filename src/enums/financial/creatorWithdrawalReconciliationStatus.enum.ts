@@ -1,0 +1,8 @@
+export enum CreatorWithdrawalReconciliationStatus {
+  OPEN = "OPEN",
+  RETRY_SCHEDULED = "RETRY_SCHEDULED",
+  IN_PROGRESS = "IN_PROGRESS",
+  ACKNOWLEDGED = "ACKNOWLEDGED",
+  RESOLVED = "RESOLVED",
+  FAILED = "FAILED",
+}

@@ -9,6 +9,10 @@ import {
   getUserBookings,
   checkCreatorJourneyEligibility,
 } from "../../controllers/booking.controller";
+import {
+  getBookingFunding,
+  previewBookingFunding,
+} from "../../controllers/bookingFunding.controller";
 
 import { cancelBookingByUser } from "../../controllers/userCancelBooking.controller";
 
@@ -26,6 +30,12 @@ const router = Router();
 ========================================================= */
 
 router.get("/user", protect, getUserBookings);
+
+/* =========================================================
+   SAFE BOOKING FINANCIAL READS
+========================================================= */
+router.post("/pricing-preview", protect, previewBookingFunding);
+router.get("/:bookingId/funding", protect, getBookingFunding);
 
 /* =========================================================
    CREATOR JOURNEY ELIGIBILITY

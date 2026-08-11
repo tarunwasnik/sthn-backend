@@ -1,3 +1,3 @@
 "use strict";
-//beckend/src/public/dtos/CreatorPublicCard.dto.ts
+// backend/src/public/dtos/CreatorPublicCard.dto.ts
 Object.defineProperty(exports, "__esModule", { value: true });

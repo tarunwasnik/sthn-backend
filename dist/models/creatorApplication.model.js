@@ -41,8 +41,8 @@ const CreatorApplicationSchema = new mongoose_1.Schema({
         type: mongoose_1.Schema.Types.ObjectId,
         ref: "User",
         required: true,
-        index: true,
         unique: true,
+        index: true,
     },
     displayName: {
         type: String,
@@ -80,7 +80,20 @@ const CreatorApplicationSchema = new mongoose_1.Schema({
         required: true,
         trim: true,
     },
-    verificationMedia: {
+    languages: {
+        type: [String],
+        default: [],
+    },
+    /* ================= MEDIA ================= */
+    avatarUrl: {
+        type: String,
+        default: null,
+    },
+    coverUrl: {
+        type: String,
+        default: null,
+    },
+    media: {
         type: [String],
         default: [],
     },
@@ -88,6 +101,16 @@ const CreatorApplicationSchema = new mongoose_1.Schema({
         type: String,
         enum: ["draft", "submitted", "approved", "rejected"],
         default: "draft",
+        index: true,
+    },
+    rejectionReason: {
+        type: String,
+        trim: true,
+        default: "",
+    },
+    submittedForReviewAt: {
+        type: Date,
+        default: null,
         index: true,
     },
 }, { timestamps: true });

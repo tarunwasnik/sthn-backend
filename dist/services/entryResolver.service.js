@@ -9,6 +9,7 @@ const resolveEntry = (user) => {
     const status = user.status.toLowerCase();
     const role = user.role.toUpperCase();
     const creatorStatus = user.creatorStatus?.toLowerCase?.() ?? "none";
+    const userId = user._id.toString();
     // 🚫 Hard blocks
     if (status === "suspended") {
         throw new Error("Account suspended");
@@ -21,6 +22,7 @@ const resolveEntry = (user) => {
         return {
             entryType: "ONBOARDING",
             entryRoute: "/onboarding",
+            userId,
         };
     }
     // 👑 Admin routing
@@ -28,6 +30,7 @@ const resolveEntry = (user) => {
         return {
             entryType: "ADMIN",
             entryRoute: "/admin/entry",
+            userId,
         };
     }
     // 🎯 Approved creators
@@ -35,19 +38,14 @@ const resolveEntry = (user) => {
         return {
             entryType: "CREATOR",
             entryRoute: "/dashboard/creator",
-        };
-    }
-    // ⏳ Creator application pending
-    if (role === "USER" && creatorStatus === "pending") {
-        return {
-            entryType: "CREATOR_PENDING",
-            entryRoute: "/creator-pending",
+            userId,
         };
     }
     // 👤 Default user dashboard
     return {
         entryType: "USER",
         entryRoute: "/dashboard/user",
+        userId,
     };
 };
 exports.resolveEntry = resolveEntry;

@@ -11,6 +11,11 @@ const slot_model_1 = require("../models/slot.model");
 const creatorProfile_model_1 = require("../models/creatorProfile.model");
 const userProfile_model_1 = require("../models/userProfile.model");
 const creatorStatus_1 = require("../constants/creatorStatus");
+const creatorService_model_1 = require("../models/creatorService.model");
+const bookingTerminationType_enum_1 = require("../enums/booking/bookingTerminationType.enum");
+const bookingFinancialTermination_service_1 = require("../services/financial/bookingFinancialTermination.service");
+const User_1 = __importDefault(require("../models/User"));
+const accountGovernanceResolver_service_1 = require("../services/accountGovernance/accountGovernanceResolver.service");
 /* =========================================================
    GET CREATOR BOOKINGS (EXTENDED WITH USER + SLOTS)
 ========================================================= */
@@ -62,12 +67,32 @@ const getCreatorBookings = async (req, res) => {
             _id: { $in: allSlotIds },
         }).lean();
         const slotMap = new Map(slots.map((s) => [String(s._id), s]));
+        /* ================= SERVICE ENRICH ================= */
+        const serviceIds = [
+            ...new Set(bookings
+                .map((b) => String(b.serviceId))
+                .filter(Boolean)),
+        ];
+        const services = await creatorService_model_1.CreatorService.find({
+            _id: { $in: serviceIds },
+        }).lean();
+        const serviceMap = new Map(services.map((s) => [
+            String(s._id),
+            s,
+        ]));
         /* ================= FINAL MERGE ================= */
         const enrichedBookings = bookings.map((b) => {
             const profile = userMap.get(String(b.userId));
+            const service = serviceMap.get(String(b.serviceId));
             return {
                 ...b,
+                service: {
+                    _id: service?._id || null,
+                    title: service?.title || "Untitled",
+                    media: service?.media || [],
+                },
                 user: {
+                    _id: String(b.userId),
                     displayName: profile?.username || "Unknown",
                     avatarUrl: profile?.profilePhotos?.[0] || null,
                 },
@@ -92,7 +117,8 @@ exports.getCreatorBookings = getCreatorBookings;
 ========================================================= */
 const decideBooking = async (req, res) => {
     const user = req.user;
-    let { bookingId, decision } = req.body;
+    const bookingId = req.params.bookingId ?? req.body.bookingId;
+    let { decision } = req.body;
     if (!user) {
         return res.status(401).json({ message: "Unauthorized" });
     }
@@ -123,6 +149,38 @@ const decideBooking = async (req, res) => {
             message: "Creator profile is not active",
         });
     }
+    if (decision === "REJECT") {
+        try {
+            const result = await bookingFinancialTermination_service_1.bookingFinancialTerminationService.terminateBookingFinancially({
+                bookingId,
+                actorId: user.id,
+                actorType: bookingTerminationType_enum_1.BookingTerminationActorType.CREATOR,
+                terminationType: bookingTerminationType_enum_1.BookingTerminationType.CREATOR_REJECTED,
+            });
+            return res.status(200).json({ message: "Booking rejected successfully", ...result });
+        }
+        catch (error) {
+            return res.status(error.statusCode ?? 400).json({ code: error.code, message: error.message });
+        }
+    }
+    const creatorUser = await User_1.default.findById(user.id);
+    if (!creatorUser) {
+        return res.status(401).json({
+            message: "Unauthorized",
+        });
+    }
+    const creatorGovernance = (0, accountGovernanceResolver_service_1.resolveAccountGovernance)(creatorUser);
+    if (creatorGovernance.blocksAcceptingBookings) {
+        return res.status(403).json({
+            message: "Your account is currently restricted from accepting booking requests.",
+            ...(creatorGovernance.isCreatorCooldownActive &&
+                creatorGovernance.cooldownUntil
+                ? {
+                    cooldownUntil: creatorGovernance.cooldownUntil,
+                }
+                : {}),
+        });
+    }
     const session = await mongoose_1.default.startSession();
     try {
         session.startTransaction();
@@ -135,12 +193,6 @@ const decideBooking = async (req, res) => {
             throw new Error("Booking not found or already processed");
         }
         if (booking.expiresAt && booking.expiresAt.getTime() < Date.now()) {
-            await slot_model_1.Slot.updateMany({
-                _id: { $in: booking.slotIds },
-                status: "LOCKED",
-            }, { status: "AVAILABLE" }, { session });
-            booking.status = "EXPIRED";
-            await booking.save({ session });
             throw new Error("Booking request has expired");
         }
         const slots = await slot_model_1.Slot.find({ _id: { $in: booking.slotIds } }, null, { session });
@@ -166,17 +218,7 @@ const decideBooking = async (req, res) => {
             booking.status = "CONFIRMED";
         }
         else {
-            const slotUpdate = await slot_model_1.Slot.updateMany({
-                _id: { $in: booking.slotIds },
-                status: "LOCKED",
-            }, { status: "AVAILABLE" }, { session });
-            if (slotUpdate.modifiedCount !== booking.slotIds.length) {
-                throw new Error("Failed to release all slots");
-            }
-            booking.status = "REJECTED";
-            if (booking.paymentStatus === "PAID") {
-                booking.paymentStatus = "REFUNDED";
-            }
+            throw new Error("Creator rejection must be processed by the Financial termination service.");
         }
         await booking.save({ session });
         await session.commitTransaction();

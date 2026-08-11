@@ -61,6 +61,11 @@ const CreatorProfileSchema = new mongoose_1.Schema({
         type: String,
         default: null,
     },
+    // ✅ ADDED COVER FIELD (CRITICAL FIX)
+    coverUrl: {
+        type: String,
+        default: null,
+    },
     media: {
         type: [String],
         default: [],

@@ -5,6 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.decideAppeal = exports.getAuditLogs = exports.getEscalatedDisputes = exports.resolveDispute = exports.adminCancelBooking = exports.rejectCreator = exports.approveCreator = exports.resetUserTrust = exports.banUser = exports.activateUser = exports.suspendUser = void 0;
+const bookingTerminationType_enum_1 = require("../enums/booking/bookingTerminationType.enum");
+const bookingFinancialTermination_service_1 = require("../services/financial/bookingFinancialTermination.service");
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
 const creatorProfile_model_1 = require("../models/creatorProfile.model");
@@ -12,9 +14,7 @@ const creatorStatus_1 = require("../constants/creatorStatus");
 const roles_1 = require("../constants/roles");
 const AppError_1 = require("../utils/AppError");
 const booking_model_1 = require("../models/booking.model");
-const slot_model_1 = require("../models/slot.model");
 const dispute_model_1 = require("../models/dispute.model");
-const auditLog_model_1 = require("../models/auditLog.model");
 const appeal_model_1 = require("../models/appeal.model");
 const auditLog_service_1 = require("../services/auditLog.service");
 const disputeLock_service_1 = require("../services/disputeLock.service");
@@ -174,40 +174,14 @@ exports.rejectCreator = rejectCreator;
 const adminCancelBooking = async (req, res) => {
     const adminId = req.user.id;
     const { bookingId } = req.params;
-    const { refund } = req.body;
-    const session = await mongoose_1.default.startSession();
-    try {
-        session.startTransaction();
-        const booking = await booking_model_1.Booking.findById(bookingId).session(session);
-        if (!booking)
-            throw new AppError_1.AppError("Booking not found", 404);
-        const before = booking.toObject();
-        booking.status = "CANCELLED";
-        booking.paymentStatus = refund ? "REFUNDED" : "PAID";
-        await booking.save({ session });
-        await slot_model_1.Slot.updateMany({ _id: { $in: booking.slotIds } }, { status: "AVAILABLE" }, { session });
-        await (0, auditLog_service_1.createAuditLog)({
-            actorType: "ADMIN",
-            actorId: new mongoose_1.default.Types.ObjectId(adminId),
-            action: "BOOKING_CANCELLED_BY_ADMIN",
-            entityType: "BOOKING",
-            entityId: booking._id,
-            before,
-            after: {
-                status: booking.status,
-                paymentStatus: booking.paymentStatus,
-            },
-        });
-        await session.commitTransaction();
-        res.json({ message: "Booking cancelled by admin" });
-    }
-    catch (err) {
-        await session.abortTransaction();
-        throw err;
-    }
-    finally {
-        session.endSession();
-    }
+    const result = await bookingFinancialTermination_service_1.bookingFinancialTerminationService.terminateBookingFinancially({
+        bookingId,
+        actorId: adminId,
+        actorType: bookingTerminationType_enum_1.BookingTerminationActorType.ADMIN,
+        terminationType: bookingTerminationType_enum_1.BookingTerminationType.ADMIN_CANCELLED,
+        reason: typeof req.body.reason === "string" ? req.body.reason : undefined,
+    });
+    return res.json({ message: "Booking cancelled by admin", ...result });
 };
 exports.adminCancelBooking = adminCancelBooking;
 /* ================= DISPUTE RESOLUTION (LOCKED) ================= */
@@ -230,10 +204,9 @@ const resolveDispute = async (req, res) => {
         const booking = await booking_model_1.Booking.findById(dispute.bookingId).session(session);
         if (!booking)
             throw new AppError_1.AppError("Booking not found", 404);
-        if (action === "REFUND_USER")
-            booking.paymentStatus = "REFUNDED";
-        if (action === "PAY_CREATOR")
-            booking.paymentStatus = "PAID";
+        if (action !== "NO_ACTION") {
+            throw new AppError_1.AppError("Dispute financial outcomes are deferred to the Financial termination and refund-accounting phases", 409);
+        }
         dispute.status = action === "NO_ACTION" ? "REJECTED" : "RESOLVED";
         dispute.resolution = {
             action,
@@ -281,8 +254,16 @@ const getEscalatedDisputes = async (req, res) => {
 exports.getEscalatedDisputes = getEscalatedDisputes;
 /* ================= AUDIT LOG VIEW ================= */
 const getAuditLogs = async (req, res) => {
-    const logs = await auditLog_model_1.AuditLog.find().sort({ createdAt: -1 }).lean();
-    res.json({ logs });
+    const result = await (0, auditLog_service_1.queryAuditLogs)(req.query);
+    res.json({
+        logs: result.logs.map((log) => ({
+            auditReference: log._id.toString(), category: log.category, action: log.action,
+            actor: { type: log.actorType, id: log.actorId?.toString(), reference: log.actorReference },
+            financialContext: log.financialContext, transition: log.transition,
+            metadata: log.metadata, createdAt: log.createdAt,
+        })),
+        pagination: result.pagination,
+    });
 };
 exports.getAuditLogs = getAuditLogs;
 /* ================= APPEAL DECISION ================= */
@@ -308,13 +289,8 @@ const decideAppeal = async (req, res) => {
             throw new AppError_1.AppError("Linked booking not found", 404);
         const beforeAppeal = appeal.toObject();
         const beforeDispute = dispute.toObject();
-        if (action === "REVERSE_DECISION") {
-            if (dispute.resolution?.action === "REFUND_USER") {
-                booking.paymentStatus = "PAID";
-            }
-            if (dispute.resolution?.action === "PAY_CREATOR") {
-                booking.paymentStatus = "REFUNDED";
-            }
+        if (action === "REVERSE_DECISION" && dispute.resolution?.action !== "NO_ACTION") {
+            throw new AppError_1.AppError("Financial dispute reversal is deferred to later Financial Domain phases", 409);
         }
         appeal.status = action === "REVERSE_DECISION" ? "UPHELD" : "REJECTED";
         appeal.decision = {

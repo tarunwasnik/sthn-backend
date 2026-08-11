@@ -3,9 +3,10 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateSlotsForAvailability = void 0;
 const slot_model_1 = require("../models/slot.model");
+const luxon_1 = require("luxon");
 const MIN_SLOT_DURATION = 30;
 const MAX_SLOT_DURATION = 480;
-const generateSlotsForAvailability = async ({ availabilityId, creatorId, serviceId, date, startTime, endTime, slotDurationMinutes, price, }) => {
+const generateSlotsForAvailability = async ({ availabilityId, creatorId, serviceId, date, startTime, endTime, timezone, slotDurationMinutes, price, session, }) => {
     /* =========================================================
        SLOT DURATION VALIDATION
     ========================================================= */
@@ -24,29 +25,55 @@ const generateSlotsForAvailability = async ({ availabilityId, creatorId, service
     }
     /* ========================================================= */
     const slots = [];
-    const [startHour, startMinute] = startTime.split(":").map(Number);
-    const [endHour, endMinute] = endTime.split(":").map(Number);
-    const startTotalMinutes = startHour * 60 + startMinute;
-    const endTotalMinutes = endHour * 60 + endMinute;
-    let currentMinutes = startTotalMinutes;
-    while (currentMinutes + slotDurationMinutes <= endTotalMinutes) {
-        const slotStart = new Date(date);
-        slotStart.setHours(Math.floor(currentMinutes / 60), currentMinutes % 60, 0, 0);
-        const slotEnd = new Date(slotStart);
-        slotEnd.setMinutes(slotEnd.getMinutes() + slotDurationMinutes);
+    const availabilityDate = luxon_1.DateTime.fromJSDate(date);
+    const [startHour, startMinute] = startTime
+        .split(":")
+        .map(Number);
+    const [endHour, endMinute] = endTime
+        .split(":")
+        .map(Number);
+    console.log("timezone:", timezone);
+    console.log("date:", date);
+    console.log("fromJSDate:", luxon_1.DateTime.fromJSDate(date).toISO());
+    console.log("setZone:", luxon_1.DateTime.fromJSDate(date)
+        .setZone(timezone)
+        .toISO());
+    let currentSlotStart = luxon_1.DateTime.fromObject({
+        year: availabilityDate.year,
+        month: availabilityDate.month,
+        day: availabilityDate.day,
+        hour: startHour,
+        minute: startMinute,
+    }, { zone: timezone });
+    const availabilityEnd = luxon_1.DateTime.fromObject({
+        year: availabilityDate.year,
+        month: availabilityDate.month,
+        day: availabilityDate.day,
+        hour: endHour,
+        minute: endMinute,
+    }, { zone: timezone });
+    while (currentSlotStart.plus({
+        minutes: slotDurationMinutes,
+    }) <= availabilityEnd) {
+        const currentSlotEnd = currentSlotStart.plus({
+            minutes: slotDurationMinutes,
+        });
         slots.push({
             availabilityId,
             creatorId,
             serviceId,
-            startTime: slotStart,
-            endTime: slotEnd,
+            startTime: currentSlotStart.toUTC().toJSDate(),
+            endTime: currentSlotEnd.toUTC().toJSDate(),
+            timezone,
             status: "AVAILABLE",
             price,
         });
-        currentMinutes += slotDurationMinutes;
+        currentSlotStart = currentSlotEnd;
     }
     if (slots.length > 0) {
-        await slot_model_1.Slot.insertMany(slots, { ordered: false });
+        await slot_model_1.Slot.insertMany(slots, {
+            session,
+        });
     }
     return slots;
 };

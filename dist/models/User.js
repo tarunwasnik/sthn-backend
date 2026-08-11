@@ -36,8 +36,13 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
 const roles_1 = require("../constants/roles");
+/* =========================================================
+   USER SCHEMA
+========================================================= */
 const UserSchema = new mongoose_1.Schema({
-    // 🔐 Authentication Identity
+    /* =======================================================
+       AUTHENTICATION IDENTITY
+    ======================================================= */
     email: {
         type: String,
         required: true,
@@ -71,19 +76,95 @@ const UserSchema = new mongoose_1.Schema({
         default: "pending_profile",
         index: true,
     },
-    // 🆕 Creator Elevation Lifecycle
+    /* =======================================================
+       CREATOR ELEVATION LIFECYCLE
+    ======================================================= */
     creatorStatus: {
         type: String,
         enum: ["none", "pending", "approved", "rejected"],
         default: "none",
         index: true,
     },
-    // 🔐 Trust & abuse system
+    /* =======================================================
+       TRUST & ABUSE CONTROL
+    ======================================================= */
     abuseScore: {
         type: Number,
         default: 0,
         index: true,
     },
+    /* =======================================================
+       ACCOUNT GOVERNANCE
+    ======================================================= */
+    governanceState: {
+        type: String,
+        enum: [
+            "ACTIVE",
+            "PENDING_SUSPENSION",
+            "SUSPENDED",
+            "PENDING_BAN",
+            "BANNED",
+        ],
+        default: "ACTIVE",
+        index: true,
+    },
+    governanceTriggeredAt: {
+        type: Date,
+        default: null,
+        index: true,
+    },
+    governanceReason: {
+        type: String,
+        default: null,
+    },
+    governanceTriggeredBy: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+        index: true,
+    },
+    /* =======================================================
+       SUSPENSION BOOKING PROTECTION
+    ======================================================= */
+    suspensionProtectedUntil: {
+        type: Date,
+        default: null,
+        index: true,
+    },
+    /* =======================================================
+       BAN WITHDRAWAL LIFECYCLE
+    ======================================================= */
+    banWithdrawalWindowStartedAt: {
+        type: Date,
+        default: null,
+        index: true,
+    },
+    banWithdrawalWindowEndsAt: {
+        type: Date,
+        default: null,
+        index: true,
+    },
+    /* =======================================================
+       UNCLAIMED / RESTRICTED FUNDS
+    ======================================================= */
+    unclaimedBalanceAmount: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
+    unclaimedBalanceCurrency: {
+        type: String,
+        default: null,
+        trim: true,
+        uppercase: true,
+    },
+    unclaimedBalanceRecordedAt: {
+        type: Date,
+        default: null,
+    },
+    /* =======================================================
+       USER COOLDOWN
+    ======================================================= */
     userCooldownUntil: {
         type: Date,
         default: null,
@@ -98,17 +179,46 @@ const UserSchema = new mongoose_1.Schema({
         ref: "User",
         default: null,
     },
+    userCooldownTriggeredAt: {
+        type: Date,
+        default: null,
+        index: true,
+    },
+    /* =======================================================
+       CREATOR COOLDOWN
+    ======================================================= */
     creatorCooldownUntil: {
         type: Date,
         default: null,
         index: true,
     },
-    // 🔑 Admin mode persistence
+    creatorCooldownReason: {
+        type: String,
+        default: null,
+    },
+    creatorCooldownBy: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+    },
+    creatorCooldownTriggeredAt: {
+        type: Date,
+        default: null,
+        index: true,
+    },
+    /* =======================================================
+       ADMIN MODE PERSISTENCE
+    ======================================================= */
     adminMode: {
         type: String,
         enum: ["SYSTEM", "OPERATIONS"],
         default: null,
         index: true,
     },
-}, { timestamps: true });
+}, {
+    timestamps: true,
+});
+/* =========================================================
+   MODEL
+========================================================= */
 exports.default = mongoose_1.default.model("User", UserSchema);

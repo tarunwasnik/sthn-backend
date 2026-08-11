@@ -43,8 +43,15 @@ const getPublicCreatorsData = async (query = {}) => {
                         $match: {
                             $expr: {
                                 $and: [
-                                    { $eq: ["$creatorId", "$$creatorUserId"] },
-                                    { $eq: ["$isActive", true] },
+                                    {
+                                        $eq: [
+                                            "$creatorId",
+                                            "$$creatorUserId",
+                                        ],
+                                    },
+                                    {
+                                        $eq: ["$isActive", true],
+                                    },
                                 ],
                             },
                         },
@@ -53,7 +60,11 @@ const getPublicCreatorsData = async (query = {}) => {
                 as: "activeServices",
             },
         },
-        { $match: { activeServices: { $ne: [] } } },
+        {
+            $match: {
+                activeServices: { $ne: [] },
+            },
+        },
         /* ================= SLOT LOOKUP ================= */
         {
             $lookup: {
@@ -64,9 +75,24 @@ const getPublicCreatorsData = async (query = {}) => {
                         $match: {
                             $expr: {
                                 $and: [
-                                    { $eq: ["$creatorId", "$$creatorUserId"] },
-                                    { $eq: ["$status", "AVAILABLE"] },
-                                    { $gt: ["$startTime", now] },
+                                    {
+                                        $eq: [
+                                            "$creatorId",
+                                            "$$creatorUserId",
+                                        ],
+                                    },
+                                    {
+                                        $eq: [
+                                            "$status",
+                                            "AVAILABLE",
+                                        ],
+                                    },
+                                    {
+                                        $gt: [
+                                            "$startTime",
+                                            now,
+                                        ],
+                                    },
                                 ],
                             },
                         },
@@ -77,16 +103,30 @@ const getPublicCreatorsData = async (query = {}) => {
                 as: "availableSlots",
             },
         },
-        { $match: { availableSlots: { $ne: [] } } },
         /* ================= PRICE + SLOT INFO ================= */
         {
             $addFields: {
-                startingPrice: { $min: "$activeServices.price" },
+                startingPrice: {
+                    $min: "$activeServices.price",
+                },
                 nextAvailableSlot: {
-                    $arrayElemAt: ["$availableSlots.startTime", 0],
+                    $ifNull: [
+                        {
+                            $arrayElemAt: [
+                                "$availableSlots.startTime",
+                                0,
+                            ],
+                        },
+                        null,
+                    ],
                 },
                 isAvailable: {
-                    $gt: [{ $size: "$availableSlots" }, 0],
+                    $gt: [
+                        {
+                            $size: "$availableSlots",
+                        },
+                        0,
+                    ],
                 },
             },
         },
@@ -118,7 +158,10 @@ const getPublicCreatorsData = async (query = {}) => {
                 slug: 1,
                 displayName: 1,
                 avatarUrl: 1,
+                coverUrl: 1,
+                media: 1,
                 primaryCategory: 1,
+                categories: 1,
                 rating: 1,
                 reviewCount: 1,
                 country: 1,
@@ -135,23 +178,48 @@ const getPublicCreatorsData = async (query = {}) => {
     /* ================= SORTING ================= */
     const sortOption = query.sort || "recommended";
     if (sortOption === "price_asc") {
-        basePipeline.push({ $sort: { startingPrice: 1 } });
+        basePipeline.push({
+            $sort: {
+                isAvailable: -1,
+                startingPrice: 1,
+            },
+        });
     }
     else if (sortOption === "price_desc") {
-        basePipeline.push({ $sort: { startingPrice: -1 } });
+        basePipeline.push({
+            $sort: {
+                isAvailable: -1,
+                startingPrice: -1,
+            },
+        });
     }
     else if (sortOption === "rating") {
         basePipeline.push({
-            $sort: { rating: -1, reviewCount: -1 },
+            $sort: {
+                isAvailable: -1,
+                rating: -1,
+                reviewCount: -1,
+            },
         });
     }
     else {
+        /* DEFAULT:
+           AVAILABLE creators first
+        */
         basePipeline.push({
-            $sort: { rating: -1, reviewCount: -1 },
+            $sort: {
+                isAvailable: -1,
+                rating: -1,
+                reviewCount: -1,
+                createdAt: -1,
+            },
         });
     }
     /* ================= COUNT ================= */
-    const countPipeline = [...basePipeline, { $count: "total" }];
+    const countPipeline = [
+        ...basePipeline,
+        { $count: "total" },
+    ];
     const countResult = await creatorProfile_model_1.CreatorProfile.aggregate(countPipeline);
     const total = countResult[0]?.total || 0;
     /* ================= PAGINATION ================= */
@@ -166,8 +234,14 @@ const getPublicCreatorsData = async (query = {}) => {
             id: c._id.toString(),
             slug: c.slug,
             displayName: c.displayName,
-            avatarUrl: c.avatarUrl || "/avatars/default.png",
+            avatarUrl: c.avatarUrl ||
+                "/avatars/default.png",
+            coverUrl: c.coverUrl ||
+                c.media?.[0] ||
+                "/covers/default.png",
+            media: c.media || [],
             primaryCategory: c.primaryCategory,
+            categories: c.categories || [],
             rating: c.rating,
             reviewCount: c.reviewCount,
             country: c.country,
@@ -203,9 +277,15 @@ const getPublicCreatorBySlugData = async (slug) => {
     if (profile?.dateOfBirth) {
         const today = new Date();
         const birth = new Date(profile.dateOfBirth);
-        age = today.getFullYear() - birth.getFullYear();
-        const m = today.getMonth() - birth.getMonth();
-        if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+        age =
+            today.getFullYear() -
+                birth.getFullYear();
+        const m = today.getMonth() -
+            birth.getMonth();
+        if (m < 0 ||
+            (m === 0 &&
+                today.getDate() <
+                    birth.getDate())) {
             age--;
         }
     }
@@ -219,8 +299,12 @@ const getPublicCreatorBySlugData = async (slug) => {
         id: creator._id.toString(),
         slug: creator.slug,
         displayName: creator.displayName,
-        avatarUrl: creator.avatarUrl || "/avatars/default.png",
-        coverImageUrl: "/covers/default.png",
+        avatarUrl: creator.avatarUrl ||
+            "/avatars/default.png",
+        coverUrl: creator.coverUrl ||
+            creator.media?.[0] ||
+            "/covers/default.png",
+        media: creator.media || [],
         bio: creator.bio || "",
         categories: creator.categories || [],
         primaryCategory: creator.primaryCategory,
@@ -237,6 +321,8 @@ const getPublicCreatorBySlugData = async (slug) => {
             description: s.description,
             durationMinutes: s.durationMinutes,
             price: s.price,
+            media: s.media || [],
+            thumbnailUrl: s.thumbnailUrl || null,
         })),
     };
 };
@@ -271,7 +357,8 @@ const getPublicCreatorSlotsData = async (slug, date) => {
         serviceId: slot.serviceId._id,
         serviceTitle: slot.serviceId.title,
         price: slot.serviceId.price,
-        durationMinutes: slot.serviceId.durationMinutes,
+        durationMinutes: slot.serviceId
+            .durationMinutes,
         startTime: slot.startTime,
         endTime: slot.endTime,
     }));

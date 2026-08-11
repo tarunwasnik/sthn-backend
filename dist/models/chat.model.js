@@ -1,5 +1,5 @@
 "use strict";
-//backend/src/models/chat.model.ts
+// backend/src/models/chat.model.ts
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -53,10 +53,110 @@ const ChatSchema = new mongoose_1.Schema({
         enum: ["USER", "CREATOR"],
         required: true,
     },
+    type: {
+        type: String,
+        enum: ["text", "location", "document", "image", "voice", "video"],
+        default: "text",
+    },
     message: {
         type: String,
         required: true,
         trim: true,
+    },
+    location: {
+        latitude: {
+            type: Number,
+        },
+        longitude: {
+            type: Number,
+        },
+        name: {
+            type: String,
+            trim: true,
+        },
+        address: {
+            type: String,
+            trim: true,
+        },
+        placeId: {
+            type: String,
+            trim: true,
+        },
+    },
+    attachment: {
+        url: {
+            type: String,
+            trim: true,
+        },
+        publicId: {
+            type: String,
+            trim: true,
+        },
+        fileName: {
+            type: String,
+            trim: true,
+        },
+        originalFileName: {
+            type: String,
+            trim: true,
+        },
+        mimeType: {
+            type: String,
+            trim: true,
+        },
+        fileSize: {
+            type: Number,
+        },
+        resourceType: {
+            type: String,
+            enum: ["raw", "image", "video"],
+        },
+    },
+    groupId: {
+        type: String,
+        trim: true,
+        default: null,
+        index: true,
+    },
+    replyTo: {
+        messageId: {
+            type: mongoose_1.Schema.Types.ObjectId,
+            ref: "Chat",
+        },
+        senderId: {
+            type: mongoose_1.Schema.Types.ObjectId,
+            ref: "User",
+        },
+        senderRole: {
+            type: String,
+            enum: ["USER", "CREATOR"],
+        },
+        type: {
+            type: String,
+            enum: ["text", "location", "document", "image", "voice", "video"],
+        },
+        message: {
+            type: String,
+            trim: true,
+        },
+        attachment: {
+            url: {
+                type: String,
+                trim: true,
+            },
+            fileName: {
+                type: String,
+                trim: true,
+            },
+            mimeType: {
+                type: String,
+                trim: true,
+            },
+            resourceType: {
+                type: String,
+                enum: ["raw", "image", "video"],
+            },
+        },
     },
     seenBy: [
         {
@@ -68,5 +168,31 @@ const ChatSchema = new mongoose_1.Schema({
         type: [String],
         default: [],
     },
-}, { timestamps: true });
+    isDeleted: {
+        type: Boolean,
+        default: false,
+    },
+    deletedAt: {
+        type: Date,
+        default: null,
+    },
+    reactions: {
+        type: [
+            {
+                userId: {
+                    type: mongoose_1.Schema.Types.ObjectId,
+                    ref: "User",
+                    required: true,
+                },
+                emoji: {
+                    type: String,
+                    required: true,
+                },
+            },
+        ],
+        default: [],
+    },
+}, {
+    timestamps: true,
+});
 exports.Chat = mongoose_1.default.model("Chat", ChatSchema);

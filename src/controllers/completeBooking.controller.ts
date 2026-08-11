@@ -2,6 +2,7 @@
 
 import { Request, Response } from "express";
 import { completeBookingService } from "../services/booking/completeBooking.service";
+import { BookingWalletReservationCaptureError } from "../errors/financial/BookingWalletReservationCaptureError";
 
 /* =========================================================
    CREATOR COMPLETES BOOKING
@@ -19,7 +20,7 @@ export const completeBookingByCreator = async (
   }
 
   try {
-    const booking = await completeBookingService({
+    const result = await completeBookingService({
       bookingId,
       creatorId: user.id,
       role: user.role,
@@ -27,10 +28,13 @@ export const completeBookingByCreator = async (
 
     return res.status(200).json({
       message: "Booking completed successfully",
-      booking,
+      ...(result as Record<string, unknown>),
     });
   } catch (err: any) {
-    return res.status(400).json({
+    return res.status(
+      err instanceof BookingWalletReservationCaptureError ? err.statusCode : 400,
+    ).json({
+      ...(err instanceof BookingWalletReservationCaptureError ? { code: err.code } : {}),
       message: err.message || "Failed to complete booking",
     });
   }
@@ -52,7 +56,7 @@ export const completeBookingByUser = async (
   }
 
   try {
-    const booking = await completeBookingService({
+    const result = await completeBookingService({
       bookingId,
       creatorId: user.id, // service will validate role
       role: user.role,
@@ -60,10 +64,13 @@ export const completeBookingByUser = async (
 
     return res.status(200).json({
       message: "Session ended successfully",
-      booking,
+      ...(result as Record<string, unknown>),
     });
   } catch (err: any) {
-    return res.status(400).json({
+    return res.status(
+      err instanceof BookingWalletReservationCaptureError ? err.statusCode : 400,
+    ).json({
+      ...(err instanceof BookingWalletReservationCaptureError ? { code: err.code } : {}),
       message: err.message || "Failed to end session",
     });
   }

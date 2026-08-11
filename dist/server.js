@@ -15,15 +15,31 @@ const socket_io_1 = require("socket.io");
 const routes_1 = __importDefault(require("./routes"));
 const sockets_1 = require("./sockets");
 const expireBookings_job_1 = require("./jobs/expireBookings.job");
-const completeBookings_job_1 = require("./jobs/completeBookings.job"); // ✅ ADD THIS
+const completeBookings_job_1 = require("./jobs/completeBookings.job");
 const interactionTrigger_job_1 = require("./jobs/interactionTrigger.job");
 const sessionEndingSoon_job_1 = require("./jobs/sessionEndingSoon.job");
 const disputeEscalation_job_1 = require("./jobs/disputeEscalation.job");
+const settleBookings_job_1 = require("./jobs/settleBookings.job");
+const errorHandler_1 = require("./middlewares/errorHandler"); // ✅ ADDED
 mongoose_1.default.set("bufferCommands", false);
 const app = (0, express_1.default)();
-/* ===================== MIDDLEWARE ===================== */
+/* ===================== CORS CONFIG ===================== */
+const allowedOrigins = [
+    "http://localhost:5173",
+    "https://sthn-frontend.vercel.app",
+    "https://sthn-frontend-hmcpkqxce-tarunwasniks-projects.vercel.app",
+];
 app.use((0, cors_1.default)({
-    origin: "http://localhost:5173",
+    origin: function (origin, callback) {
+        if (!origin)
+            return callback(null, true);
+        if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+        }
+        else {
+            callback(new Error("CORS not allowed"));
+        }
+    },
     credentials: true,
 }));
 app.use(express_1.default.json());
@@ -38,10 +54,11 @@ async function runBackgroundJobs() {
         jobRunning = true;
         console.log("🔄 Running background jobs...");
         await (0, expireBookings_job_1.expireBookingsJob)();
-        await (0, completeBookings_job_1.completeBookingsJob)(); // ✅ ADD THIS (CRITICAL)
+        await (0, completeBookings_job_1.completeBookingsJob)();
         await (0, interactionTrigger_job_1.interactionTriggerJob)();
         await (0, sessionEndingSoon_job_1.sessionEndingSoonJob)();
         await (0, disputeEscalation_job_1.disputeEscalationJob)();
+        await (0, settleBookings_job_1.settleBookingsJob)();
         console.log("✅ Background jobs completed");
     }
     catch (err) {
@@ -52,7 +69,6 @@ async function runBackgroundJobs() {
     }
 }
 async function startJobLoop() {
-    // ✅ WAIT BEFORE FIRST RUN
     await new Promise((resolve) => setTimeout(resolve, 5000));
     console.log("⏱ Starting job loop...");
     while (true) {
@@ -65,11 +81,15 @@ async function startServer() {
     try {
         await mongoose_1.default.connect(process.env.MONGODB_URI);
         console.log("✅ MongoDB connected");
+        /* ===================== ROUTES ===================== */
         app.use("/api", routes_1.default);
+        /* ===================== ERROR HANDLER (🔥 MUST BE LAST) ===================== */
+        app.use(errorHandler_1.errorHandler);
         const httpServer = http_1.default.createServer(app);
+        /* ===================== SOCKET.IO ===================== */
         exports.io = new socket_io_1.Server(httpServer, {
             cors: {
-                origin: "http://localhost:5173",
+                origin: allowedOrigins,
                 credentials: true,
             },
         });

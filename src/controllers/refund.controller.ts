@@ -1,7 +1,6 @@
 //backend/src/controllers/refund.controller.ts
 
 import { Request,Response } from "express";
-import { Booking } from "../models/booking.model";
 import { assertRefundAllowed, InteractionGuardError } from "../services/interactionGuards.service";
 
 export const requestRefund = async (req: Request, res: Response) => {
@@ -17,11 +16,5 @@ export const requestRefund = async (req: Request, res: Response) => {
     throw err;
   }
 
-  const booking = await Booking.findById(bookingId);
-  if (!booking) return res.status(404).json({ message: "Booking not found" });
-
-  booking.paymentStatus = "REFUNDED";
-  await booking.save();
-
-  return res.status(200).json({ message: "Refund processed" });
+  return res.status(409).json({ message: "Legacy refund endpoint is disabled; refunds must be initiated by Financial termination or a later dispute workflow." });
 };

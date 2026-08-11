@@ -30,7 +30,7 @@ const protect = async (req, res, next) => {
                 message: "Account permanently banned.",
             });
         }
-        // Attach full lifecycle-aware user
+        // Attach authenticated user context
         req.user = user;
         next();
     }

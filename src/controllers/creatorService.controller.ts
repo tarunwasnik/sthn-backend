@@ -6,6 +6,7 @@ import { CreatorService } from "../models/creatorService.model";
 import { CreatorProfile } from "../models/creatorProfile.model";
 import { AppError } from "../utils/AppError";
 import cloudinary, { extractPublicId } from "../config/cloudinary";
+import { creatorServiceMajorToMinor } from "../utils/financial/creatorServicePrice.util";
 
 /**
  * CREATE SERVICE
@@ -40,9 +41,11 @@ export const createCreatorService = async (req: Request, res: Response) => {
     throw new AppError("Invalid durationMinutes", 400);
   }
 
-  if (typeof price !== "number" || price < 0) {
+  if (typeof price !== "number") {
     throw new AppError("Invalid price", 400);
   }
+  try { creatorServiceMajorToMinor(price, creatorProfile.currency as never); }
+  catch { throw new AppError("Invalid price", 400); }
 
   const service = await CreatorService.create({
     creatorId: creatorObjectId,
@@ -154,9 +157,11 @@ export const updateCreatorService = async (req: Request, res: Response) => {
   }
 
   if (price !== undefined) {
-    if (typeof price !== "number" || price < 0) {
+    if (typeof price !== "number") {
       throw new AppError("Invalid price", 400);
     }
+    try { creatorServiceMajorToMinor(price, service.currency as never); }
+    catch { throw new AppError("Invalid price", 400); }
     service.price = price;
   }
 

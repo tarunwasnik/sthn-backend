@@ -3,11 +3,32 @@
 import { Request, Response } from "express";
 import mongoose from "mongoose";
 import { Slot } from "../models/slot.model";
-import { Booking } from "../models/booking.model";
+import { Booking, IBooking } from "../models/booking.model";
 import { Dispute } from "../models/dispute.model";
 import { UserProfile } from "../models/userProfile.model";
 import { CreatorProfile } from "../models/creatorProfile.model";
 import { CreatorService } from "../models/creatorService.model";
+import { SUPPORTED_CURRENCIES } from "../constants/financial/supportedCurrencies";
+import { paymentService } from "../services/financial/payment.service";
+import { paymentLifecycleService } from "../services/financial/paymentLifecycle.service";
+import { CUSTOMER_PLATFORM_FEE_RATE_BPS, marketplacePricingService } from
+  "../services/financial/marketplacePricing.service";
+import { creatorServiceMajorToMinor } from "../utils/financial/creatorServicePrice.util";
+import { bookingFinancialTerminationService } from "../services/financial/bookingFinancialTermination.service";
+import { BookingTerminationActorType, BookingTerminationType } from "../enums/booking/bookingTerminationType.enum";
+import User from "../models/User";
+import { resolveAccountGovernance } from "../services/accountGovernance/accountGovernanceResolver.service";
+import { PaymentMethod } from "../enums/financial/paymentMethod.enum";
+import { PaymentPricingPolicy } from "../enums/financial/paymentPricingPolicy.enum";
+import { PaymentStatus } from "../enums/financial/paymentStatus.enum";
+import { BookingFundReservationStatus } from "../enums/financial/bookingFundReservationStatus.enum";
+import { BookingWalletReservationError } from "../errors/financial/BookingWalletReservationError";
+import { bookingWalletReservationService } from "../services/financial/bookingWalletReservation.service";
+import { bookingFundReservationRepository } from "../repositories/bookingFundReservation.repository";
+import { IPayment, Payment } from "../models/payment.model";
+import {
+  deriveBookingRequestIdentity,
+} from "../utils/financial/bookingWalletReservationIdentity.util";
 
 /* =========================================================
    CLEANUP EXPIRED BOOKINGS
@@ -15,26 +36,20 @@ import { CreatorService } from "../models/creatorService.model";
 
 const cleanupExpiredBookings = async (
   creatorId: mongoose.Types.ObjectId,
-  session: mongoose.ClientSession,
 ) => {
   const expiredBookings = await Booking.find({
     creatorId,
     status: "REQUESTED",
     expiresAt: { $lt: new Date() },
-  }).session(session);
+  }).select("_id");
 
   for (const booking of expiredBookings) {
-    await Slot.updateMany(
-      {
-        _id: { $in: booking.slotIds },
-        status: "LOCKED",
-      },
-      { status: "AVAILABLE" },
-      { session },
-    );
-
-    booking.status = "EXPIRED";
-    await booking.save({ session });
+    await bookingFinancialTerminationService.terminateBookingFinancially({
+      bookingId: booking._id.toString(),
+      actorType: BookingTerminationActorType.SYSTEM,
+      terminationType: BookingTerminationType.BOOKING_EXPIRED,
+      reason: "Booking request expired.",
+    });
   }
 };
 
@@ -100,6 +115,11 @@ export const getUserBookings = async (req: Request, res: Response) => {
         paymentStatus: booking.paymentStatus,
 
         price: booking.price,
+        serviceAmount: booking.serviceAmount,
+        platformFeeAmount: booking.platformFeeAmount,
+        totalAmount: booking.totalAmount,
+        commissionAmount: booking.commissionAmount,
+        creatorAmount: booking.creatorAmount,
         currency: booking.currency,
         durationMinutes: booking.durationMinutes,
 
@@ -193,9 +213,75 @@ export const checkCreatorJourneyEligibility = async (
    REQUEST BOOKING
 ========================================================= */
 
-export const requestBooking = async (req: Request, res: Response) => {
+const safeWalletBookingResponse = (
+  booking: IBooking,
+  payment: IPayment,
+  reservation: {
+    reservationReference: string;
+    status: BookingFundReservationStatus;
+    amount: number;
+    currency: string;
+    authorizedAt?: Date;
+  },
+  slots: Array<{ startTime: Date; endTime: Date; status: string }>,
+) => ({
+  message: "Booking request sent",
+  booking: {
+    bookingReference: booking.bookingReference,
+    status: booking.status,
+    paymentMethod: PaymentMethod.WALLET,
+    paymentReference: payment.paymentReference,
+    reservationReference: reservation.reservationReference,
+    fundsReservedAt: reservation.authorizedAt,
+    price: booking.price,
+    serviceAmount: booking.serviceAmount,
+    platformFeeAmount: booking.platformFeeAmount,
+    totalAmount: booking.totalAmount,
+    commissionAmount: booking.commissionAmount,
+    creatorAmount: booking.creatorAmount,
+    currency: booking.currency,
+    durationMinutes: booking.durationMinutes,
+    slots: slots.map((slot) => ({
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      status: slot.status,
+    })),
+  },
+  payment: {
+    paymentReference: payment.paymentReference,
+    method: PaymentMethod.WALLET,
+    status: PaymentStatus.AUTHORIZED,
+    amount: payment.amount,
+    serviceAmount: booking.serviceAmount,
+    platformFeeAmount: booking.platformFeeAmount,
+    totalAmount: booking.totalAmount,
+    commissionAmount: booking.commissionAmount,
+    creatorAmount: booking.creatorAmount,
+    currency: payment.currency,
+    authorizedAt: reservation.authorizedAt,
+  },
+  reservation: {
+    reservationReference: reservation.reservationReference,
+    status: reservation.status,
+    amount: reservation.amount,
+    currency: reservation.currency,
+    authorizedAt: reservation.authorizedAt,
+  },
+});
+
+export const requestBooking = async (
+  req: Request,
+  res: Response,
+): Promise<Response> => {
   const user = req.user;
   const { serviceId, slotIds } = req.body;
+  const requestedMethod = req.body.paymentMethod ?? PaymentMethod.INTERNAL;
+  const paymentMethod =
+    requestedMethod === PaymentMethod.WALLET
+      ? PaymentMethod.WALLET
+      : requestedMethod === PaymentMethod.INTERNAL
+        ? PaymentMethod.INTERNAL
+        : null;
 
   if (!user) {
     return res.status(401).json({ message: "Unauthorized" });
@@ -203,6 +289,12 @@ export const requestBooking = async (req: Request, res: Response) => {
 
   if (user.status !== "active") {
     return res.status(403).json({ message: "Account is not active." });
+  }
+
+  if (!paymentMethod) {
+    return res.status(422).json({
+      message: "paymentMethod must be WALLET or INTERNAL.",
+    });
   }
 
   if (!mongoose.Types.ObjectId.isValid(serviceId)) {
@@ -215,6 +307,79 @@ export const requestBooking = async (req: Request, res: Response) => {
 
   if (!slotIds.every((id) => mongoose.Types.ObjectId.isValid(id))) {
     return res.status(400).json({ message: "Invalid slotIds" });
+  }
+
+  const suppliedIdempotencyKey =
+    typeof req.body.idempotencyKey === "string"
+      ? req.body.idempotencyKey.trim()
+      : typeof req.header("Idempotency-Key") === "string"
+        ? req.header("Idempotency-Key")!.trim()
+        : "";
+
+  if (paymentMethod === PaymentMethod.WALLET) {
+    if (!suppliedIdempotencyKey || suppliedIdempotencyKey.length > 200) {
+      return res.status(422).json({
+        message: "A bounded idempotencyKey is required for Wallet booking.",
+      });
+    }
+    const clientFinancialFields = ["userId", "walletId", "amount", "currency"]
+      .filter((field) => req.body[field] !== undefined);
+    if (clientFinancialFields.length > 0) {
+      return res.status(422).json({
+        message: "Wallet owner, amount, and currency are server-authoritative.",
+      });
+    }
+  }
+
+  const requestIdentity = paymentMethod === PaymentMethod.WALLET
+    ? deriveBookingRequestIdentity({
+        userId: user.id,
+        serviceId,
+        slotIds,
+        method: paymentMethod,
+        idempotencyKey: suppliedIdempotencyKey,
+      })
+    : null;
+
+  const loadWalletReplay = async () => {
+    if (!requestIdentity) return null;
+    const booking = await Booking.findOne({
+      userId: user.id,
+      bookingRequestKey: requestIdentity.bookingRequestKey,
+    }).select("+bookingRequestKey +bookingRequestFingerprint");
+    if (!booking) return null;
+    if (booking.bookingRequestFingerprint !== requestIdentity.bookingRequestFingerprint) {
+      throw new BookingWalletReservationError(
+        "Booking idempotency key conflicts with a different request.",
+        "BOOKING_WALLET_RESERVATION_IDENTITY_CONFLICT",
+      );
+    }
+    const payment = booking.paymentId
+      ? await Payment.findById(booking.paymentId)
+      : null;
+    const reservation = await bookingFundReservationRepository.findByBooking(
+      booking._id as mongoose.Types.ObjectId,
+    );
+    const replaySlots = await Slot.find({ _id: { $in: booking.slotIds } })
+      .select("startTime endTime status")
+      .sort({ startTime: 1 });
+    if (!payment || !reservation || reservation.status !== BookingFundReservationStatus.ACTIVE) {
+      throw new BookingWalletReservationError(
+        "Committed Wallet booking is missing its financial authorization.",
+        "BOOKING_WALLET_RESERVATION_INTEGRITY_ERROR",
+      );
+    }
+    return safeWalletBookingResponse(booking, payment, reservation, replaySlots);
+  };
+
+  try {
+    const replay = await loadWalletReplay();
+    if (replay) return res.status(200).json(replay);
+  } catch (error) {
+    if (error instanceof BookingWalletReservationError) {
+      return res.status(error.statusCode).json({ message: error.message, code: error.code });
+    }
+    return res.status(500).json({ message: "Failed to validate booking replay." });
   }
 
   const profile = await UserProfile.findOne({ userId: user.id });
@@ -237,6 +402,54 @@ export const requestBooking = async (req: Request, res: Response) => {
     }
 
     return res.status(403).json({ message });
+  }
+
+  const serviceForExpiry = await CreatorService.findById(serviceId)
+    .select("creatorId")
+    .lean();
+
+  if (serviceForExpiry) {
+    await cleanupExpiredBookings(
+      new mongoose.Types.ObjectId(serviceForExpiry.creatorId),
+    );
+  }
+
+  const serviceForGovernance = await CreatorService.findById(serviceId)
+    .select("creatorId")
+    .lean();
+
+  if (!serviceForGovernance) {
+    return res.status(404).json({ message: "Service not found" });
+  }
+
+  const requesterUser = await User.findById(user.id);
+  if (!requesterUser) {
+    return res.status(401).json({ message: "Authenticated user not found." });
+  }
+
+  const requesterGovernance = resolveAccountGovernance(requesterUser);
+  if (requesterGovernance.blocksOutgoingBookings) {
+    return res.status(403).json({
+      message: "Your account is currently restricted from creating new bookings.",
+      ...(requesterGovernance.isCooldownActive && requesterGovernance.cooldownUntil
+        ? { cooldownUntil: requesterGovernance.cooldownUntil }
+        : {}),
+    });
+  }
+
+  const targetCreatorUser = await User.findById(serviceForGovernance.creatorId);
+  if (!targetCreatorUser) {
+    return res.status(404).json({ message: "Creator account not found" });
+  }
+
+  const targetCreatorGovernance = resolveAccountGovernance(targetCreatorUser);
+  if (targetCreatorGovernance.blocksIncomingBookings) {
+    return res.status(403).json({
+      message: "This creator is currently unable to receive new booking requests.",
+      ...(targetCreatorGovernance.isCreatorCooldownActive && targetCreatorGovernance.cooldownUntil
+        ? { cooldownUntil: targetCreatorGovernance.cooldownUntil }
+        : {}),
+    });
   }
 
   const session = await mongoose.startSession();
@@ -264,11 +477,6 @@ export const requestBooking = async (req: Request, res: Response) => {
     if (creatorProfile.status !== "active") {
       throw new Error("Creator is not active");
     }
-
-    await cleanupExpiredBookings(
-      new mongoose.Types.ObjectId(creatorId),
-      session,
-    );
 
     const slots = await Slot.find({
       _id: { $in: slotIds },
@@ -328,7 +536,19 @@ export const requestBooking = async (req: Request, res: Response) => {
       throw new Error("Failed to lock slots");
     }
 
-    const totalPrice = slots.reduce((sum, slot) => sum + slot.price, 0);
+    const totalPrice = slots.reduce((sum, slot) => sum +
+      creatorServiceMajorToMinor(slot.price, creatorProfile.currency as never), 0);
+
+    const paymentCurrency = SUPPORTED_CURRENCIES.find(
+      (currency) => currency === creatorProfile.currency,
+    );
+    if (!paymentCurrency) {
+      throw new Error("Creator currency is not supported for payments");
+    }
+    const pricing = marketplacePricingService.calculate({
+      serviceAmount: totalPrice,
+      currency: paymentCurrency,
+    });
 
     const expiresAt = new Date(Date.now() + 180 * 60 * 1000);
 
@@ -342,23 +562,178 @@ export const requestBooking = async (req: Request, res: Response) => {
           serviceTitle: service.title,
           durationMinutes: totalMinutes,
           price: totalPrice,
+          serviceAmount: pricing.serviceAmount,
+          platformFeeAmount: pricing.platformFeeAmount,
+          commissionAmount: pricing.commissionAmount,
+          creatorAmount: pricing.creatorAmount,
+          totalAmount: pricing.totalAmount,
           currency: creatorProfile.currency,
           status: "REQUESTED",
-          paymentStatus: "PAID",
+          paymentStatus: "PENDING",
           expiresAt,
+          ...(requestIdentity ? {
+            bookingReference: requestIdentity.bookingReference,
+            paymentMethod: PaymentMethod.WALLET,
+            bookingRequestKey: requestIdentity.bookingRequestKey,
+            bookingRequestFingerprint: requestIdentity.bookingRequestFingerprint,
+          } : {
+            paymentMethod: PaymentMethod.INTERNAL,
+          }),
         },
       ],
       { session },
     );
 
+    const createdBooking = booking[0];
+
+    const payment = await paymentService.createPayment({
+      bookingId: createdBooking._id.toString(),
+      userId: user.id,
+      creatorId: creatorId.toString(),
+      serviceAmount: {
+        amount: totalPrice,
+        currency: paymentCurrency,
+      },
+      idempotencyKey: `booking-payment:${createdBooking._id.toString()}`,
+      method: paymentMethod,
+      ...(paymentMethod === PaymentMethod.WALLET ? {
+        idempotencyKey: `booking-payment:${requestIdentity!.bookingReference}`,
+        pricingSnapshot: {
+          serviceAmount: pricing.serviceAmount,
+          customerFeeRateBps: CUSTOMER_PLATFORM_FEE_RATE_BPS,
+          customerFeeAmount: pricing.platformFeeAmount,
+          grossEscrowAmount: pricing.totalAmount,
+          currency: paymentCurrency,
+          pricingPolicy: PaymentPricingPolicy.STANDARD_CUSTOMER_FEE_V1,
+          pricingVersion: 1,
+        },
+      } : {}),
+      session,
+    });
+
+    createdBooking.paymentId = payment._id;
+    createdBooking.paymentReference = payment.paymentReference;
+    await createdBooking.save({ session });
+
+    let walletReservation:
+      | Awaited<ReturnType<typeof bookingWalletReservationService.authorize>>
+      | null = null;
+    if (paymentMethod === PaymentMethod.WALLET) {
+      walletReservation = await bookingWalletReservationService.authorize({
+        booking: createdBooking,
+        payment,
+        authenticatedUserId: new mongoose.Types.ObjectId(user.id),
+        currency: paymentCurrency,
+        session,
+      });
+    }
+
     await session.commitTransaction();
+
+    if (walletReservation) {
+      payment.status = PaymentStatus.AUTHORIZED;
+      const safeResponse = safeWalletBookingResponse(
+        createdBooking,
+        payment,
+        walletReservation.reservation,
+        slots.map((slot) => ({
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          status: "LOCKED",
+        })),
+      );
+      return res.status(201).json(safeResponse);
+    }
+
+    const initializedPayment =
+      await paymentLifecycleService.completePaymentLifecycle(
+        payment._id.toString(),
+      );
+    if (initializedPayment.payment.status === PaymentStatus.CAPTURED) {
+      await Booking.updateOne(
+        { _id: createdBooking._id, status: "REQUESTED" },
+        { $set: { paymentStatus: "PAID", isPayable: true } },
+      );
+      createdBooking.paymentStatus = "PAID";
+      createdBooking.isPayable = true;
+    }
 
     return res.status(201).json({
       message: "Booking request sent",
-      booking: booking[0],
+      booking: createdBooking,
+      payment: initializedPayment.payment,
     });
   } catch (err: any) {
-    await session.abortTransaction();
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    if (paymentMethod === PaymentMethod.WALLET) {
+      try {
+        const replay = await loadWalletReplay();
+        if (replay) return res.status(200).json(replay);
+      } catch (replayError) {
+        if (replayError instanceof BookingWalletReservationError) {
+          return res.status(replayError.statusCode).json({
+            message: replayError.message,
+            code: replayError.code,
+          });
+        }
+      }
+
+      const cause = err instanceof BookingWalletReservationError
+        ? (err as Error & { cause?: unknown }).cause
+        : err;
+      const isTransientTransactionConflict =
+        typeof cause === "object" &&
+        cause !== null &&
+        "hasErrorLabel" in cause &&
+        typeof (cause as { hasErrorLabel?: unknown }).hasErrorLabel === "function" &&
+        (
+          (cause as { hasErrorLabel: (label: string) => boolean })
+            .hasErrorLabel("TransientTransactionError") ||
+          (cause as { hasErrorLabel: (label: string) => boolean })
+            .hasErrorLabel("UnknownTransactionCommitResult")
+        );
+      const retryCount =
+        typeof res.locals.bookingWalletTransactionRetryCount === "number"
+          ? res.locals.bookingWalletTransactionRetryCount
+          : 0;
+      if (isTransientTransactionConflict && retryCount < 3) {
+        res.locals.bookingWalletTransactionRetryCount = retryCount + 1;
+        return requestBooking(req, res);
+      }
+    }
+
+    if (err instanceof BookingWalletReservationError) {
+      return res.status(err.statusCode).json({
+        message: err.message,
+        code: err.code,
+      });
+    }
+
+    if (paymentMethod === PaymentMethod.WALLET) {
+      const bookingConflictMessages = new Set([
+        "Service not found",
+        "Service is not active",
+        "You cannot book your own service",
+        "Creator profile not found",
+        "Creator is not active",
+        "Cannot book expired slots",
+        "One or more slots not available",
+        "This slot is already requested by another user",
+        "Failed to lock slots",
+      ]);
+      const bookingConflict = bookingConflictMessages.has(err?.message);
+      return res.status(409).json({
+        message: bookingConflict
+          ? "Booking or slot state conflicts with this request."
+          : "Wallet booking transaction could not be committed.",
+        code: bookingConflict
+          ? "BOOKING_WALLET_RESERVATION_BOOKING_CONFLICT"
+          : "BOOKING_WALLET_RESERVATION_TRANSACTION_CONFLICT",
+      });
+    }
 
     return res.status(400).json({
       message: err.message || "Failed to request booking",
@@ -411,13 +786,5 @@ export const refundBooking = async (req: Request, res: Response) => {
     });
   }
 
-  booking.paymentStatus = "REFUNDED";
-  booking.isFinancialLocked = true;
-
-  await booking.save();
-
-  return res.status(200).json({
-    message: "Booking marked as refunded",
-    booking,
-  });
+  return res.status(409).json({ message: "Legacy refund endpoint is disabled; Financial Payment state is authoritative." });
 };

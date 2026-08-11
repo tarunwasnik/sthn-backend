@@ -4,6 +4,8 @@
 //backend/src/controllers/admin.controller.ts
 
 import { Request, Response } from "express";
+import { BookingTerminationActorType, BookingTerminationType } from "../enums/booking/bookingTerminationType.enum";
+import { bookingFinancialTerminationService } from "../services/financial/bookingFinancialTermination.service";
 import mongoose from "mongoose";
 import User from "../models/User";
 import { CreatorProfile } from "../models/creatorProfile.model";
@@ -14,10 +16,9 @@ import { AppError } from "../utils/AppError";
 import { Booking } from "../models/booking.model";
 import { Slot } from "../models/slot.model";
 import { Dispute } from "../models/dispute.model";
-import { AuditLog } from "../models/auditLog.model";
 import { Appeal } from "../models/appeal.model";
 
-import { createAuditLog } from "../services/auditLog.service";
+import { createAuditLog, queryAuditLogs } from "../services/auditLog.service";
 import { assertDisputeMutable } from "../services/disputeLock.service";
 
 /* ==================== HELPERS ==================== */
@@ -230,49 +231,16 @@ export const rejectCreator = async (req: Request, res: Response) => {
 export const adminCancelBooking = async (req: Request, res: Response) => {
   const adminId = req.user!.id;
   const { bookingId } = req.params;
-  const { refund } = req.body;
 
-  const session = await mongoose.startSession();
+  const result = await bookingFinancialTerminationService.terminateBookingFinancially({
+    bookingId,
+    actorId: adminId,
+    actorType: BookingTerminationActorType.ADMIN,
+    terminationType: BookingTerminationType.ADMIN_CANCELLED,
+    reason: typeof req.body.reason === "string" ? req.body.reason : undefined,
+  });
 
-  try {
-    session.startTransaction();
-
-    const booking = await Booking.findById(bookingId).session(session);
-    if (!booking) throw new AppError("Booking not found", 404);
-
-    const before = booking.toObject();
-
-    booking.status = "CANCELLED";
-    booking.paymentStatus = refund ? "REFUNDED" : "PAID";
-    await booking.save({ session });
-
-    await Slot.updateMany(
-      { _id: { $in: booking.slotIds } },
-      { status: "AVAILABLE" },
-      { session }
-    );
-
-    await createAuditLog({
-      actorType: "ADMIN",
-      actorId: new mongoose.Types.ObjectId(adminId),
-      action: "BOOKING_CANCELLED_BY_ADMIN",
-      entityType: "BOOKING",
-      entityId: booking._id,
-      before,
-      after: {
-        status: booking.status,
-        paymentStatus: booking.paymentStatus,
-      },
-    });
-
-    await session.commitTransaction();
-    res.json({ message: "Booking cancelled by admin" });
-  } catch (err) {
-    await session.abortTransaction();
-    throw err;
-  } finally {
-    session.endSession();
-  }
+  return res.json({ message: "Booking cancelled by admin", ...result });
 };
 
 /* ================= DISPUTE RESOLUTION (LOCKED) ================= */
@@ -303,8 +271,9 @@ export const resolveDispute = async (req: Request, res: Response) => {
     const booking = await Booking.findById(dispute.bookingId).session(session);
     if (!booking) throw new AppError("Booking not found", 404);
 
-    if (action === "REFUND_USER") booking.paymentStatus = "REFUNDED";
-    if (action === "PAY_CREATOR") booking.paymentStatus = "PAID";
+    if (action !== "NO_ACTION") {
+      throw new AppError("Dispute financial outcomes are deferred to the Financial termination and refund-accounting phases", 409);
+    }
 
     dispute.status = action === "NO_ACTION" ? "REJECTED" : "RESOLVED";
     dispute.resolution = {
@@ -359,8 +328,16 @@ export const getEscalatedDisputes = async (req: Request, res: Response) => {
 /* ================= AUDIT LOG VIEW ================= */
 
 export const getAuditLogs = async (req: Request, res: Response) => {
-  const logs = await AuditLog.find().sort({ createdAt: -1 }).lean();
-  res.json({ logs });
+  const result = await queryAuditLogs(req.query);
+  res.json({
+    logs: result.logs.map((log) => ({
+      auditReference: log._id.toString(), category: log.category, action: log.action,
+      actor: { type: log.actorType, id: log.actorId?.toString(), reference: log.actorReference },
+      financialContext: log.financialContext, transition: log.transition,
+      metadata: log.metadata, createdAt: log.createdAt,
+    })),
+    pagination: result.pagination,
+  });
 };
 
 /* ================= APPEAL DECISION ================= */
@@ -393,13 +370,8 @@ export const decideAppeal = async (req: Request, res: Response) => {
     const beforeAppeal = appeal.toObject();
     const beforeDispute = dispute.toObject();
 
-    if (action === "REVERSE_DECISION") {
-      if (dispute.resolution?.action === "REFUND_USER") {
-        booking.paymentStatus = "PAID";
-      }
-      if (dispute.resolution?.action === "PAY_CREATOR") {
-        booking.paymentStatus = "REFUNDED";
-      }
+    if (action === "REVERSE_DECISION" && dispute.resolution?.action !== "NO_ACTION") {
+      throw new AppError("Financial dispute reversal is deferred to later Financial Domain phases", 409);
     }
 
     appeal.status = action === "REVERSE_DECISION" ? "UPHELD" : "REJECTED";

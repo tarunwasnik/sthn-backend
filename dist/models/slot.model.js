@@ -64,6 +64,12 @@ const SlotSchema = new mongoose_1.Schema({
         type: Date,
         required: true,
     },
+    timezone: {
+        type: String,
+        required: true,
+        default: "UTC",
+        index: true,
+    },
     status: {
         type: String,
         enum: ["AVAILABLE", "LOCKED", "BOOKED", "CANCELLED"],
@@ -77,11 +83,6 @@ const SlotSchema = new mongoose_1.Schema({
         index: true,
     },
 }, { timestamps: true });
-/**
- * 🔐 HARD SAFETY GUARANTEE
- * Prevent duplicate slot start times for the same creator
- */
-SlotSchema.index({ creatorId: 1, startTime: 1 }, { unique: true });
 /**
  * ⚡ Discovery & Availability Queries
  */

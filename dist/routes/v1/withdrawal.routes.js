@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const withdrawal_controller_1 = require("../../controllers/withdrawal.controller");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const creator_middleware_1 = require("../../middlewares/creator.middleware");
+const router = (0, express_1.Router)();
+router.get("/", auth_middleware_1.protect, creator_middleware_1.requireActiveCreator, withdrawal_controller_1.withdrawalController.listWithdrawals.bind(withdrawal_controller_1.withdrawalController));
+router.get("/:withdrawalReference", auth_middleware_1.protect, creator_middleware_1.requireActiveCreator, withdrawal_controller_1.withdrawalController.getWithdrawalByReference.bind(withdrawal_controller_1.withdrawalController));
+router.post("/", auth_middleware_1.protect, creator_middleware_1.requireActiveCreator, withdrawal_controller_1.withdrawalController.requestWithdrawal.bind(withdrawal_controller_1.withdrawalController));
+router.post("/:withdrawalId/cancel", auth_middleware_1.protect, creator_middleware_1.requireActiveCreator, withdrawal_controller_1.withdrawalController.cancelWithdrawal.bind(withdrawal_controller_1.withdrawalController));
+router.post("/:withdrawalId/refresh", auth_middleware_1.protect, withdrawal_controller_1.withdrawalController.refreshWithdrawalPayout.bind(withdrawal_controller_1.withdrawalController));
+exports.default = router;

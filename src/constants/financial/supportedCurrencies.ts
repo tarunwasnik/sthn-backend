@@ -1,0 +1,35 @@
+//backend/src/constants/financial/supportedCurrencies.ts
+
+export const SUPPORTED_CURRENCIES = [
+  "USD",
+  "EUR",
+  "GBP",
+  "INR",
+  "AUD",
+  "CAD",
+  "SGD",
+  "JPY",
+  "CNY",
+  "HKD",
+  "CHF",
+  "SEK",
+  "NZD",
+  "MXN",
+  "BRL",
+  "ZAR",
+  "KRW",
+  "TRY",
+  "AED",
+  "SAR",
+  "THB",
+  "MYR",
+  "IDR",
+  "PHP",
+  "VND",
+  "PKR",
+  "BDT",
+  "LKR",
+  "NPR",
+] as const;
+
+export type SupportedCurrency = (typeof SUPPORTED_CURRENCIES)[number];

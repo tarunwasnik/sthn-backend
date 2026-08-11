@@ -12,6 +12,8 @@ const adminCreatorApproval_controller_1 = require("../../controllers/adminCreato
 const admin_actions_routes_1 = __importDefault(require("./admin.actions.routes"));
 const featureFlagTelemetry_routes_1 = __importDefault(require("./featureFlagTelemetry.routes"));
 const featureFlagDashboard_routes_1 = __importDefault(require("./featureFlagDashboard.routes"));
+const providerSimulator_controller_1 = require("../../controllers/admin/providerSimulator.controller");
+const payoutDestinationVerification_controller_1 = require("../../controllers/admin/payoutDestinationVerification.controller");
 const router = (0, express_1.Router)();
 /* ================= ADMIN ACTIONS NAMESPACE ================= */
 router.use("/actions", admin_actions_routes_1.default);
@@ -19,6 +21,11 @@ router.use("/actions", admin_actions_routes_1.default);
 router.get("/dashboard", auth_middleware_1.protect, (0, authorize_middleware_1.authorizeRoles)("admin"), (_req, res) => {
     res.json({ message: "Welcome Admin" });
 });
+/* ================= PROVIDER SIMULATOR ================= */
+router.post("/provider-simulator/payouts/:providerPayoutId/status", auth_middleware_1.protect, (0, authorize_middleware_1.authorizeRoles)("admin"), providerSimulator_controller_1.simulatePayoutStatus);
+router.get("/audit-logs", auth_middleware_1.protect, (0, authorize_middleware_1.authorizeRoles)("admin"), admin_controller_1.getAuditLogs);
+/* ================= PAYOUT DESTINATION VERIFICATION ================= */
+router.post("/payout-destinations/:destinationReference/verification", auth_middleware_1.protect, (0, authorize_middleware_1.authorizeRoles)("admin"), payoutDestinationVerification_controller_1.applyPayoutDestinationVerificationDecision);
 /* ================= USER MANAGEMENT ================= */
 router.patch("/users/:id/suspend", auth_middleware_1.protect, (0, authorize_middleware_1.authorizeRoles)("admin"), admin_controller_1.suspendUser);
 router.patch("/users/:id/activate", auth_middleware_1.protect, (0, authorize_middleware_1.authorizeRoles)("admin"), admin_controller_1.activateUser);

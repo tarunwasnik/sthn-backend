@@ -1,68 +1,21 @@
-//backend/src/controllers/userCancelBooking.controller.ts
-
 import { Request, Response } from "express";
-import mongoose from "mongoose";
-import { Booking } from "../models/booking.model";
-import { Slot } from "../models/slot.model";
+import { BookingTerminationActorType, BookingTerminationType } from "../enums/booking/bookingTerminationType.enum";
+import { bookingFinancialTerminationService } from "../services/financial/bookingFinancialTermination.service";
 
-export const cancelBookingByUser = async (
-  req: Request,
-  res: Response
-) => {
-  const rawUser = req.user as any;
-
-  const userId =
-    rawUser?.id ||
-    rawUser?._id ||
-    rawUser?.userId;
-
-  if (!userId) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-
-  const { bookingId } = req.body;
-
-  const session = await mongoose.startSession();
-
+export const cancelBookingByUser = async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  const bookingId = req.params.bookingId ?? req.body.bookingId;
+  if (!userId) return res.status(401).json({ message: "Unauthorized" });
   try {
-    session.startTransaction();
-
-    const booking = await Booking.findById(bookingId).session(session);
-
-    if (!booking) throw new Error("Booking not found");
-
-    if (String(booking.userId) !== String(userId)) {
-      throw new Error("Not authorized");
-    }
-
-    const status = booking.status;
-
-    if (!["REQUESTED", "CONFIRMED"].includes(status)) {
-      throw new Error("Booking not cancellable");
-    }
-
-    booking.status = "CANCELLED";
-
-    if (booking.paymentStatus === "PAID") {
-      booking.paymentStatus = "REFUNDED";
-    }
-
-    await Slot.updateMany(
-      { _id: { $in: booking.slotIds } },
-      { status: "AVAILABLE" },
-      { session }
-    );
-
-    await booking.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return res.json({ message: "Booking cancelled", booking });
-  } catch (err: any) {
-    await session.abortTransaction();
-    session.endSession();
-
-    return res.status(400).json({ message: err.message });
+    const result = await bookingFinancialTerminationService.terminateBookingFinancially({
+      bookingId,
+      actorId: userId,
+      actorType: BookingTerminationActorType.CUSTOMER,
+      terminationType: BookingTerminationType.CUSTOMER_CANCELLED,
+      reason: typeof req.body.reason === "string" ? req.body.reason : undefined,
+    });
+    return res.status(200).json({ message: "Booking cancelled", ...result });
+  } catch (error: any) {
+    return res.status(error.statusCode ?? 400).json({ code: error.code, message: error.message });
   }
 };

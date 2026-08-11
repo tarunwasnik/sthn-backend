@@ -13,7 +13,7 @@ interface JwtPayload {
 export const protect = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   const authHeader = req.headers.authorization;
 
@@ -26,7 +26,7 @@ export const protect = async (
   try {
     const decoded = jwt.verify(
       token,
-      process.env.JWT_SECRET as string
+      process.env.JWT_SECRET as string,
     ) as JwtPayload;
 
     // Always trust DB for authoritative state
@@ -48,7 +48,7 @@ export const protect = async (
       });
     }
 
-    // Attach full lifecycle-aware user
+    // Attach authenticated user context
     req.user = user;
 
     next();

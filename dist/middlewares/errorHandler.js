@@ -6,8 +6,9 @@ const errorHandler = (err, req, res, next) => {
     console.error("🔥 GLOBAL ERROR HANDLER HIT 🔥");
     console.error("Error message:", err.message);
     console.error("Full error:", err);
-    const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
+    const statusCode = err.statusCode || 500;
     res.status(statusCode).json({
+        success: false,
         message: err.message || "Server error",
     });
 };

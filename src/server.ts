@@ -17,6 +17,7 @@ import { completeBookingsJob } from "./jobs/completeBookings.job";
 import { interactionTriggerJob } from "./jobs/interactionTrigger.job";
 import { sessionEndingSoonJob } from "./jobs/sessionEndingSoon.job";
 import { disputeEscalationJob } from "./jobs/disputeEscalation.job";
+import { settleBookingsJob } from "./jobs/settleBookings.job";
 
 import { errorHandler } from "./middlewares/errorHandler"; // ✅ ADDED
 
@@ -29,7 +30,7 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173",
   "https://sthn-frontend.vercel.app",
-  "https://sthn-frontend-hmcpkqxce-tarunwasniks-projects.vercel.app"
+  "https://sthn-frontend-hmcpkqxce-tarunwasniks-projects.vercel.app",
 ];
 
 app.use(
@@ -44,7 +45,7 @@ app.use(
       }
     },
     credentials: true,
-  })
+  }),
 );
 
 app.use(express.json());
@@ -74,6 +75,7 @@ async function runBackgroundJobs() {
     await interactionTriggerJob();
     await sessionEndingSoonJob();
     await disputeEscalationJob();
+    await settleBookingsJob();
 
     console.log("✅ Background jobs completed");
   } catch (err) {
@@ -137,7 +139,6 @@ async function startServer() {
         process.exit(0);
       });
     });
-
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
     process.exit(1);

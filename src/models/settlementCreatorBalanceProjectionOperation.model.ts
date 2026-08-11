@@ -1,0 +1,4 @@
+import mongoose, { Document, Schema } from "mongoose";
+export interface ISettlementCreatorBalanceProjectionOperation extends Document { settlementId: mongoose.Types.ObjectId; creatorId: mongoose.Types.ObjectId; amount: number; currency: string; createdAt: Date; updatedAt: Date; }
+const schema = new Schema<ISettlementCreatorBalanceProjectionOperation>({ settlementId: { type: Schema.Types.ObjectId, ref: "Settlement", unique: true, immutable: true }, creatorId: { type: Schema.Types.ObjectId, ref: "User", required: true, immutable: true }, amount: { type: Number, required: true, immutable: true }, currency: { type: String, required: true, immutable: true } }, { timestamps: true });
+export const SettlementCreatorBalanceProjectionOperation = mongoose.model<ISettlementCreatorBalanceProjectionOperation>("SettlementCreatorBalanceProjectionOperation", schema);

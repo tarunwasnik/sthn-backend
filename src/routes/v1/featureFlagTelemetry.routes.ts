@@ -1,3 +1,4 @@
+//backend/src/routes/v1/featireFlagTelemetry.routes.ts
 import { Router } from "express";
 import { getFeatureFlagEvents } from "../../controllers/featureFlagTelemetry.controller";
 import { protect } from "../../middlewares/auth.middleware";
@@ -9,11 +10,6 @@ const router = Router();
  * GET /admin/feature-flag-events
  * Read-only telemetry
  */
-router.get(
-  "/",
-  protect,
-  authorizeRoles("admin"),
-  getFeatureFlagEvents
-);
+router.get("/", protect, authorizeRoles("admin"), getFeatureFlagEvents);
 
 export default router;
