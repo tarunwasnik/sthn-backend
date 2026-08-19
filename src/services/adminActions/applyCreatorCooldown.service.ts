@@ -2,6 +2,7 @@
 
 import { applyCreatorCooldownExecutor } from "./actionExecutors/applyCreatorCooldown.executor";
 import { CreatorProfile } from "../../models/creatorProfile.model";
+import User from "../../models/User";
 
 type Input = {
   adminId: string;
@@ -25,7 +26,9 @@ export const applyCreatorCooldownService = async ({
   }
 
   const now = new Date();
-  const currentCooldown = creatorProfile.creatorCooldownUntil ?? null;
+  const targetUser = await User.findById(creatorProfile.userId).select("creatorCooldownUntil").lean();
+  if (!targetUser) throw new Error("Target user not found");
+  const currentCooldown = targetUser.creatorCooldownUntil ?? null;
 
   const hasActiveCooldown =
     currentCooldown !== null && currentCooldown.getTime() > now.getTime();

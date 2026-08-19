@@ -17,6 +17,11 @@ export class AdminFinancialService {
   getOverview() { return this.read.overview(); }
   getPayments(input: any) { return this.read.payments(input); }
   getPayment(reference: string) { return this.read.payment(reference); }
+  async getPaymentFinancialDetail(reference: string) {
+    const detail = await this.read.paymentFinancialDetail(reference);
+    if (!detail) throw new Error("Payment not found");
+    return detail;
+  }
   getRefunds(input: any) { return this.read.refunds(input); }
   getRefund(reference: string) { return this.read.refund(reference); }
   getSettlements(input: any) { return this.read.settlements(input); }

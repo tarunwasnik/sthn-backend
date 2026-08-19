@@ -3,6 +3,7 @@
 
 import { revokeCreatorCooldownExecutor } from "./actionExecutors/revokeCreatorCooldown.executor";
 import { CreatorProfile } from "../../models/creatorProfile.model";
+import User from "../../models/User";
 
 type Input = {
   adminId: string;
@@ -24,11 +25,12 @@ export const revokeCreatorCooldownService = async ({
   }
 
   const now = new Date();
-  const currentCooldown = creatorProfile.creatorCooldownUntil ?? null;
+  const targetUser = await User.findById(creatorProfile.userId).select("creatorCooldownUntil").lean();
+  if (!targetUser) throw new Error("Target user not found");
+  const currentCooldown = targetUser.creatorCooldownUntil ?? null;
 
   const hasCooldown = currentCooldown !== null;
-  const isActiveCooldown =
-    hasCooldown && currentCooldown.getTime() > now.getTime();
+  const isActiveCooldown = hasCooldown && currentCooldown.getTime() > now.getTime();
 
   // ==========================
   // 🔥 DRY RUN MODE (Phase 20.5)
@@ -87,14 +89,6 @@ export const revokeCreatorCooldownService = async ({
   // ==========================
   // 🔹 REAL EXECUTION MODE
   // ==========================
-  if (!hasCooldown) {
-    throw new Error("Cannot revoke cooldown: creator has no cooldown");
-  }
-
-  if (!isActiveCooldown) {
-    throw new Error("Cannot revoke cooldown: cooldown has already expired");
-  }
-
   return revokeCreatorCooldownExecutor({
     adminId,
     creatorProfileId,

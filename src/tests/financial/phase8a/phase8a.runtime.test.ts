@@ -15,6 +15,7 @@ import { registerBookingPaymentMethodRegressionTests } from "./bookingPaymentMet
 import { registerBookingFundingReadTests } from "./bookingFundingRead.test";
 import { registerCreatorServicePriceTests } from "./creatorServicePrice.test";
 import { registerCreatorServicePriceControllerTests } from "./creatorServicePrice.controller.test";
+import { registerBookingServiceSnapshotTests } from "./bookingServiceSnapshot.test";
 
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "phase8a-test-jwt-secret";
@@ -39,3 +40,4 @@ registerBookingPaymentMethodRegressionTests();
 registerBookingFundingReadTests();
 registerCreatorServicePriceTests();
 registerCreatorServicePriceControllerTests();
+registerBookingServiceSnapshotTests();

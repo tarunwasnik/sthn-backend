@@ -60,6 +60,9 @@ export const getCreatorBookingDetails = async (
         service: {
           _id: booking.serviceId,
           title: booking.serviceTitle,
+          // A null snapshot denotes legacy partial evidence, never a live
+          // CreatorService fallback presented as booking-time truth.
+          snapshot: booking.serviceSnapshot ?? null,
           data: service || null,
         },
       },

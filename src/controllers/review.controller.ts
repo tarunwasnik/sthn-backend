@@ -3,12 +3,18 @@
 import { Request, Response } from "express";
 import { submitReviewService } from "../services/review/submitReview.service";
 import { Review } from "../models/review.model";
+import { Booking } from "../models/booking.model";
+import { CreatorProfile } from "../models/creatorProfile.model";
+import { UserProfile } from "../models/userProfile.model";
+import mongoose from "mongoose";
+
+type AuthenticatedRequest = Request & { user?: { id: string } };
 
 /* =========================
    SUBMIT REVIEW
 ========================= */
 
-export const submitReview = async (req: Request, res: Response) => {
+export const submitReview = async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user;
   const { bookingId } = req.params;
   const { rating, comment, reportFlag } = req.body;
@@ -47,10 +53,23 @@ export const getReviewsForCreator = async (req: Request, res: Response) => {
   try {
     const { creatorId } = req.params;
 
-    if (!creatorId) {
+    if (!creatorId || !mongoose.Types.ObjectId.isValid(creatorId)) {
       return res.status(400).json({
-        message: "creatorId is required",
+        message: "Invalid creatorId",
       });
+    }
+
+    // Public creator profiles identify a CreatorProfile. Reviews remain owned by
+    // the Creator's underlying User identity, so resolve that boundary here.
+    const creator = await CreatorProfile.findOne({
+      _id: creatorId,
+      status: "active",
+    })
+      .select("userId")
+      .lean();
+
+    if (!creator) {
+      return res.status(404).json({ message: "Creator not found" });
     }
 
     // ✅ Pagination params
@@ -61,7 +80,7 @@ export const getReviewsForCreator = async (req: Request, res: Response) => {
 
     // ✅ TRUST FILTER APPLIED
     const query = {
-      revieweeId: creatorId,
+      revieweeId: creator.userId,
       role: "USER_TO_CREATOR",
       trustScore: { $gte: 0.3 },
       isFlagged: { $ne: true },
@@ -75,12 +94,36 @@ export const getReviewsForCreator = async (req: Request, res: Response) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate("reviewerId", "displayName avatarUrl");
+      .select("_id reviewerId rating comment createdAt")
+      .lean();
+
+    const reviewerProfiles = await UserProfile.find({
+      userId: { $in: reviews.map((review) => review.reviewerId) },
+    })
+      .select("userId username avatar")
+      .lean();
+    const profileByUserId = new Map(
+      reviewerProfiles.map((profile) => [String(profile.userId), profile]),
+    );
 
     const totalPages = Math.ceil(total / limit);
 
     return res.status(200).json({
-      reviews,
+      reviews: reviews.map((review) => {
+        const reviewer = profileByUserId.get(String(review.reviewerId));
+        return {
+          reviewId: String(review._id),
+          rating: review.rating,
+          comment: review.comment,
+          createdAt: review.createdAt,
+          reviewer: reviewer
+            ? {
+                displayName: reviewer.username,
+                avatarUrl: reviewer.avatar,
+              }
+            : null,
+        };
+      }),
       pagination: {
         page,
         limit,
@@ -103,7 +146,7 @@ export const getReviewsForCreator = async (req: Request, res: Response) => {
    REPORT REVIEW (NEW)
 ========================= */
 
-export const reportReview = async (req: Request, res: Response) => {
+export const reportReview = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user;
     const { reviewId } = req.params;
@@ -154,4 +197,49 @@ export const reportReview = async (req: Request, res: Response) => {
       message: "Failed to report review",
     });
   }
+};
+
+/* =========================
+   CURRENT ACTOR BOOKING REVIEW STATE
+========================= */
+
+export const getMyBookingReviewState = async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user;
+  const { bookingId } = req.params;
+
+  if (!user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+    return res.status(400).json({ message: "Invalid bookingId" });
+  }
+
+  const booking = await Booking.findById(bookingId).select("userId creatorId").lean();
+  if (!booking) {
+    return res.status(404).json({ message: "Booking not found" });
+  }
+
+  const isParticipant =
+    String(booking.userId) === user.id || String(booking.creatorId) === user.id;
+  if (!isParticipant) {
+    return res.status(403).json({ message: "Access denied" });
+  }
+
+  const review = await Review.findOne({ bookingId: booking._id, reviewerId: user.id })
+    .select("_id rating comment reportFlag createdAt")
+    .lean();
+
+  return res.status(200).json({
+    hasReviewed: Boolean(review),
+    review: review
+      ? {
+          reviewId: String(review._id),
+          rating: review.rating,
+          comment: review.comment,
+          reportFlag: review.reportFlag,
+          createdAt: review.createdAt,
+        }
+      : null,
+  });
 };

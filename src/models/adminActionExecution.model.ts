@@ -15,6 +15,7 @@ export interface IAdminActionExecution extends Document {
   targetId: mongoose.Types.ObjectId;
 
   status: AdminActionExecutionStatus;
+  result?: Record<string, unknown>;
 
   createdAt: Date;
 }
@@ -53,6 +54,7 @@ const AdminActionExecutionSchema = new Schema<IAdminActionExecution>(
       required: true,
       index: true,
     },
+    result: { type: Schema.Types.Mixed },
   },
   {
     timestamps: { createdAt: true, updatedAt: false },

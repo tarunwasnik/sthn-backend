@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import mongoose from "mongoose";
 import { adminFinancialService } from "../services/admin/adminFinancial.service";
 import { adminObjectId, adminReference, parseAdminCreatorBalanceListQuery, parseAdminPayoutListQuery, parseAdminPaymentListQuery, parseAdminRefundListQuery, parseAdminSettlementListQuery, parseAdminWithdrawalListQuery } from "../validators/adminFinancial.validator";
-import { creatorBalanceDto, overviewDto, paginatedDto, paymentDto, payoutDto, refundDto, settlementDto, withdrawalDto } from "../dtos/adminFinancial.dto";
+import { creatorBalanceDto, overviewDto, paginatedDto, paymentDto, paymentFinancialDetailDto, payoutDto, refundDto, settlementDto, withdrawalDto } from "../dtos/adminFinancial.dto";
 
 const safe = (value: any) => value ? JSON.parse(JSON.stringify(value, (key, item) => /providerPayload|encrypted|accountNumber|ifsc|upi|token|secret/i.test(key) ? undefined : item)) : value;
 const send = (res: Response, data: unknown) => res.json({ success: true, data: safe(data) });
@@ -15,6 +15,7 @@ export const adminFinancialController = {
   listPayouts: async (req: Request,res: Response) => send(res, paginatedDto(await adminFinancialService.getPayouts(parseAdminPayoutListQuery(req.query)), payoutDto)),
   overview: async (_req: Request,res: Response) => send(res, overviewDto(await adminFinancialService.getOverview())),
   payment: async (req: Request,res: Response) => send(res, paymentDto(await adminFinancialService.getPayment(adminReference(req.params.paymentReference)))),
+  paymentFinancialDetail: async (req: Request,res: Response) => send(res, paymentFinancialDetailDto(await adminFinancialService.getPaymentFinancialDetail(adminReference(req.params.paymentReference)))),
   refund: async (req: Request,res: Response) => send(res, refundDto(await adminFinancialService.getRefund(adminReference(req.params.refundReference)))),
   settlement: async (req: Request,res: Response) => send(res, settlementDto(await adminFinancialService.getSettlement(adminReference(req.params.settlementReference)))),
   withdrawal: async (req: Request,res: Response) => send(res, withdrawalDto(await adminFinancialService.getWithdrawal(adminReference(req.params.withdrawalReference)))),

@@ -387,6 +387,25 @@ export class FxRateSnapshotService {
     return toFxRateSnapshotResponseDto(current, { now, cached: true });
   }
 
+  async getAdminReadState() {
+    const now = this.now();
+    const configuredPairs = this.config.enabledPairs
+      ? Array.from(this.config.enabledPairs).sort()
+      : this.config.providerMode === "INTERNAL" ? ["INR:USD"] : [];
+    const snapshots = await exchangeRateSnapshotRepository.listCurrent(
+      this.provider.providerName,
+    );
+    return {
+      provider: this.provider.providerName,
+      providerMode: this.config.providerMode,
+      refreshPairs: configuredPairs.map((pair) => {
+        const [baseCurrency, quoteCurrency] = pair.split(":");
+        return { baseCurrency, quoteCurrency };
+      }),
+      snapshots: snapshots.map((snapshot) => toFxRateSnapshotResponseDto(snapshot, { now })),
+    };
+  }
+
   async lookupOrRefresh(base: unknown, quote: unknown,
     actor: FxActor = { type: "SYSTEM" }) {
     return this.refresh(base, quote, false, actor);

@@ -13,6 +13,12 @@ interface SubmitReviewInput {
   reportFlag?: boolean;
 }
 
+const isReviewDuplicateKeyError = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  error.code === 11000;
+
 export const submitReviewService = async ({
   bookingId,
   reviewerId,
@@ -162,6 +168,9 @@ export const submitReviewService = async ({
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
+    if (isReviewDuplicateKeyError(err)) {
+      throw new Error("You already reviewed this booking");
+    }
     throw err;
   }
 };

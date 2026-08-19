@@ -19,6 +19,7 @@ import payoutDestinationRoutes from "./payoutDestination.routes";
 import bookingRoutes from "./booking.routes";
 import userCancelBookingRoutes from "./userCancelBooking.routes";
 import disputeRoutes from "./dispute.routes";
+import reviewRoutes from "./review.routes";
 import chatRoutes from "./chat.routes";
 
 import adminDashboardRoutes from "./admin.dashboard.routes";
@@ -54,6 +55,9 @@ router.use("/bookings/creator", creatorCancelBookingRoutes); // ✅ IMPORTANT
 
 /* ================= DISPUTES ================= */
 router.use("/disputes", disputeRoutes);
+
+/* ================= REVIEWS ================= */
+router.use("/reviews", reviewRoutes);
 
 /* ================= CREATORS ================= */
 router.use("/creator-applications", creatorApplicationRoutes);

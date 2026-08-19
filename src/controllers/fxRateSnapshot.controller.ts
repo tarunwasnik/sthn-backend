@@ -7,6 +7,14 @@ import { fxRateSnapshotService } from
   "../services/financial/fxRateSnapshot.service";
 
 export class FxRateSnapshotController {
+  async list(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) return res.status(401).json({ success: false, message: "Unauthorized" });
+      const data = await fxRateSnapshotService.getAdminReadState();
+      return res.status(200).json({ success: true, data });
+    } catch (error) { next(error); }
+  }
+
   async refresh(req: Request, res: Response, next: NextFunction) {
     try {
       if (!req.user) return res.status(401).json({

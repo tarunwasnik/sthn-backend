@@ -1,6 +1,7 @@
 import { getAdminActionDefinition } from "./adminActionRegistry.service";
 import { applyCreatorCooldownService } from "./applyCreatorCooldown.service";
 import { revokeCreatorCooldownService } from "./revokeCreatorCooldown.service";
+import { executeGovernanceAction } from "./actionExecutors/governance.executor";
 import { logAdminAction } from "./adminActionLogger.service";
 import { validateAdminActionParams } from "./adminActionValidator";
 
@@ -55,7 +56,7 @@ export const executeAdminActionService = async ({
   adminRole: string;
   key: string;
   targetId: string;
-  params: Record<string, any>;
+  params: Record<string, unknown>;
   reason: string;
   dryRun?: boolean;
   confirmationToken?: string;
@@ -228,7 +229,7 @@ export const executeAdminActionService = async ({
   // ==========================
   // 2️⃣ REASON + PARAM VALIDATION
   // ==========================
-  if (action.requiresReason && !reason) {
+  if (action.requiresReason && (!reason || typeof reason !== "string" || !reason.trim() || reason.trim().length > 500)) {
     throw new Error("This action requires a reason");
   }
 
@@ -237,7 +238,10 @@ export const executeAdminActionService = async ({
     throw new Error(validation.error);
   }
 
-  const paramsHash = hashParams(params);
+  // Reason is a material part of every governance decision and must be bound
+  // to both confirmation and deterministic execution identity, without being
+  // smuggled into the action parameter payload.
+  const paramsHash = hashParams({ ...params, __reason: reason.trim() });
 
   // ==========================
   // 🔐 CONFIRMATION
@@ -260,7 +264,7 @@ export const executeAdminActionService = async ({
   // ==========================
   // 🔐 IDEMPOTENCY
   // ==========================
-  let executionRecord: any | null = null;
+  let executionRecord: InstanceType<typeof AdminActionExecution> | null = null;
 
   if (!dryRun) {
     const idempotencyKey = createIdempotencyKey({
@@ -290,6 +294,8 @@ export const executeAdminActionService = async ({
             outcome: "EXECUTED",
             action: action.key,
             summary: "Action already executed",
+            replay: true,
+            result: existing.result,
           };
         }
 
@@ -304,14 +310,14 @@ export const executeAdminActionService = async ({
   // ==========================
   // 3️⃣ DISPATCH TO SERVICE
   // ==========================
-  let rawResult: any;
+  let rawResult: Record<string, any>;
 
   switch (key) {
     case "APPLY_CREATOR_COOLDOWN":
       rawResult = await applyCreatorCooldownService({
         adminId,
         creatorProfileId: targetId,
-        days: params.days,
+        days: params.days as number,
         reason,
         dryRun,
       });
@@ -323,6 +329,15 @@ export const executeAdminActionService = async ({
         creatorProfileId: targetId,
         reason,
         dryRun,
+      });
+      break;
+
+    case "SUSPEND_USER":
+    case "ACTIVATE_USER":
+    case "BAN_USER":
+    case "RESET_USER_TRUST":
+      rawResult = await executeGovernanceAction({
+        adminId, userId: targetId, reason, action: key, dryRun,
       });
       break;
 
@@ -378,8 +393,10 @@ export const executeAdminActionService = async ({
   // ==========================
   // 🔹 EXECUTION — FINALIZE
   // ==========================
+  const actionResult = safeActionResult(action.key, rawResult, targetId);
   if (executionRecord) {
     executionRecord.status = "EXECUTED";
+    executionRecord.result = actionResult;
     await executionRecord.save();
   }
 
@@ -393,12 +410,21 @@ export const executeAdminActionService = async ({
     params,
     reason,
     status: "SUCCESS",
-    result: rawResult,
+    result: actionResult,
   });
 
   return {
     outcome: "EXECUTED",
     action: action.key,
     summary: rawResult?.summary,
+    replay: false,
+    result: actionResult,
   };
+};
+
+const safeActionResult = (actionKey: string, rawResult: Record<string, any>, targetId: string) => {
+  if (rawResult.result) return rawResult.result;
+  if (actionKey === "APPLY_CREATOR_COOLDOWN") return { targetId, kind: "CREATOR", until: rawResult.cooldownUntil, reason: rawResult.reason, replay: Boolean(rawResult.replay) };
+  if (actionKey === "REVOKE_CREATOR_COOLDOWN") return { targetId, kind: "CREATOR", revoked: Boolean(rawResult.revoked) };
+  return { targetId };
 };

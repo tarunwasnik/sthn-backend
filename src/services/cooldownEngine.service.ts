@@ -2,6 +2,7 @@
 
 
 import User from "../models/User";
+import { applyAccountCooldown } from "./accountGovernance/cooldownLifecycle.service";
 
 const nowPlus = (hours: number) =>
   new Date(Date.now() + hours * 60 * 60 * 1000);
@@ -28,11 +29,10 @@ export const applyCooldownIfNeeded = async (userId: string) => {
     userCooldown = nowPlus(24);
   }
 
-  await User.updateOne(
-    { _id: userId },
-    {
-      ...(userCooldown && { userCooldownUntil: userCooldown }),
-      ...(creatorCooldown && { creatorCooldownUntil: creatorCooldown }),
-    }
-  );
+  if (userCooldown) {
+    await applyAccountCooldown({ userId, kind: "USER", until: userCooldown, reason: "Automatic abuse cooldown" });
+  }
+  if (creatorCooldown) {
+    await applyAccountCooldown({ userId, kind: "CREATOR", until: creatorCooldown, reason: "Automatic abuse cooldown" });
+  }
 };

@@ -8,6 +8,7 @@ import { walletCreationService } from "../wallet/walletCreation.service";
 import { walletTopUpRequestRepository } from "../../repositories/walletTopUpRequest.repository";
 import { IWalletTopUpRequest } from "../../models/walletTopUpRequest.model";
 import { WalletTopUpRequestError } from "../../errors/financial/WalletTopUpRequestError";
+import { WalletTopUpRequestStatus } from "../../enums/financial/walletTopUpRequestStatus.enum";
 
 export class WalletTopUpRequestService {
   private page(value: unknown, fallback: number) { const n = typeof value === "string" ? Number(value) : fallback; if (!Number.isSafeInteger(n) || n < 1) throw new WalletTopUpRequestError("Invalid pagination.", "WALLET_TOP_UP_REQUEST_INVALID_PAGINATION"); return n; }
@@ -50,7 +51,7 @@ export class WalletTopUpRequestService {
   }
   async listOwn(userId: string, page?: unknown, limit?: unknown) { const identity = new mongoose.Types.ObjectId(userId); const p = this.page(page, 1); const l = Math.min(this.page(limit, 20), 100); return (await walletTopUpRequestRepository.listByUser(identity, p, l)).map((item) => this.dto(item)); }
   async getOwn(userId: string, reference: string) { const request = await walletTopUpRequestRepository.findByUserAndReference(new mongoose.Types.ObjectId(userId), reference); if (!request) throw new WalletTopUpRequestError("Top-up request not found.", "WALLET_TOP_UP_REQUEST_NOT_FOUND"); return this.dto(request); }
-  async listPending(page?: unknown, limit?: unknown) { const p = this.page(page, 1); const l = Math.min(this.page(limit, 20), 100); return (await walletTopUpRequestRepository.listPending(p, l)).map((item) => this.dto(item)); }
+  async listAdminByStatus(status: WalletTopUpRequestStatus, page?: unknown, limit?: unknown) { const p = this.page(page, 1); const l = Math.min(this.page(limit, 20), 100); return (await walletTopUpRequestRepository.listByStatus(status, p, l)).map((item) => this.dto(item)); }
   async getAdmin(reference: string) { const request = await walletTopUpRequestRepository.findByReference(reference); if (!request) throw new WalletTopUpRequestError("Top-up request not found.", "WALLET_TOP_UP_REQUEST_NOT_FOUND"); return this.dto(request); }
 }
 export const walletTopUpRequestService = new WalletTopUpRequestService();

@@ -130,6 +130,9 @@ export const getUserBookings = async (req: Request, res: Response) => {
         service: {
           _id: booking.serviceId,
           title: booking.serviceTitle,
+          // Null means this is a legacy booking; live service data below is
+          // not booking-time evidence.
+          snapshot: booking.serviceSnapshot ?? null,
           data: serviceMap.get(String(booking.serviceId)) || null,
         },
 
@@ -559,6 +562,15 @@ export const requestBooking = async (
           userId: user.id,
           creatorId,
           serviceId: service._id,
+          serviceSnapshot: {
+            serviceId: service._id,
+            title: service.title,
+            description: service.description,
+            durationMinutes: service.durationMinutes,
+            price: service.price,
+            currency: service.currency,
+            media: [...(service.media ?? [])],
+          },
           serviceTitle: service.title,
           durationMinutes: totalMinutes,
           price: totalPrice,

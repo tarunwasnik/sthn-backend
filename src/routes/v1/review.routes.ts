@@ -5,6 +5,7 @@ import { protect } from "../../middlewares/auth.middleware";
 import {
   submitReview,
   getReviewsForCreator,
+  getMyBookingReviewState,
   reportReview, // ✅ NEW
 } from "../../controllers/review.controller";
 
@@ -14,6 +15,11 @@ const router = Router();
    SUBMIT REVIEW
 ========================= */
 router.post("/:bookingId", protect, submitReview);
+
+/* =========================
+   CURRENT ACTOR BOOKING REVIEW STATE
+========================= */
+router.get("/booking/:bookingId/me", protect, getMyBookingReviewState);
 
 /* =========================
    GET CREATOR REVIEWS (PUBLIC)

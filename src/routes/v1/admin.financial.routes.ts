@@ -22,7 +22,7 @@ import { adminBookingEscrowController as bookingEscrow } from "../../controllers
 import { adminPlatformRevenueController as platformRevenue } from "../../controllers/adminPlatformRevenue.controller";
 const router = Router(); router.use(protect, authorizeRoles("admin"));
 router.get("/overview", c.overview);
-router.get("/payments", c.listPayments); router.get("/payments/:paymentReference", c.payment); router.post("/payments/:paymentReference/sync", c.syncPayment);
+router.get("/payments", c.listPayments); router.get("/payments/:paymentReference/financial-detail", c.paymentFinancialDetail); router.get("/payments/:paymentReference", c.payment); router.post("/payments/:paymentReference/sync", c.syncPayment);
 router.get("/refunds", c.listRefunds); router.get("/refunds/:refundReference", c.refund); router.post("/refunds/:refundReference/sync", c.syncRefund);
 router.get("/settlements", c.listSettlements); router.get("/settlements/:settlementReference", c.settlement); router.post("/settlements/:settlementReference/recheck", c.recheckSettlement);
 router.get("/creator-balances", c.listBalances); router.get("/creator-balances/:creatorId", c.balance);
@@ -43,6 +43,7 @@ router.get("/creator-withdrawal-reconciliations", withdrawalOperations.list.bind
 router.post("/creator-withdrawal-reconciliations/:reconciliationReference/retry", withdrawalOperations.retry.bind(withdrawalOperations));
 router.post("/creator-withdrawal-reconciliations/:reconciliationReference/repair", withdrawalOperations.repair.bind(withdrawalOperations));
 router.patch("/creator-withdrawal-reconciliations/:reconciliationReference/status", withdrawalOperations.updateStatus.bind(withdrawalOperations));
+router.get("/fx-rates", fxRates.list.bind(fxRates));
 router.post("/fx-rates/refresh", fxRates.refresh.bind(fxRates));
 router.get("/platform-revenue", platformRevenue.summary);
 router.get("/platform-revenue/entries", platformRevenue.entries);

@@ -2,26 +2,17 @@
 
 
 import { Request, Response } from "express";
-import { applyCreatorCooldownService } from "../../services/adminActions/applyCreatorCooldown.service";
+import { executeAdminActionService } from "../../services/adminActions/adminActionDispatcher.service";
+import { mapAdminActionError } from "../../utils/adminActionError.mapper";
 import { adminAsyncHandler } from "../../middlewares/adminAsyncHandler";
 import { adminResponse } from "../../utils/adminResponse";
 
 export const applyCreatorCooldown = adminAsyncHandler(
   async (req: Request, res: Response) => {
-    const adminId = req.user!.id;
-    const { targetId, params, reason } = req.body;
-
-    const result = await applyCreatorCooldownService({
-      adminId,
-      creatorProfileId: targetId,
-      days: params.days,
-      reason,
-    });
-
-    res.json(
-      adminResponse({
-        data: result,
-      })
-    );
+    try {
+      const { targetId, params, reason, dryRun = false, confirmationToken } = req.body;
+      const result = await executeAdminActionService({ adminId: req.user!.id, adminRole: req.user!.role, key: "APPLY_CREATOR_COOLDOWN", targetId, params: params ?? {}, reason, dryRun, confirmationToken });
+      res.json(adminResponse({ data: result }));
+    } catch (error) { res.status(403).json(mapAdminActionError(error)); }
   }
 );

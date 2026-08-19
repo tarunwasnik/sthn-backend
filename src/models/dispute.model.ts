@@ -8,6 +8,13 @@ export type DisputeSignal =
   | "SLA_SOFT_BREACH"
   | "SLA_HARD_BREACH"
   | "REPEAT_OFFENDER";
+export type DisputeInputState = "OPEN" | "CLOSED";
+
+export interface IDisputeInputAccess {
+  state: DisputeInputState;
+  changedAt?: Date;
+  changedBy?: Types.ObjectId;
+}
 
 export interface IDispute extends Document {
   bookingId: Types.ObjectId;
@@ -16,6 +23,10 @@ export interface IDispute extends Document {
   reason: string;
 
   status: DisputeStatus;
+
+  /** Private-branch submission permission; one shared dispute, two branches. */
+  customerInput: IDisputeInputAccess;
+  creatorInput: IDisputeInputAccess;
 
   // ⏱ SLA & escalation
   slaHours: number;
@@ -31,10 +42,20 @@ export interface IDispute extends Document {
     resolvedBy: Types.ObjectId;
     resolvedAt: Date;
   };
+  finalDecision?: { customerOutcome:"NO_ADVERSE_FINDING"|"ADVERSE_FINDING"|"MIXED"|"INCONCLUSIVE"; customerSummary:string; creatorOutcome:"NO_ADVERSE_FINDING"|"ADVERSE_FINDING"|"MIXED"|"INCONCLUSIVE"; creatorSummary:string; summary:string; financialReviewRequired:boolean; governanceReviewRequired:boolean; finalizedBy:Types.ObjectId; finalizedAt:Date; };
 
   createdAt: Date;
   updatedAt: Date;
 }
+
+const DisputeInputAccessSchema = new Schema<IDisputeInputAccess>(
+  {
+    state: { type: String, enum: ["OPEN", "CLOSED"], required: true, default: "OPEN" },
+    changedAt: Date,
+    changedBy: { type: Schema.Types.ObjectId, ref: "User" },
+  },
+  { _id: false, id: false },
+);
 
 const DisputeSchema = new Schema<IDispute>(
   {
@@ -89,6 +110,17 @@ const DisputeSchema = new Schema<IDispute>(
       index: true,
     },
 
+    customerInput: {
+      type: DisputeInputAccessSchema,
+      required: true,
+      default: () => ({ state: "OPEN" }),
+    },
+    creatorInput: {
+      type: DisputeInputAccessSchema,
+      required: true,
+      default: () => ({ state: "OPEN" }),
+    },
+
     /* ================= RESOLUTION ================= */
 
     resolution: {
@@ -103,6 +135,7 @@ const DisputeSchema = new Schema<IDispute>(
       },
       resolvedAt: Date,
     },
+    finalDecision:{type:{customerOutcome:{type:String,enum:["NO_ADVERSE_FINDING","ADVERSE_FINDING","MIXED","INCONCLUSIVE"]},customerSummary:{type:String,maxlength:2000},creatorOutcome:{type:String,enum:["NO_ADVERSE_FINDING","ADVERSE_FINDING","MIXED","INCONCLUSIVE"]},creatorSummary:{type:String,maxlength:2000},summary:{type:String,maxlength:4000},financialReviewRequired:Boolean,governanceReviewRequired:Boolean,finalizedBy:{type:Schema.Types.ObjectId,ref:"User"},finalizedAt:Date},default:undefined},
   },
   { timestamps: true }
 );

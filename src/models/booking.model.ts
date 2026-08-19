@@ -14,6 +14,11 @@ export interface IBooking extends Document {
   creatorId: mongoose.Types.ObjectId;
 
   serviceId: mongoose.Types.ObjectId;
+  /**
+   * Immutable public CreatorService evidence captured when this booking was
+   * created. Absent only for bookings created before DI-2A.
+   */
+  serviceSnapshot?: IBookingServiceSnapshot;
 
   /**
    * Financial Domain payment created for this booking.
@@ -88,6 +93,30 @@ export interface IBooking extends Document {
   updatedAt: Date;
 }
 
+export interface IBookingServiceSnapshot {
+  serviceId: mongoose.Types.ObjectId;
+  title: string;
+  description: string;
+  durationMinutes: number;
+  /** CreatorService's advertised major-unit price, not booking financial pricing. */
+  price: number;
+  currency: string;
+  media: string[];
+}
+
+const BookingServiceSnapshotSchema = new Schema<IBookingServiceSnapshot>(
+  {
+    serviceId: { type: Schema.Types.ObjectId, ref: "CreatorService", required: true },
+    title: { type: String, required: true, trim: true },
+    description: { type: String, required: true, trim: true },
+    durationMinutes: { type: Number, required: true, min: 15, max: 480 },
+    price: { type: Number, required: true, min: 0 },
+    currency: { type: String, required: true, trim: true },
+    media: { type: [String], default: [] },
+  },
+  { _id: false, id: false },
+);
+
 const BookingSchema = new Schema<IBooking>(
   {
     slotIds: [
@@ -117,6 +146,11 @@ const BookingSchema = new Schema<IBooking>(
       ref: "CreatorService",
       required: true,
       index: true,
+    },
+
+    serviceSnapshot: {
+      type: BookingServiceSnapshotSchema,
+      immutable: true,
     },
 
     paymentId: {

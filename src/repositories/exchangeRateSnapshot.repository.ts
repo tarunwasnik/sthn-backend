@@ -65,6 +65,12 @@ export class ExchangeRateSnapshotRepository {
     return ExchangeRateSnapshot.find({ provider, baseCurrency, quoteCurrency })
       .sort({ effectiveDate: -1, createdAt: -1 }).limit(limit).exec();
   }
+
+  listCurrent(provider: string) {
+    return ExchangeRateSnapshot.find({ provider,
+      status: ExchangeRateSnapshotStatus.ACTIVE })
+      .sort({ baseCurrency: 1, quoteCurrency: 1, createdAt: -1 }).exec();
+  }
 }
 
 export const exchangeRateSnapshotRepository =

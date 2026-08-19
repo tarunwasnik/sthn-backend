@@ -38,6 +38,7 @@ const TERMINATION_CAUSES = new Map<BookingTerminationType, BookingWalletReleaseC
   [BookingTerminationType.CUSTOMER_CANCELLED, BookingWalletReleaseCause.USER_CANCELLED],
   [BookingTerminationType.CREATOR_CANCELLED, BookingWalletReleaseCause.CREATOR_CANCELLED],
   [BookingTerminationType.ADMIN_CANCELLED, BookingWalletReleaseCause.ADMIN_CANCELLED],
+  [BookingTerminationType.GOVERNANCE_TERMINATED, BookingWalletReleaseCause.GOVERNANCE_TERMINATED],
 ]);
 
 export const bookingWalletReleaseCauseForTermination = (
@@ -133,6 +134,7 @@ export class BookingWalletReservationReleaseService {
       [BookingWalletReleaseCause.USER_CANCELLED, BookingTerminationType.CUSTOMER_CANCELLED],
       [BookingWalletReleaseCause.CREATOR_CANCELLED, BookingTerminationType.CREATOR_CANCELLED],
       [BookingWalletReleaseCause.ADMIN_CANCELLED, BookingTerminationType.ADMIN_CANCELLED],
+      [BookingWalletReleaseCause.GOVERNANCE_TERMINATED, BookingTerminationType.GOVERNANCE_TERMINATED],
     ]).get(cause);
     if (booking.terminationType !== expectedTermination) {
       this.fail(

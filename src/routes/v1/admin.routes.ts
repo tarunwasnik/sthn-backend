@@ -31,6 +31,16 @@ import featureFlagDashboardRoutes from "./featureFlagDashboard.routes";
 
 import { simulatePayoutStatus } from "../../controllers/admin/providerSimulator.controller";
 import { applyPayoutDestinationVerificationDecision } from "../../controllers/admin/payoutDestinationVerification.controller";
+import {
+  suspendUserThroughAdminAction,
+  activateUserThroughAdminAction,
+  banUserThroughAdminAction,
+  resetUserTrustThroughAdminAction,
+} from "../../controllers/adminActions/governanceCompatibility.controller";
+import { getAdminGovernanceTargetController } from "../../controllers/adminGovernanceRead.controller";
+import { addAdminDisputeFinding, createAdminDisputeRequest, finalizeAdminDispute, getAdminDispute, getAdminDisputeInvestigation, listAdminDisputes, setAdminDisputeInputAccess, shareAdminDisputeSubmission } from "../../controllers/adminDispute.controller";
+import { chatDocumentUpload, chatImageUpload } from "../../middlewares/upload.middleware";
+import { uploadAdminDocument, uploadAdminImage } from "../../controllers/disputeDirectEvidence.controller";
 
 const router = Router();
 
@@ -59,6 +69,7 @@ router.post(
 );
 
 router.get("/audit-logs", protect, authorizeRoles("admin"), getAuditLogs);
+router.get("/governance/targets/:userId", protect, authorizeRoles("admin"), getAdminGovernanceTargetController);
 
 /* ================= PAYOUT DESTINATION VERIFICATION ================= */
 
@@ -75,21 +86,21 @@ router.patch(
   "/users/:id/suspend",
   protect,
   authorizeRoles("admin"),
-  suspendUser
+  suspendUserThroughAdminAction
 );
 
 router.patch(
   "/users/:id/activate",
   protect,
   authorizeRoles("admin"),
-  activateUser
+  activateUserThroughAdminAction
 );
 
 router.patch(
   "/users/:id/ban",
   protect,
   authorizeRoles("admin"),
-  banUser
+  banUserThroughAdminAction
 );
 
 /* ================= CREATOR PROFILE LIFECYCLE ================= */
@@ -156,7 +167,7 @@ router.patch(
   "/users/:id/reset-trust",
   protect,
   authorizeRoles("admin"),
-  resetUserTrust
+  resetUserTrustThroughAdminAction
 );
 
 /* ================= BOOKING OVERRIDES ================= */
@@ -169,6 +180,17 @@ router.patch(
 );
 
 /* ================= DISPUTE RESOLUTION ================= */
+
+router.get("/disputes", protect, authorizeRoles("admin"), listAdminDisputes);
+
+router.patch("/disputes/:disputeId/input-access", protect, authorizeRoles("admin"), setAdminDisputeInputAccess);
+router.post("/disputes/:disputeId/findings", protect, authorizeRoles("admin"), addAdminDisputeFinding);
+router.post("/disputes/:disputeId/finalize", protect, authorizeRoles("admin"), finalizeAdminDispute);
+router.post("/disputes/:disputeId/requests", protect, authorizeRoles("admin"), createAdminDisputeRequest);
+router.post("/disputes/:disputeId/share", protect, authorizeRoles("admin"), shareAdminDisputeSubmission);
+router.get("/disputes/:disputeId/investigation", protect, authorizeRoles("admin"), getAdminDisputeInvestigation);
+router.post("/disputes/:disputeId/evidence/images", protect, authorizeRoles("admin"), chatImageUpload.single("file"), uploadAdminImage);
+router.post("/disputes/:disputeId/evidence/documents", protect, authorizeRoles("admin"), chatDocumentUpload.single("file"), uploadAdminDocument);
 
 router.patch(
   "/disputes/:disputeId/resolve",
@@ -185,6 +207,8 @@ router.get(
   authorizeRoles("admin"),
   getEscalatedDisputes
 );
+
+router.get("/disputes/:disputeId", protect, authorizeRoles("admin"), getAdminDispute);
 
 /* ================= APPEALS ================= */
 

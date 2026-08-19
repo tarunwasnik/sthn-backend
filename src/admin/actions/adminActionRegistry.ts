@@ -60,6 +60,26 @@ export interface AdminActionDefinition {
 
 export const ADMIN_ACTIONS: AdminActionDefinition[] = [
   {
+    key: "SUSPEND_USER", label: "Suspend user", targetType: "user", allowedRoles: ["admin"],
+    riskLevel: "high", requiresReason: true,
+    policy: { allowedRoles: ["admin"], allowDryRun: true, allowExecute: true }, version: 1, params: [],
+  },
+  {
+    key: "ACTIVATE_USER", label: "Activate suspended user", targetType: "user", allowedRoles: ["admin"],
+    riskLevel: "medium", requiresReason: true,
+    policy: { allowedRoles: ["admin"], allowDryRun: true, allowExecute: true }, version: 1, params: [],
+  },
+  {
+    key: "BAN_USER", label: "Ban user", targetType: "user", allowedRoles: ["admin"],
+    riskLevel: "critical", requiresReason: true,
+    policy: { allowedRoles: ["admin"], allowDryRun: true, allowExecute: true }, version: 1, params: [],
+  },
+  {
+    key: "RESET_USER_TRUST", label: "Reset user trust", targetType: "user", allowedRoles: ["admin"],
+    riskLevel: "medium", requiresReason: true,
+    policy: { allowedRoles: ["admin"], allowDryRun: true, allowExecute: true }, version: 1, params: [],
+  },
+  {
     key: "APPLY_CREATOR_COOLDOWN",
     label: "Apply creator cooldown",
     targetType: "creator",
