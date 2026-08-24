@@ -4,6 +4,7 @@ import { protect } from "../../middlewares/auth.middleware";
 import { authorizeRoles } from "../../middlewares/authorize.middleware";
 import {
   listPendingProfiles,
+  listAdminReviewProfiles,
   approveProfile,
   rejectProfile,
 } from "../../controllers/profileVerification.controller";
@@ -15,6 +16,13 @@ router.get(
   protect,
   authorizeRoles("admin"),
   listPendingProfiles
+);
+
+router.get(
+  "/admin-review",
+  protect,
+  authorizeRoles("admin"),
+  listAdminReviewProfiles,
 );
 
 router.patch(

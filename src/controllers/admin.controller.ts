@@ -24,6 +24,7 @@ import { triggerSuspensionLifecycle } from "../services/accountGovernance/suspen
 import { removeSuspensionLifecycle } from "../services/accountGovernance/unsuspendLifecycle.service";
 import { triggerBanLifecycle } from "../services/accountGovernance/banLifecycle.service";
 import { resetAccountTrust } from "../services/accountGovernance/cooldownLifecycle.service";
+import { toUserTrustAuditSnapshot } from "../dtos/admin/userTrustAuditSnapshot.dto";
 
 /* ==================== HELPERS ==================== */
 
@@ -158,7 +159,13 @@ export const resetUserTrust = async (req: Request, res: Response) => {
     throw new AppError("Admin cannot reset own trust", 400);
   }
 
-  const before = (await User.findById(userId).lean()) ?? undefined;
+  const beforeUser = await User.findById(userId)
+    .select("abuseScore status governanceState userCooldownUntil creatorCooldownUntil")
+    .lean();
+
+  if (!beforeUser) {
+    throw new AppError("User not found", 404);
+  }
 
   const user = await resetAccountTrust(userId);
 
@@ -168,14 +175,8 @@ export const resetUserTrust = async (req: Request, res: Response) => {
     action: "USER_TRUST_RESET",
     entityType: "USER",
     entityId: user._id,
-    before,
-    after: {
-      abuseScore: user.abuseScore,
-      status: user.status,
-      governanceState: user.governanceState,
-      userCooldownCleared: true,
-      creatorCooldownCleared: true,
-    },
+    before: toUserTrustAuditSnapshot(beforeUser),
+    after: toUserTrustAuditSnapshot(user),
   });
 
   res.json({ message: "User trust reset successfully" });

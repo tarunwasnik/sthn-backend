@@ -58,6 +58,7 @@
     "test:admin-payment-detail": "node --test --test-concurrency=1 -r ts-node/register src/tests/financial/adminPaymentFinancialDetail.test.ts",
     "test:reviews": "node --test --test-concurrency=1 -r ts-node/register src/tests/review/review.runtime.test.ts",
     "test:disputes": "node --test --test-concurrency=1 -r ts-node/register src/tests/dispute/dispute.runtime.test.ts",
+    "test:terminal-chat": "node --test --test-concurrency=1 -r ts-node/register src/tests/chat/terminalChatReadOnly.runtime.test.ts",
     "test:admin-disputes": "node --test --test-concurrency=1 -r ts-node/register src/tests/dispute/adminDispute.runtime.test.ts",
     "test:admin-dispute-investigation": "node --test --test-concurrency=1 -r ts-node/register src/tests/dispute/adminDisputeInvestigation.runtime.test.ts",
     "test:dispute-findings": "node --test --test-concurrency=1 -r ts-node/register src/tests/dispute/disputeFindings.runtime.test.ts",

@@ -1,0 +1,10 @@
+import { Router } from "express";
+import { protect } from "../middlewares/auth.middleware";
+import { faceVerificationCaptureUpload } from "../middlewares/upload.middleware";
+import { beginFaceVerificationSession, cancelCurrentFaceVerificationSession, getFaceVerificationSessionStatus, uploadFaceVerificationCapture } from "../controllers/faceVerification.controller";
+const router = Router();
+router.post("/session", protect, beginFaceVerificationSession);
+router.get("/session/:sessionReference/status", protect, getFaceVerificationSessionStatus);
+router.post("/session/:sessionReference/cancel", protect, cancelCurrentFaceVerificationSession);
+router.post("/session/:sessionReference/captures/:challengeIndex", protect, faceVerificationCaptureUpload.single("file"), uploadFaceVerificationCapture);
+export default router;

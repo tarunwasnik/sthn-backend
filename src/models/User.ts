@@ -24,6 +24,8 @@ export interface IUser extends Document {
   password?: string | null;
   authProvider: "local" | "google";
   googleId?: string | null;
+  mobileCountryCode?: string | null;
+  mobileNumber?: string | null;
 
   role: Role;
 
@@ -118,6 +120,20 @@ const UserSchema = new Schema<IUser>(
       type: String,
       default: null,
       index: true,
+    },
+
+    mobileCountryCode: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 5,
+    },
+
+    mobileNumber: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 15,
     },
 
     role: {

@@ -54,7 +54,7 @@ export interface FinancialAuditContext {
   ledgerTransactionReference?: string; projectionOperationReference?: string;
 }
 export interface FinancialAuditTransition { fromStatus?: string; toStatus?: string; outcome?: AuditOutcome; }
-interface CreateAuditLogParams { actorType: AuditActorType; actorId?: mongoose.Types.ObjectId; action: string; entityType: string; entityId: mongoose.Types.ObjectId; before?: Record<string, any>; after?: Record<string, any>; session?: mongoose.ClientSession; }
+interface CreateAuditLogParams { actorType: AuditActorType; actorId?: mongoose.Types.ObjectId; actorReference?: string; action: string; entityType: string; entityId: mongoose.Types.ObjectId; before?: Record<string, any>; after?: Record<string, any>; session?: mongoose.ClientSession; }
 export interface FinancialAuditParams { action: AuditAction; actor: AuditActor; entityType: string; entityId: mongoose.Types.ObjectId; financialContext: FinancialAuditContext; transition?: FinancialAuditTransition; metadata?: Record<string, unknown>; session?: mongoose.ClientSession; }
 
 function boundedString(value: unknown, field: string): string {
@@ -95,7 +95,7 @@ function validateActor(actor: AuditActor) {
 
 /** The sole append-only audit authority, including financial audit sanitization. */
 export const createAuditLog = async (params: CreateAuditLogParams): Promise<void> => {
-  const actor = validateActor({ type: params.actorType, id: params.actorId });
+  const actor = validateActor({ type: params.actorType, id: params.actorId, reference: params.actorReference });
   if (!params.action || !params.entityType || !params.entityId) throw new Error("AuditLog: action, entity type and entity id are required");
   const data = { ...actor, action: params.action, entityType: params.entityType, entityId: params.entityId, before: params.before, after: params.after };
   if (params.session) await AuditLog.create([data], { session: params.session }); else await AuditLog.create(data);

@@ -83,7 +83,7 @@ export const getBookingDisputeState = async (req: AuthenticatedRequest, res: Res
 export const getMyDisputes = async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user;
   if (!user) return res.status(401).json({ message: "Unauthorized" });
-  const bookings = await Booking.find({ $or: [{ userId: user.id }, { creatorId: user.id }] }).select("_id bookingReference status serviceTitle").lean();
+  const bookings = await Booking.find({ $or: [{ userId: user.id }, { creatorId: user.id }] }).select("_id userId creatorId bookingReference status serviceTitle").lean();
   const bookingById = new Map(bookings.map((booking) => [String(booking._id), booking]));
   const disputes = await Dispute.find({ bookingId: { $in: bookings.map((booking) => booking._id) } }).sort({ createdAt: -1 });
   return res.status(200).json({ disputes: disputes.map((dispute) => {

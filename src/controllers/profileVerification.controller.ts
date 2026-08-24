@@ -1,77 +1,58 @@
 // backend/src/controllers/profileVerification.controller.ts
 
 import { Request, Response } from "express";
-import { UserProfile } from "../models/userProfile.model";
 import { AppError } from "../utils/AppError";
+import { catchAsync } from "../utils/catchAsync";
+import {
+  decideProfileVerificationRequest,
+  listProfileVerificationQueue,
+} from "../services/profile/profileVerificationRequest.service";
 
 /* ================= LIST PENDING PROFILES ================= */
 
-export const listPendingProfiles = async (_req: Request, res: Response) => {
-  const profiles = await UserProfile.find({
-    profileStatus: "pending_verification",
-  })
-    .populate("userId", "name email")
-    .sort({
-      verificationSubmittedAt: -1,
-      createdAt: -1,
-    })
-    .lean();
-
+export const listPendingProfiles = catchAsync(async (_req: Request, res: Response) => {
+  const profiles = await listProfileVerificationQueue("AI");
   res.json({ profiles });
-};
+});
+
+export const listAdminReviewProfiles = catchAsync(async (_req: Request, res: Response) => {
+  const profiles = await listProfileVerificationQueue("ADMIN_REVIEW");
+  res.json({ profiles });
+});
 
 /* ================= APPROVE PROFILE ================= */
 
-export const approveProfile = async (req: Request, res: Response) => {
+export const approveProfile = catchAsync(async (req: Request, res: Response) => {
   const { profileId } = req.params;
-
-  const profile = await UserProfile.findById(profileId);
-
-  if (!profile) {
-    throw new AppError("Profile not found", 404);
-  }
-
-  if (profile.profileStatus !== "pending_verification") {
-    throw new AppError("Profile not eligible for approval", 400);
-  }
-
-  profile.profileStatus = "verified";
-  profile.rejectionReason = "";
-
-  await profile.save();
+  const result = await decideProfileVerificationRequest({
+    profileId,
+    decision: "APPROVE",
+    authority: "ADMIN",
+    decidedBy: req.user!.id,
+  });
 
   res.json({
     message: "Profile verified successfully",
+    replayed: result.replayed,
   });
-};
+});
 
 /* ================= REJECT PROFILE ================= */
 
-export const rejectProfile = async (req: Request, res: Response) => {
+export const rejectProfile = catchAsync(async (req: Request, res: Response) => {
   const { profileId } = req.params;
-
   const { reason } = req.body;
-
-  const profile = await UserProfile.findById(profileId);
-
-  if (!profile) {
-    throw new AppError("Profile not found", 404);
-  }
-
-  if (profile.profileStatus !== "pending_verification") {
-    throw new AppError("Profile not eligible for rejection", 400);
-  }
-
-  if (!reason || !reason.trim()) {
-    throw new AppError("Rejection reason is required", 400);
-  }
-
-  profile.profileStatus = "rejected";
-  profile.rejectionReason = reason.trim();
-
-  await profile.save();
+  if (typeof reason !== "string") throw new AppError("Rejection reason is required", 400);
+  const result = await decideProfileVerificationRequest({
+    profileId,
+    decision: "REJECT",
+    authority: "ADMIN",
+    decidedBy: req.user!.id,
+    reason,
+  });
 
   res.json({
     message: "Profile rejected",
+    replayed: result.replayed,
   });
-};
+});

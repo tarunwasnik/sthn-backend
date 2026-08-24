@@ -4,6 +4,7 @@
 import { CreatorProfile } from "../../models/creatorProfile.model";
 import { Booking } from "../../models/booking.model";
 import { Types } from "mongoose";
+import { toAdminCreatorListDto } from "../../dtos/admin/adminCreatorList.dto";
 
 export const getAllCreatorsService = async (
   page: number,
@@ -13,13 +14,15 @@ export const getAllCreatorsService = async (
 
   const [data, total] = await Promise.all([
     CreatorProfile.find()
+      .select("userId slug displayName avatarUrl primaryCategory country city currency rating reviewCount status createdAt")
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     CreatorProfile.countDocuments()
   ]);
 
-  return { data, total };
+  return { data: data.map(toAdminCreatorListDto), total };
 };
 
 

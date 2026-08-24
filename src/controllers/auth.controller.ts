@@ -220,7 +220,8 @@ export const getMe = async (req: Request, res: Response) => {
       });
     }
 
-    const user = await User.findById(authUser.id).select("-password");
+    const user = await User.findById(authUser.id)
+      .select("email role status creatorStatus");
 
     if (!user) {
       return res.status(404).json({

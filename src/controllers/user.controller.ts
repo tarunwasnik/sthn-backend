@@ -4,6 +4,9 @@ import { Request, Response } from "express";
 import User from "../models/User";
 import { UserProfile } from "../models/userProfile.model";
 import { asyncHandler } from "../middlewares/asyncHandler";
+import { toPublicUserProfileDto } from "../dtos/user/publicUserProfile.dto";
+import { calculateAge } from "../utils/calculateAge";
+import mongoose from "mongoose";
 
 /**
  * Get all users
@@ -11,13 +14,18 @@ import { asyncHandler } from "../middlewares/asyncHandler";
  */
 export const getUsers = asyncHandler(
   async (_req: Request, res: Response) => {
-    const users = await User.find().sort({ createdAt: -1 }).lean();
+    const users = await User.find()
+      .select("email role status createdAt")
+      .sort({ createdAt: -1 })
+      .lean();
 
     const userIds = users.map((u) => u._id);
 
     const profiles = await UserProfile.find({
       userId: { $in: userIds },
-    }).lean();
+    })
+      .select("userId username")
+      .lean();
 
     const profileMap = new Map(
       profiles.map((p) => [p.userId.toString(), p])
@@ -48,9 +56,17 @@ export const getUserPublicProfile = asyncHandler(
   async (req: Request, res: Response) => {
     const { userId } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        message: "Invalid userId",
+      });
+    }
+
     const profile = await UserProfile.findOne({
       userId,
-    }).lean();
+    })
+      .select("username dateOfBirth avatar cover bio interests country city languages profilePhotos")
+      .lean();
 
     if (!profile) {
       return res.status(404).json({
@@ -59,7 +75,7 @@ export const getUserPublicProfile = asyncHandler(
     }
 
     return res.status(200).json({
-      profile,
+      profile: toPublicUserProfileDto(profile, calculateAge),
     });
   }
 );

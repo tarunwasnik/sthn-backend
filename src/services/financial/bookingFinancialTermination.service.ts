@@ -122,8 +122,6 @@ export class BookingFinancialTerminationService {
         );
       }
     }
-    if (booking.hasInteracted && ![BookingTerminationActorType.ADMIN, BookingTerminationActorType.GOVERNANCE, BookingTerminationActorType.SYSTEM].includes(input.actorType)) throw new BookingTerminationError("Booking cancellation is restricted after interaction.", "BOOKING_ONGOING_TERMINATION_RESTRICTED", 409);
-
     const payment = booking.paymentId ? await paymentRepository.findById(booking.paymentId) : null;
     if (payment && booking.paymentMethod !== payment.method) {
       throw new BookingWalletReservationReleaseError(

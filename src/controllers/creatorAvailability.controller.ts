@@ -1,3 +1,4 @@
+/// <reference path="../types/express.d.ts" />
 // backend/src/controllers/creatorAvailability.controller.ts
 
 import { Request, Response } from "express";
@@ -647,7 +648,12 @@ export const getAvailabilitySlots = async (
   res: Response
 ) => {
 
+  const user = req.user;
   const { availabilityId } = req.params;
+
+  if (!user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
 
   if (!mongoose.Types.ObjectId.isValid(availabilityId)) {
     return res.status(400).json({
@@ -655,8 +661,20 @@ export const getAvailabilitySlots = async (
     });
   }
 
+  const availability = await Availability.findOne({
+    _id: availabilityId,
+    creatorId: new mongoose.Types.ObjectId(user.id),
+  });
+
+  if (!availability) {
+    return res.status(404).json({
+      message: "Availability not found",
+    });
+  }
+
   const slots = await Slot.find({
-    availabilityId,
+    availabilityId: availability._id,
+    creatorId: new mongoose.Types.ObjectId(user.id),
   }).sort({ startTime: 1 });
 
   return res.status(200).json({
@@ -675,10 +693,22 @@ export const disableSlot = async (
   res: Response
 ) => {
 
+  const user = req.user;
   const { slotId } = req.params;
 
-  const slot = await Slot.findByIdAndUpdate(
-    slotId,
+  if (!user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(slotId)) {
+    return res.status(400).json({ message: "Invalid slotId" });
+  }
+
+  const slot = await Slot.findOneAndUpdate(
+    {
+      _id: slotId,
+      creatorId: new mongoose.Types.ObjectId(user.id),
+    },
     { status: "CANCELLED" },
     { new: true }
   );
@@ -689,7 +719,7 @@ export const disableSlot = async (
     });
   }
 
-  return res.json({
+  return res.status(200).json({
     message: "Slot disabled",
     slot,
   });
@@ -704,10 +734,22 @@ export const enableSlot = async (
   res: Response
 ) => {
 
+  const user = req.user;
   const { slotId } = req.params;
 
-  const slot = await Slot.findByIdAndUpdate(
-    slotId,
+  if (!user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(slotId)) {
+    return res.status(400).json({ message: "Invalid slotId" });
+  }
+
+  const slot = await Slot.findOneAndUpdate(
+    {
+      _id: slotId,
+      creatorId: new mongoose.Types.ObjectId(user.id),
+    },
     { status: "AVAILABLE" },
     { new: true }
   );
@@ -718,7 +760,7 @@ export const enableSlot = async (
     });
   }
 
-  return res.json({
+  return res.status(200).json({
     message: "Slot enabled",
     slot,
   });
@@ -733,9 +775,21 @@ export const deleteSlot = async (
   res: Response
 ) => {
 
+  const user = req.user;
   const { slotId } = req.params;
 
-  const slot = await Slot.findByIdAndDelete(slotId);
+  if (!user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(slotId)) {
+    return res.status(400).json({ message: "Invalid slotId" });
+  }
+
+  const slot = await Slot.findOneAndDelete({
+    _id: slotId,
+    creatorId: new mongoose.Types.ObjectId(user.id),
+  });
 
   if (!slot) {
     return res.status(404).json({
@@ -743,7 +797,7 @@ export const deleteSlot = async (
     });
   }
 
-  return res.json({
+  return res.status(200).json({
     message: "Slot deleted",
   });
 

@@ -18,6 +18,8 @@ import { interactionTriggerJob } from "./jobs/interactionTrigger.job";
 import { sessionEndingSoonJob } from "./jobs/sessionEndingSoon.job";
 import { disputeEscalationJob } from "./jobs/disputeEscalation.job";
 import { settleBookingsJob } from "./jobs/settleBookings.job";
+import { profileVerificationReconciliationJob } from "./jobs/profileVerificationReconciliation.job";
+import { faceVerificationEvidenceCleanupJob } from "./jobs/faceVerificationEvidenceCleanup.job";
 
 import { errorHandler } from "./middlewares/errorHandler"; // ✅ ADDED
 
@@ -59,6 +61,10 @@ export let io: Server;
 const PORT = process.env.PORT || 5000;
 
 let jobRunning = false;
+let jobLoopStopping = false;
+let jobLoopPromise: Promise<void> | null = null;
+let jobLoopTimer: NodeJS.Timeout | null = null;
+let resolveJobLoopDelay: (() => void) | null = null;
 
 /* ===================== BACKGROUND JOBS ===================== */
 
@@ -76,6 +82,8 @@ async function runBackgroundJobs() {
     await sessionEndingSoonJob();
     await disputeEscalationJob();
     await settleBookingsJob();
+    await profileVerificationReconciliationJob();
+    await faceVerificationEvidenceCleanupJob();
 
     console.log("✅ Background jobs completed");
   } catch (err) {
@@ -85,20 +93,62 @@ async function runBackgroundJobs() {
   }
 }
 
+const waitForJobLoopDelay = (milliseconds: number) =>
+  new Promise<void>((resolve) => {
+    resolveJobLoopDelay = () => {
+      resolveJobLoopDelay = null;
+      resolve();
+    };
+
+    jobLoopTimer = setTimeout(() => {
+      jobLoopTimer = null;
+      resolveJobLoopDelay?.();
+    }, milliseconds);
+  });
+
 async function startJobLoop() {
-  await new Promise((resolve) => setTimeout(resolve, 5000));
+  if (jobLoopPromise) return jobLoopPromise;
 
-  console.log("⏱ Starting job loop...");
+  jobLoopStopping = false;
 
-  while (true) {
-    await runBackgroundJobs();
-    await new Promise((resolve) => setTimeout(resolve, 60 * 1000));
+  jobLoopPromise = (async () => {
+    await waitForJobLoopDelay(5000);
+
+    if (jobLoopStopping) return;
+
+    console.log("⏱ Starting job loop...");
+
+    while (!jobLoopStopping) {
+      await runBackgroundJobs();
+
+      if (jobLoopStopping) break;
+
+      await waitForJobLoopDelay(60 * 1000);
+    }
+  })().finally(() => {
+    jobLoopPromise = null;
+    jobLoopTimer = null;
+    resolveJobLoopDelay = null;
+  });
+
+  return jobLoopPromise;
+}
+
+async function stopJobLoop() {
+  jobLoopStopping = true;
+
+  if (jobLoopTimer) {
+    clearTimeout(jobLoopTimer);
+    jobLoopTimer = null;
   }
+
+  resolveJobLoopDelay?.();
+  await jobLoopPromise;
 }
 
 /* ===================== START SERVER ===================== */
 
-async function startServer() {
+export async function startServer() {
   try {
     await mongoose.connect(process.env.MONGODB_URI as string);
 
@@ -134,6 +184,7 @@ async function startServer() {
 
     process.on("SIGINT", async () => {
       console.log("🛑 Shutting down server...");
+      await stopJobLoop();
       await mongoose.connection.close();
       httpServer.close(() => {
         process.exit(0);
@@ -145,4 +196,6 @@ async function startServer() {
   }
 }
 
-startServer();
+if (require.main === module) {
+  void startServer();
+}

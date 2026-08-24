@@ -9,8 +9,7 @@ export interface AuthTokenPayload {
 }
 
 export const generateToken = (payload: AuthTokenPayload): string => {
-    console.log("JWT_SECRET inside generateToken =", process.env.JWT_SECRET);
-    const secret = process.env.JWT_SECRET;
+  const secret = process.env.JWT_SECRET;
 
   if (!secret) {
     throw new Error("JWT_SECRET is not defined");

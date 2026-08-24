@@ -12,7 +12,12 @@ export interface UserProfileDocument extends Document {
   userId: mongoose.Types.ObjectId;
 
   username: string;
+  realName?: string | null;
   dateOfBirth: Date;
+
+  country?: string | null;
+  city?: string | null;
+  languages: string[];
 
   interests: string[];
   bio: string;
@@ -26,6 +31,7 @@ export interface UserProfileDocument extends Document {
   rejectionReason: string;
 
   verificationSubmittedAt?: Date;
+  verificationSubmissionVersion: number;
 
   createdAt: Date;
   updatedAt: Date;
@@ -50,9 +56,35 @@ const UserProfileSchema = new Schema<UserProfileDocument>(
       index: true,
     },
 
+    realName: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 120,
+    },
+
     dateOfBirth: {
       type: Date,
-      required: true,
+      required: function (this: UserProfileDocument) { return this.profileStatus !== "incomplete"; },
+    },
+
+    country: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 100,
+    },
+
+    city: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 100,
+    },
+
+    languages: {
+      type: [String],
+      default: [],
     },
 
     interests: {
@@ -62,29 +94,29 @@ const UserProfileSchema = new Schema<UserProfileDocument>(
 
     bio: {
       type: String,
-      required: true,
+      required: function (this: UserProfileDocument) { return this.profileStatus !== "incomplete"; },
       trim: true,
     },
 
     avatar: {
       type: String,
-      required: true,
+      required: function (this: UserProfileDocument) { return this.profileStatus !== "incomplete"; },
     },
 
     cover: {
       type: String,
-      required: true,
+      required: function (this: UserProfileDocument) { return this.profileStatus !== "incomplete"; },
     },
 
     profilePhotos: {
       type: [String],
       validate: {
         validator: function (value: string[]) {
-          return value.length >= 2 && value.length <= 6;
+          return (this as UserProfileDocument).profileStatus === "incomplete" || (value.length >= 2 && value.length <= 6);
         },
         message: "Gallery must contain between 2 and 6 images",
       },
-      required: true,
+      required: function (this: UserProfileDocument) { return this.profileStatus !== "incomplete"; },
     },
 
     profileStatus: {
@@ -104,6 +136,11 @@ const UserProfileSchema = new Schema<UserProfileDocument>(
       type: Date,
       default: null,
       index: true,
+    },
+    verificationSubmissionVersion: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
   },
   { timestamps: true },

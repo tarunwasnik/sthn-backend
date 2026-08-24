@@ -12,7 +12,7 @@ export const cancelBookingByUser = async (req: Request, res: Response) => {
       actorId: userId,
       actorType: BookingTerminationActorType.CUSTOMER,
       terminationType: BookingTerminationType.CUSTOMER_CANCELLED,
-      reason: typeof req.body.reason === "string" ? req.body.reason : undefined,
+      reason: typeof req.body?.reason === "string" ? req.body.reason : undefined,
     });
     return res.status(200).json({ message: "Booking cancelled", ...result });
   } catch (error: any) {

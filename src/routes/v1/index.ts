@@ -5,6 +5,7 @@ import { Router } from "express";
 import adminRoutes from "./admin.routes";
 import userRoutes from "./user.routes";
 import profileRoutes from "../profile.routes";
+import faceVerificationRoutes from "../faceVerification.routes";
 import profileVerificationRoutes from "./profileVerification.routes";
 
 import creatorApplicationRoutes from "./creatorApplication.routes";
@@ -43,6 +44,7 @@ router.use("/admin/financial", adminFinancialRoutes);
 /* ================= USERS ================= */
 router.use("/users", userRoutes);
 router.use("/profile", profileRoutes);
+router.use("/profile/face-verification", faceVerificationRoutes);
 
 /* ================= WALLET ================= */
 router.use("/wallet", walletRoutes);

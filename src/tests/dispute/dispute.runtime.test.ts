@@ -107,3 +107,20 @@ test("no-dispute state is safe and unrelated booking disputes are excluded", asy
   await getMyDisputes({ user: { id: String(second.customer._id) } } as unknown as Request, list.response);
   assert.equal((list.body as { disputes: unknown[] }).disputes.length, 0);
 });
+
+test("participant dispute lists preserve the viewer-specific finalized outcome", async () => {
+  const { customer, creator, booking } = await fixture();
+  await open(String(customer._id), String(booking._id));
+  await Dispute.updateOne(
+    { bookingId: booking._id },
+    { $set: { status: "RESOLVED", finalDecision: { customerOutcome: "ADVERSE_FINDING", customerSummary: "Customer-only", creatorOutcome: "NO_ADVERSE_FINDING", creatorSummary: "Creator-only", summary: "Participant-safe", financialReviewRequired: false, governanceReviewRequired: false, finalizedAt: new Date() } } },
+  );
+  for (const [actor, outcome] of [[customer, "ADVERSE_FINDING"], [creator, "NO_ADVERSE_FINDING"]] as const) {
+    const list = response();
+    await getMyDisputes({ user: { id: String(actor._id) } } as unknown as Request, list.response);
+    const dispute = (list.body as { disputes: Array<{ finalDecision?: { outcome: string } }> }).disputes[0];
+    assert.equal(dispute.finalDecision?.outcome, outcome);
+    assert.equal(JSON.stringify(dispute).includes("Customer-only"), false);
+    assert.equal(JSON.stringify(dispute).includes("Creator-only"), false);
+  }
+});

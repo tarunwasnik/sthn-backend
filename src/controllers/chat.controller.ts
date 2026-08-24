@@ -13,7 +13,36 @@ import { classifySeverity } from "../services/moderationSeverity.service";
 import { ModerationQueue } from "../models/moderationQueue.model";
 import { emitSoftWarning } from "../services/softWarning.service";
 import { uploadToCloudinary } from "../utils/uploadToCloudinary";
-import { io } from "../server";
+import { personalRoom } from "../sockets/chat.socket";
+// Resolve the Socket.IO export only when a controller executes. Importing it at
+// module evaluation time creates a server → routes → controller → server cycle.
+const getIo = () => require("../server").io as typeof import("../server").io;
+
+const isTerminalChatBooking = (status: string) => status === "CANCELLED" || status === "COMPLETED";
+const terminalChatReadOnly = (res: Response) => res.status(409).json({ code: "CHAT_READ_ONLY", message: "This booking conversation is read-only." });
+
+const emitRecipientConversationUpdate = (
+  booking: { userId: unknown; creatorId: unknown },
+  senderId: unknown,
+  chat: { _id: unknown; bookingId: unknown; senderId: unknown; message: string; createdAt: Date },
+) => {
+  const sender = String(senderId);
+  const bookingUserId = String(booking.userId);
+  const bookingCreatorId = String(booking.creatorId);
+  const recipientId = sender === bookingUserId ? bookingCreatorId : bookingUserId;
+
+  // The recipient comes exclusively from the persisted booking relationship.
+  // Do not emit a sender's own message as inbox/unread activity.
+  if (recipientId === sender) return;
+
+  getIo().to(personalRoom(recipientId)).emit("chat:conversation-update", {
+    bookingId: chat.bookingId,
+    messageId: chat._id,
+    senderId: chat.senderId,
+    message: chat.message,
+    createdAt: chat.createdAt,
+  });
+};
 
 /* ======================================================
    SEND MESSAGE (UPDATED WITH TIME CHECK)
@@ -72,6 +101,7 @@ export const sendMessage = async (req: Request, res: Response) => {
     return res.status(403).json({ message: "Access denied" });
   }
 
+  if (isTerminalChatBooking(booking.status)) return terminalChatReadOnly(res);
   if (booking.status !== "CONFIRMED") {
     return res.status(400).json({
       message: "Chat allowed only for confirmed bookings",
@@ -152,7 +182,7 @@ export const sendMessage = async (req: Request, res: Response) => {
   const severityResult = classifySeverity(moderation.flags, abuseScore);
 
   if (severityResult.severity !== "LOW") {
-    emitSoftWarning(io, bookingId, actorId.toString(), severityResult.severity);
+    emitSoftWarning(getIo(), bookingId, actorId.toString(), severityResult.severity);
   }
 
   let moderationQueueId: mongoose.Types.ObjectId | null = null;
@@ -227,7 +257,7 @@ export const sendMessage = async (req: Request, res: Response) => {
     });
   }
 
-  io.to(`booking:${bookingId}`).emit("chat:message", {
+  getIo().to(`booking:${bookingId}`).emit("chat:message", {
     _id: chat._id,
     bookingId: chat.bookingId,
 
@@ -242,6 +272,8 @@ export const sendMessage = async (req: Request, res: Response) => {
     seenBy: chat.seenBy,
     createdAt: chat.createdAt,
   });
+
+  emitRecipientConversationUpdate(booking, actorId, chat);
 
   return res.status(201).json({ chat });
 };
@@ -293,6 +325,7 @@ export const sendDocumentMessage = async (req: Request, res: Response) => {
       });
     }
 
+    if (isTerminalChatBooking(booking.status)) return terminalChatReadOnly(res);
     if (booking.status !== "CONFIRMED") {
       return res.status(400).json({
         message: "Chat allowed only for confirmed bookings",
@@ -396,7 +429,7 @@ export const sendDocumentMessage = async (req: Request, res: Response) => {
       aiFlags: [],
     });
 
-    io.to(`booking:${bookingId}`).emit("chat:message", {
+    getIo().to(`booking:${bookingId}`).emit("chat:message", {
       _id: chat._id,
       bookingId: chat.bookingId,
       senderId: chat.senderId,
@@ -408,6 +441,8 @@ export const sendDocumentMessage = async (req: Request, res: Response) => {
       seenBy: chat.seenBy,
       createdAt: chat.createdAt,
     });
+
+    emitRecipientConversationUpdate(booking, actorId, chat);
 
     return res.status(201).json({
       chat,
@@ -471,6 +506,7 @@ export const sendImageMessage = async (req: Request, res: Response) => {
       });
     }
 
+    if (isTerminalChatBooking(booking.status)) return terminalChatReadOnly(res);
     if (booking.status !== "CONFIRMED") {
       return res.status(400).json({
         message: "Chat allowed only for confirmed bookings",
@@ -598,7 +634,7 @@ export const sendImageMessage = async (req: Request, res: Response) => {
 
     const chats = await Chat.insertMany(chatDocuments);
 
-    io.to(`booking:${bookingId}`).emit("chat:image-group", {
+    getIo().to(`booking:${bookingId}`).emit("chat:image-group", {
       bookingId,
       messages: chats.map((chat) => ({
         _id: chat._id,
@@ -627,6 +663,10 @@ export const sendImageMessage = async (req: Request, res: Response) => {
 
         updatedAt: chat.updatedAt,
       })),
+    });
+
+    chats.forEach((chat) => {
+      emitRecipientConversationUpdate(booking, actorId, chat);
     });
 
     return res.status(201).json({
@@ -670,6 +710,11 @@ export const deleteMessage = async (req: Request, res: Response) => {
     });
   }
 
+  const booking = await Booking.findById(chat.bookingId);
+  if (!booking) return res.status(404).json({ message: "Booking not found" });
+  if (!booking.userId.equals(actorId) && !booking.creatorId.equals(actorId)) return res.status(403).json({ message: "Access denied" });
+  if (isTerminalChatBooking(booking.status)) return terminalChatReadOnly(res);
+
   // Only sender can delete
   if (!chat.senderId.equals(actorId)) {
     return res.status(403).json({
@@ -700,7 +745,7 @@ export const deleteMessage = async (req: Request, res: Response) => {
 
   await chat.save();
 
-  io.to(`booking:${chat.bookingId}`).emit("chat:deleted", {
+  getIo().to(`booking:${chat.bookingId}`).emit("chat:deleted", {
     messageId: chat._id,
     bookingId: chat.bookingId,
     deletedAt: chat.deletedAt,
@@ -741,6 +786,10 @@ export const reactToMessage = async (req: Request, res: Response) => {
   }
 
   const actorId = new mongoose.Types.ObjectId(user.id);
+  const booking = await Booking.findById(chat.bookingId);
+  if (!booking) return res.status(404).json({ message: "Booking not found" });
+  if (!booking.userId.equals(actorId) && !booking.creatorId.equals(actorId)) return res.status(403).json({ message: "Access denied" });
+  if (isTerminalChatBooking(booking.status)) return terminalChatReadOnly(res);
 
   const existingReaction = chat.reactions.find(
     (reaction) => reaction.userId.toString() === actorId.toString(),
@@ -761,7 +810,7 @@ export const reactToMessage = async (req: Request, res: Response) => {
 
   await chat.save();
 
-  io.to(`booking:${chat.bookingId}`).emit("chat:reaction", {
+  getIo().to(`booking:${chat.bookingId}`).emit("chat:reaction", {
     bookingId: chat.bookingId,
     messageId: chat._id,
     reactions: chat.reactions,
@@ -816,13 +865,22 @@ export const markChatAsSeen = async (req: Request, res: Response) => {
   }
 
   const actorId = new mongoose.Types.ObjectId(user.id);
+  const booking = await Booking.findById(bookingId);
+  if (!booking) return res.status(404).json({ message: "Booking not found" });
+  if (!booking.userId.equals(actorId) && !booking.creatorId.equals(actorId)) return res.status(403).json({ message: "Access denied" });
+  if (isTerminalChatBooking(booking.status)) return terminalChatReadOnly(res);
 
   await Chat.updateMany(
     { bookingId, seenBy: { $ne: actorId } },
     { $push: { seenBy: actorId } },
   );
 
-  io.to(`booking:${bookingId}`).emit("chat:seen", {
+  getIo().to(`booking:${bookingId}`).emit("chat:seen", {
+    bookingId,
+    seenBy: actorId,
+  });
+
+  getIo().to(personalRoom(actorId.toString())).emit("chat:conversation-seen", {
     bookingId,
     seenBy: actorId,
   });
@@ -847,7 +905,7 @@ export const getConversations = async (req: Request, res: Response) => {
   ====================================================== */
 
   const bookings = await Booking.find({
-    status: "CONFIRMED",
+    status: { $in: ["CONFIRMED", "CANCELLED", "COMPLETED"] },
     $or: [{ userId: actorId }, { creatorId: actorId }],
   }).lean();
 
@@ -952,7 +1010,9 @@ export const getConversations = async (req: Request, res: Response) => {
 
   const userProfiles = await UserProfile.find({
     userId: { $in: userIds },
-  }).lean();
+  })
+    .select("userId username avatar profilePhotos")
+    .lean();
 
   const userProfileMap = new Map();
 
@@ -986,6 +1046,8 @@ export const getConversations = async (req: Request, res: Response) => {
 
     return {
       bookingId: booking._id,
+
+      actorRole: isUser ? "USER" : "CREATOR",
 
       service: {
         _id: booking.serviceId,
