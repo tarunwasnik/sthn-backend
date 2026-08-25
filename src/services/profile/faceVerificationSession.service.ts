@@ -30,10 +30,30 @@ const ensureDraftProfile = async (userId: Types.ObjectId): Promise<UserProfileDo
 
 const expireIfNeeded = async (session: FaceVerificationSessionDocument) => {
   if (["CREATED", "CAPTURING"].includes(session.status) && session.expiresAt.getTime() <= Date.now()) {
-    session.status = "EXPIRED"; session.isCurrent = false; session.cleanupAfter = cleanAt(); await session.save();
-    await faceVerificationEvidenceRepository.setCleanupForSession(session._id, session.cleanupAfter);
+    const transitioned = await faceVerificationSessionRepository.expire(session._id, new Date(), cleanAt());
+    if (transitioned) {
+      await faceVerificationEvidenceRepository.setCleanupForSession(transitioned._id, transitioned.cleanupAfter!);
+      return transitioned;
+    }
+    return (await faceVerificationSessionRepository.findById(session._id)) ?? session;
   }
   return session;
+};
+
+const hasValidChallengeSequence = (session: FaceVerificationSessionDocument) => session.requiredCaptureCount === 5 && session.challenges.length === 5 && new Set(session.challenges).size === 5;
+const isSameSubmission = (session: FaceVerificationSessionDocument, input: { userId: Types.ObjectId; avatarFingerprint: string; targetVersion: number }) =>
+  session.isCurrent && String(session.userId) === String(input.userId) && session.avatarFingerprint === input.avatarFingerprint && session.profileSubmissionVersion === input.targetVersion;
+const isReusableCurrentSession = (session: FaceVerificationSessionDocument, input: { userId: Types.ObjectId; avatarFingerprint: string; targetVersion: number }) => {
+  if (!isSameSubmission(session, input) || !hasValidChallengeSequence(session)) return false;
+  if (["CREATED", "CAPTURING"].includes(session.status) && session.expiresAt.getTime() <= Date.now()) return false;
+  if (session.status === "CREATED") return session.acceptedCaptureCount === 0;
+  if (session.status === "CAPTURE_COMPLETE") return session.acceptedCaptureCount === session.requiredCaptureCount;
+  return false;
+};
+const retireCurrentSession = async (session: FaceVerificationSessionDocument, input: { status: "CANCELLED" | "INVALIDATED"; invalidationCode?: string }) => {
+  const retired = await faceVerificationSessionRepository.retireCurrent({ sessionId: session._id, status: input.status, invalidationCode: input.invalidationCode, cleanupAfter: cleanAt() });
+  if (retired) await faceVerificationEvidenceRepository.setCleanupForSession(retired._id, retired.cleanupAfter!);
+  return retired;
 };
 
 export const startFaceVerificationSession = async (input: { userId: string; avatar: unknown }) => {
@@ -42,21 +62,30 @@ export const startFaceVerificationSession = async (input: { userId: string; avat
   const userId = new Types.ObjectId(input.userId); const profile = await ensureDraftProfile(userId);
   if (profile.profileStatus === "pending_verification") throw new AppError("Profile is already pending verification", 409);
   const avatarFingerprint = fingerprintAvatarReference(input.avatar.trim());
-  const current = await faceVerificationSessionRepository.findCurrent(profile._id);
-  if (current) {
-    await expireIfNeeded(current);
-    if (current.isCurrent && current.avatarFingerprint === avatarFingerprint) return current;
-    if (current.isCurrent) throw new AppError("A current face verification session already exists", 409);
-  }
   const targetVersion = Math.max(1, (profile.verificationSubmissionVersion ?? 0) + 1);
-  try {
-    return await faceVerificationSessionRepository.create({ sessionReference: `FACE_SESSION_${ulid()}`, userId, profileId: profile._id, profileSubmissionVersion: targetVersion, avatarFingerprint, challenges: challengeSequence(), expiresAt: new Date(Date.now() + FACE_VERIFICATION_SESSION_TTL_MS) });
-  } catch (error) {
-    if (!duplicateKey(error)) throw error;
-    const concurrent = await faceVerificationSessionRepository.findCurrent(profile._id);
-    if (!concurrent) throw error;
-    return concurrent;
+  const expected = { userId, avatarFingerprint, targetVersion };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const current = await faceVerificationSessionRepository.findCurrent(profile._id);
+    if (current) {
+      const reconciled = await expireIfNeeded(current);
+      if (!reconciled.isCurrent) continue;
+      if (isReusableCurrentSession(reconciled, expected)) return reconciled;
+      const avatarOrVersionMismatch = !isSameSubmission(reconciled, expected);
+      const partialAttempt = reconciled.status === "CAPTURING" || reconciled.acceptedCaptureCount > 0;
+      await retireCurrentSession(reconciled, avatarOrVersionMismatch || !partialAttempt
+        ? { status: "INVALIDATED", invalidationCode: avatarOrVersionMismatch ? "SUBMISSION_MISMATCH" : "SESSION_INCONSISTENT" }
+        : { status: "CANCELLED" });
+      continue;
+    }
+    try {
+      return await faceVerificationSessionRepository.create({ sessionReference: `FACE_SESSION_${ulid()}`, userId, profileId: profile._id, profileSubmissionVersion: targetVersion, avatarFingerprint, challenges: challengeSequence(), expiresAt: new Date(Date.now() + FACE_VERIFICATION_SESSION_TTL_MS) });
+    } catch (error) {
+      if (!duplicateKey(error)) throw error;
+      const winner = await faceVerificationSessionRepository.findCurrent(profile._id);
+      if (winner && isReusableCurrentSession(winner, expected)) return winner;
+    }
   }
+  throw new AppError("Unable to start a compatible face verification session. Please try again.", 409);
 };
 
 export const getOwnedFaceVerificationSession = async (input: { userId: string; sessionReference: string }) => {

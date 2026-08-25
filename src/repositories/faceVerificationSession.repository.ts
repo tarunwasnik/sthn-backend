@@ -12,6 +12,16 @@ export class FaceVerificationSessionRepository {
   expire(sessionId: Types.ObjectId, now: Date, cleanupAfter: Date) {
     return FaceVerificationSession.findOneAndUpdate({ _id: sessionId, isCurrent: true, status: { $in: ["CREATED", "CAPTURING"] }, expiresAt: { $lte: now } }, { $set: { status: "EXPIRED", isCurrent: false, cleanupAfter } }, { new: true }).exec();
   }
+  retireCurrent(input: { sessionId: Types.ObjectId; status: "CANCELLED" | "INVALIDATED"; cleanupAfter: Date; invalidationCode?: string }) {
+    const terminalFields = input.status === "CANCELLED"
+      ? { cancelledAt: new Date() }
+      : { invalidatedAt: new Date(), invalidationCode: input.invalidationCode ?? "SESSION_REPLACED" };
+    return FaceVerificationSession.findOneAndUpdate(
+      { _id: input.sessionId, isCurrent: true },
+      { $set: { status: input.status, isCurrent: false, cleanupAfter: input.cleanupAfter, ...terminalFields } },
+      { new: true },
+    ).exec();
+  }
   invalidateCompletedForAvatar(profileId: Types.ObjectId, avatarFingerprint: string, cleanupAfter: Date) {
     return FaceVerificationSession.findOneAndUpdate({ profileId, isCurrent: true, status: "CAPTURE_COMPLETE", avatarFingerprint: { $ne: avatarFingerprint } }, { $set: { status: "INVALIDATED", isCurrent: false, invalidatedAt: new Date(), invalidationCode: "AVATAR_CHANGED", cleanupAfter } }, { new: true }).exec();
   }
