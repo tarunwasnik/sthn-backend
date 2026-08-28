@@ -13,6 +13,7 @@ const fxRateSnapshotRefresh_test_1 = require("./fxRateSnapshotRefresh.test");
 const fxRateSnapshotRegression_test_1 = require("./fxRateSnapshotRegression.test");
 const fxRateSnapshotReplay_test_1 = require("./fxRateSnapshotReplay.test");
 const fxRateSnapshotRoutes_test_1 = require("./fxRateSnapshotRoutes.test");
+const fxRateProviderSelection_test_1 = require("./fxRateProviderSelection.test");
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "phase10e-test-jwt-secret";
 (0, node_test_1.before)(async () => {
@@ -29,3 +30,4 @@ process.env.JWT_SECRET = "phase10e-test-jwt-secret";
 (0, fxRateSnapshotIntegrity_test_1.registerIntegrityTests)();
 (0, fxRateSnapshotRoutes_test_1.registerRouteTests)();
 (0, fxRateSnapshotRegression_test_1.registerRegressionTests)();
+(0, fxRateProviderSelection_test_1.registerProviderSelectionTests)();

@@ -1,11 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.walletQueryService = exports.WalletQueryService = void 0;
-const wallet_constants_1 = require("../../constants/wallet/wallet.constants");
 const wallet_repository_1 = require("../../repositories/wallet/wallet.repository");
 const walletCreation_service_1 = require("./walletCreation.service");
 class WalletQueryService {
-    async getWallet(userId, currency = wallet_constants_1.DEFAULT_WALLET_CURRENCY) {
+    async getWallet(userId, currency) {
         return wallet_repository_1.walletRepository.findByUserAndCurrency(userId, (0, walletCreation_service_1.normalizeWalletCurrency)(currency));
     }
     async getBalance(userId, currency) {
@@ -24,7 +23,7 @@ class WalletQueryService {
         return wallet_repository_1.walletRepository.findAllByUser(userId);
     }
     async walletExists(userId, currency) {
-        return wallet_repository_1.walletRepository.exists(userId, (0, walletCreation_service_1.normalizeWalletCurrency)(currency ?? wallet_constants_1.DEFAULT_WALLET_CURRENCY));
+        return wallet_repository_1.walletRepository.exists(userId, (0, walletCreation_service_1.normalizeWalletCurrency)(currency));
     }
 }
 exports.WalletQueryService = WalletQueryService;

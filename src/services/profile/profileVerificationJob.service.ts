@@ -5,9 +5,14 @@ import { ProfileVerificationRequestDocument } from "../../models/profileVerifica
 import { ProfileVerificationJobDocument } from "../../models/profileVerificationJob.model";
 import { profileVerificationJobRepository } from "../../repositories/profileVerificationJob.repository";
 import { profileVerificationRequestRepository } from "../../repositories/profileVerificationRequest.repository";
+import { FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS } from "./faceVerification.constants";
+import { finalizeProfileVerificationInference } from "./profileVerificationInference.service";
+import { createSFaceProfileVerificationAdapter } from "./profileVerificationSFaceAdapter";
+import { ProfileVerificationInferenceError } from "../../errors/profile/ProfileVerificationInferenceError";
 
 const LEASE_MS = 5 * 60 * 1000;
 const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000];
+const PROCESSING_TIMEOUT_MS = 30 * 60 * 1000;
 const processingJobReference = () => `PROFILE_VERIFICATION_JOB_${ulid()}`;
 
 const boundedError = (value: unknown, maximum: number) => (
@@ -15,7 +20,7 @@ const boundedError = (value: unknown, maximum: number) => (
 );
 
 const isTerminalRequest = (request: ProfileVerificationRequestDocument | null) => (
-  !request || !request.isActive || request.status === "APPROVED" || request.status === "REJECTED"
+  !request || !request.isActive || request.status === "APPROVED" || request.status === "REJECTED" || request.status === "EXPIRED"
 );
 
 export const ensureProfileVerificationJob = async (
@@ -47,7 +52,8 @@ export const claimProfileVerificationJob = async (input: { workerId: string; now
   if (!job) return null;
 
   const request = await profileVerificationRequestRepository.findById(job.verificationRequestId);
-  if (isTerminalRequest(request) || request!.profileSubmissionVersion !== job.profileSubmissionVersion) {
+  if (isTerminalRequest(request) || request!.profileSubmissionVersion !== job.profileSubmissionVersion
+    || request!.submittedAt.getTime() + FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS <= now.getTime()) {
     await profileVerificationJobRepository.completeIfNotTerminal({ jobId: job._id, now });
     return { job, request, actionable: false };
   }
@@ -102,8 +108,35 @@ export const recordProfileVerificationJobFailure = async (input: {
   });
 };
 
+/** Executes the already-claimed PROFILE_VERIFICATION_PROCESSING job; no parallel SFace job exists. */
+export const processNextProfileVerificationJob = async (input: { workerId: string; now?: Date }) => {
+  const now = input.now ?? new Date();
+  const claim = await claimProfileVerificationJob({ workerId: input.workerId, now });
+  if (!claim) return null;
+  if (!claim.actionable) return { ...claim, result: null, completed: true };
+  try {
+    const outcome = await finalizeProfileVerificationInference({
+      verificationRequestId: String(claim.job.verificationRequestId),
+      adapter: createSFaceProfileVerificationAdapter(),
+    });
+    const completed = await profileVerificationJobRepository.completeIfNotTerminal({ jobId: claim.job._id, now: new Date() });
+    return { ...claim, result: outcome.result, replayed: outcome.replayed, completed: Boolean(completed) };
+  } catch (error) {
+    const inferenceError = error instanceof ProfileVerificationInferenceError ? error : null;
+    const failure = await recordProfileVerificationJobFailure({
+      jobId: String(claim.job._id), workerId: input.workerId,
+      errorCode: inferenceError?.code ?? "TECHNICAL_FAILURE",
+      errorMessage: inferenceError?.message,
+      now: new Date(),
+    });
+    return { ...claim, result: null, replayed: false, completed: false, failure };
+  }
+};
+
 export const reconcileProfileVerificationJobs = async (now = new Date()) => {
   const report = { jobsCreated: 0, expiredLeasesRecovered: 0, terminalJobsCompleted: 0, timeoutEscalated: 0, skipped: 0 };
+  const { expireProfileVerificationRequests } = await import("./profileVerificationRequest.service");
+  await expireProfileVerificationRequests(now);
   const recovered = await profileVerificationJobRepository.recoverExpiredLeases(now);
   report.expiredLeasesRecovered = recovered.modifiedCount;
 
@@ -111,13 +144,15 @@ export const reconcileProfileVerificationJobs = async (now = new Date()) => {
   for (const request of activeRequests) {
     const ensured = await ensureProfileVerificationJob(request);
     if (ensured.created) report.jobsCreated += 1;
-    const deadlineReached = request.submittedAt.getTime() + (30 * 60 * 1000) <= now.getTime();
-    if (deadlineReached && (request.status === "PENDING" || request.status === "PROCESSING")) {
+    const timeoutReached = request.submittedAt.getTime() + PROCESSING_TIMEOUT_MS <= now.getTime();
+    const retentionValid = request.submittedAt.getTime() + FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS > now.getTime();
+    if (timeoutReached && retentionValid && (request.status === "PENDING" || request.status === "PROCESSING")) {
       const { escalateProfileVerificationRequest } = await import("./profileVerificationRequest.service");
       const escalation = await escalateProfileVerificationRequest({
         profileId: String(request.profileId),
         reasonCode: "PROCESSING_TIMEOUT",
         reason: "Verification processing remained unresolved at the submission deadline.",
+        now,
       });
       if (!escalation.replayed) report.timeoutEscalated += 1;
     }

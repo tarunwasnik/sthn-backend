@@ -10,6 +10,10 @@ const router = (0, express_1.Router)();
 ========================= */
 router.post("/:bookingId", auth_middleware_1.protect, review_controller_1.submitReview);
 /* =========================
+   CURRENT ACTOR BOOKING REVIEW STATE
+========================= */
+router.get("/booking/:bookingId/me", auth_middleware_1.protect, review_controller_1.getMyBookingReviewState);
+/* =========================
    GET CREATOR REVIEWS (PUBLIC)
 ========================= */
 router.get("/creator/:creatorId", review_controller_1.getReviewsForCreator);

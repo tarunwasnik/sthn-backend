@@ -3,7 +3,6 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.walletValidationService = exports.WalletValidationService = void 0;
 const wallet_repository_1 = require("../../repositories/wallet/wallet.repository");
-const wallet_constants_1 = require("../../constants/wallet/wallet.constants");
 const walletCreation_service_1 = require("./walletCreation.service");
 const WalletError_1 = require("../../errors/financial/WalletError");
 /**
@@ -31,7 +30,7 @@ class WalletValidationService {
      *
      * Throws if the wallet cannot be found.
      */
-    async requireWallet(userId, currency = (0, walletCreation_service_1.normalizeWalletCurrency)(wallet_constants_1.DEFAULT_WALLET_CURRENCY)) {
+    async requireWallet(userId, currency) {
         const wallet = await wallet_repository_1.walletRepository.findByUserAndCurrency(userId, (0, walletCreation_service_1.normalizeWalletCurrency)(currency));
         if (!wallet) {
             throw new WalletError_1.WalletError("Wallet not found.", "WALLET_NOT_FOUND");
@@ -41,8 +40,8 @@ class WalletValidationService {
     /**
      * Returns true if a wallet exists.
      */
-    async walletExists(userId) {
-        return wallet_repository_1.walletRepository.exists(userId, (0, walletCreation_service_1.normalizeWalletCurrency)(wallet_constants_1.DEFAULT_WALLET_CURRENCY));
+    async walletExists(userId, currency) {
+        return wallet_repository_1.walletRepository.exists(userId, (0, walletCreation_service_1.normalizeWalletCurrency)(currency));
     }
     /**
      * Validates wallet ownership.

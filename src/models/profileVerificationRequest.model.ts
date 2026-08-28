@@ -5,7 +5,8 @@ export type ProfileVerificationRequestStatus =
   | "PROCESSING"
   | "ADMIN_REVIEW_REQUIRED"
   | "APPROVED"
-  | "REJECTED";
+  | "REJECTED"
+  | "EXPIRED";
 
 export type ProfileVerificationDecision = "APPROVE" | "REJECT";
 export type ProfileVerificationDecisionAuthority = "ADMIN" | "AI";
@@ -28,6 +29,7 @@ export interface ProfileVerificationRequestDocument extends Document {
   status: ProfileVerificationRequestStatus;
   isActive: boolean;
   submittedAt: Date;
+  expiredAt?: Date;
   processingStartedAt?: Date;
   adminReviewRequiredAt?: Date;
   adminReviewReasonCode?: ProfileVerificationAdminReviewReasonCode;
@@ -48,9 +50,10 @@ const ProfileVerificationRequestSchema = new Schema<ProfileVerificationRequestDo
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     attemptNumber: { type: Number, required: true, min: 1 },
     profileSubmissionVersion: { type: Number, required: true, min: 1 },
-    status: { type: String, required: true, enum: ["PENDING", "PROCESSING", "ADMIN_REVIEW_REQUIRED", "APPROVED", "REJECTED"], default: "PENDING", index: true },
+    status: { type: String, required: true, enum: ["PENDING", "PROCESSING", "ADMIN_REVIEW_REQUIRED", "APPROVED", "REJECTED", "EXPIRED"], default: "PENDING", index: true },
     isActive: { type: Boolean, required: true, default: true, index: true },
-    submittedAt: { type: Date, required: true, default: Date.now, index: true },
+    submittedAt: { type: Date, required: true, immutable: true, default: Date.now, index: true },
+    expiredAt: { type: Date, index: true },
     processingStartedAt: { type: Date },
     adminReviewRequiredAt: { type: Date, index: true },
     adminReviewReasonCode: { type: String, enum: ["FACE_MATCH_UNCERTAIN", "LIVENESS_UNCERTAIN", "TEXT_MODERATION_UNCERTAIN", "IMAGE_MODERATION_UNCERTAIN", "CONFLICTING_CHECKS", "PROCESSING_TIMEOUT", "MODEL_FAILURE", "OTHER"] },

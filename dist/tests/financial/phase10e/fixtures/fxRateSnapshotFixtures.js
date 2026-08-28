@@ -7,6 +7,7 @@ exports.startFxServer = exports.token = exports.setRate = exports.systemActor = 
 const node_http_1 = __importDefault(require("node:http"));
 const express_1 = __importDefault(require("express"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const fxRate_constants_1 = require("../../../../constants/financial/fxRate.constants");
 const errorHandler_1 = require("../../../../middlewares/errorHandler");
 const notFound_1 = require("../../../../middlewares/notFound");
 const admin_financial_routes_1 = __importDefault(require("../../../../routes/v1/admin.financial.routes"));
@@ -18,6 +19,7 @@ exports.FIXED_NOW = new Date("2026-08-02T12:00:00.000Z");
 const fixedClock = () => new Date(exports.FIXED_NOW);
 exports.fixedClock = fixedClock;
 exports.fxConfig = {
+    providerMode: fxRate_constants_1.FxRateProviderMode.REFERENCE,
     providerName: "DETERMINISTIC_FX",
     baseUrl: "https://unused.test/fx",
     timeoutMs: 1000,

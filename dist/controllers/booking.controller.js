@@ -16,6 +16,7 @@ const supportedCurrencies_1 = require("../constants/financial/supportedCurrencie
 const payment_service_1 = require("../services/financial/payment.service");
 const paymentLifecycle_service_1 = require("../services/financial/paymentLifecycle.service");
 const marketplacePricing_service_1 = require("../services/financial/marketplacePricing.service");
+const creatorServicePrice_util_1 = require("../utils/financial/creatorServicePrice.util");
 const bookingFinancialTermination_service_1 = require("../services/financial/bookingFinancialTermination.service");
 const bookingTerminationType_enum_1 = require("../enums/booking/bookingTerminationType.enum");
 const User_1 = __importDefault(require("../models/User"));
@@ -102,6 +103,9 @@ const getUserBookings = async (req, res) => {
                 service: {
                     _id: booking.serviceId,
                     title: booking.serviceTitle,
+                    // Null means this is a legacy booking; live service data below is
+                    // not booking-time evidence.
+                    snapshot: booking.serviceSnapshot ?? null,
                     data: serviceMap.get(String(booking.serviceId)) || null,
                 },
                 creator: {
@@ -422,7 +426,8 @@ const requestBooking = async (req, res) => {
         if (lockResult.modifiedCount !== slotIds.length) {
             throw new Error("Failed to lock slots");
         }
-        const totalPrice = slots.reduce((sum, slot) => sum + slot.price, 0);
+        const totalPrice = slots.reduce((sum, slot) => sum +
+            (0, creatorServicePrice_util_1.creatorServiceMajorToMinor)(slot.price, creatorProfile.currency), 0);
         const paymentCurrency = supportedCurrencies_1.SUPPORTED_CURRENCIES.find((currency) => currency === creatorProfile.currency);
         if (!paymentCurrency) {
             throw new Error("Creator currency is not supported for payments");
@@ -438,6 +443,15 @@ const requestBooking = async (req, res) => {
                 userId: user.id,
                 creatorId,
                 serviceId: service._id,
+                serviceSnapshot: {
+                    serviceId: service._id,
+                    title: service.title,
+                    description: service.description,
+                    durationMinutes: service.durationMinutes,
+                    price: service.price,
+                    currency: service.currency,
+                    media: [...(service.media ?? [])],
+                },
                 serviceTitle: service.title,
                 durationMinutes: totalMinutes,
                 price: totalPrice,

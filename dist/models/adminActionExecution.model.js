@@ -64,6 +64,7 @@ const AdminActionExecutionSchema = new mongoose_1.Schema({
         required: true,
         index: true,
     },
+    result: { type: mongoose_1.Schema.Types.Mixed },
 }, {
     timestamps: { createdAt: true, updatedAt: false },
 });

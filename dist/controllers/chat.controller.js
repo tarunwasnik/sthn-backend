@@ -17,7 +17,29 @@ const moderationSeverity_service_1 = require("../services/moderationSeverity.ser
 const moderationQueue_model_1 = require("../models/moderationQueue.model");
 const softWarning_service_1 = require("../services/softWarning.service");
 const uploadToCloudinary_1 = require("../utils/uploadToCloudinary");
-const server_1 = require("../server");
+const chat_socket_1 = require("../sockets/chat.socket");
+// Resolve the Socket.IO export only when a controller executes. Importing it at
+// module evaluation time creates a server → routes → controller → server cycle.
+const getIo = () => require("../server").io;
+const isTerminalChatBooking = (status) => status === "CANCELLED" || status === "COMPLETED";
+const terminalChatReadOnly = (res) => res.status(409).json({ code: "CHAT_READ_ONLY", message: "This booking conversation is read-only." });
+const emitRecipientConversationUpdate = (booking, senderId, chat) => {
+    const sender = String(senderId);
+    const bookingUserId = String(booking.userId);
+    const bookingCreatorId = String(booking.creatorId);
+    const recipientId = sender === bookingUserId ? bookingCreatorId : bookingUserId;
+    // The recipient comes exclusively from the persisted booking relationship.
+    // Do not emit a sender's own message as inbox/unread activity.
+    if (recipientId === sender)
+        return;
+    getIo().to((0, chat_socket_1.personalRoom)(recipientId)).emit("chat:conversation-update", {
+        bookingId: chat.bookingId,
+        messageId: chat._id,
+        senderId: chat.senderId,
+        message: chat.message,
+        createdAt: chat.createdAt,
+    });
+};
 /* ======================================================
    SEND MESSAGE (UPDATED WITH TIME CHECK)
 ====================================================== */
@@ -64,6 +86,8 @@ const sendMessage = async (req, res) => {
     if (!isUser && !isCreator) {
         return res.status(403).json({ message: "Access denied" });
     }
+    if (isTerminalChatBooking(booking.status))
+        return terminalChatReadOnly(res);
     if (booking.status !== "CONFIRMED") {
         return res.status(400).json({
             message: "Chat allowed only for confirmed bookings",
@@ -122,7 +146,7 @@ const sendMessage = async (req, res) => {
     }
     const severityResult = (0, moderationSeverity_service_1.classifySeverity)(moderation.flags, abuseScore);
     if (severityResult.severity !== "LOW") {
-        (0, softWarning_service_1.emitSoftWarning)(server_1.io, bookingId, actorId.toString(), severityResult.severity);
+        (0, softWarning_service_1.emitSoftWarning)(getIo(), bookingId, actorId.toString(), severityResult.severity);
     }
     let moderationQueueId = null;
     if (severityResult.severity === "HIGH") {
@@ -179,7 +203,7 @@ const sendMessage = async (req, res) => {
             chatId: chat._id,
         });
     }
-    server_1.io.to(`booking:${bookingId}`).emit("chat:message", {
+    getIo().to(`booking:${bookingId}`).emit("chat:message", {
         _id: chat._id,
         bookingId: chat.bookingId,
         senderId: chat.senderId,
@@ -191,6 +215,7 @@ const sendMessage = async (req, res) => {
         seenBy: chat.seenBy,
         createdAt: chat.createdAt,
     });
+    emitRecipientConversationUpdate(booking, actorId, chat);
     return res.status(201).json({ chat });
 };
 exports.sendMessage = sendMessage;
@@ -231,6 +256,8 @@ const sendDocumentMessage = async (req, res) => {
                 message: "Access denied",
             });
         }
+        if (isTerminalChatBooking(booking.status))
+            return terminalChatReadOnly(res);
         if (booking.status !== "CONFIRMED") {
             return res.status(400).json({
                 message: "Chat allowed only for confirmed bookings",
@@ -308,7 +335,7 @@ const sendDocumentMessage = async (req, res) => {
             seenBy: [actorId],
             aiFlags: [],
         });
-        server_1.io.to(`booking:${bookingId}`).emit("chat:message", {
+        getIo().to(`booking:${bookingId}`).emit("chat:message", {
             _id: chat._id,
             bookingId: chat.bookingId,
             senderId: chat.senderId,
@@ -320,6 +347,7 @@ const sendDocumentMessage = async (req, res) => {
             seenBy: chat.seenBy,
             createdAt: chat.createdAt,
         });
+        emitRecipientConversationUpdate(booking, actorId, chat);
         return res.status(201).json({
             chat,
         });
@@ -370,6 +398,8 @@ const sendImageMessage = async (req, res) => {
                 message: "Access denied",
             });
         }
+        if (isTerminalChatBooking(booking.status))
+            return terminalChatReadOnly(res);
         if (booking.status !== "CONFIRMED") {
             return res.status(400).json({
                 message: "Chat allowed only for confirmed bookings",
@@ -455,7 +485,7 @@ const sendImageMessage = async (req, res) => {
             };
         });
         const chats = await chat_model_1.Chat.insertMany(chatDocuments);
-        server_1.io.to(`booking:${bookingId}`).emit("chat:image-group", {
+        getIo().to(`booking:${bookingId}`).emit("chat:image-group", {
             bookingId,
             messages: chats.map((chat) => ({
                 _id: chat._id,
@@ -472,6 +502,9 @@ const sendImageMessage = async (req, res) => {
                 createdAt: chat.createdAt,
                 updatedAt: chat.updatedAt,
             })),
+        });
+        chats.forEach((chat) => {
+            emitRecipientConversationUpdate(booking, actorId, chat);
         });
         return res.status(201).json({
             messages: chats,
@@ -508,6 +541,13 @@ const deleteMessage = async (req, res) => {
             message: "Message not found",
         });
     }
+    const booking = await booking_model_1.Booking.findById(chat.bookingId);
+    if (!booking)
+        return res.status(404).json({ message: "Booking not found" });
+    if (!booking.userId.equals(actorId) && !booking.creatorId.equals(actorId))
+        return res.status(403).json({ message: "Access denied" });
+    if (isTerminalChatBooking(booking.status))
+        return terminalChatReadOnly(res);
     // Only sender can delete
     if (!chat.senderId.equals(actorId)) {
         return res.status(403).json({
@@ -531,7 +571,7 @@ const deleteMessage = async (req, res) => {
     chat.isDeleted = true;
     chat.deletedAt = new Date();
     await chat.save();
-    server_1.io.to(`booking:${chat.bookingId}`).emit("chat:deleted", {
+    getIo().to(`booking:${chat.bookingId}`).emit("chat:deleted", {
         messageId: chat._id,
         bookingId: chat.bookingId,
         deletedAt: chat.deletedAt,
@@ -566,6 +606,13 @@ const reactToMessage = async (req, res) => {
         });
     }
     const actorId = new mongoose_1.default.Types.ObjectId(user.id);
+    const booking = await booking_model_1.Booking.findById(chat.bookingId);
+    if (!booking)
+        return res.status(404).json({ message: "Booking not found" });
+    if (!booking.userId.equals(actorId) && !booking.creatorId.equals(actorId))
+        return res.status(403).json({ message: "Access denied" });
+    if (isTerminalChatBooking(booking.status))
+        return terminalChatReadOnly(res);
     const existingReaction = chat.reactions.find((reaction) => reaction.userId.toString() === actorId.toString());
     if (!existingReaction) {
         chat.reactions.push({
@@ -580,7 +627,7 @@ const reactToMessage = async (req, res) => {
         existingReaction.emoji = emoji;
     }
     await chat.save();
-    server_1.io.to(`booking:${chat.bookingId}`).emit("chat:reaction", {
+    getIo().to(`booking:${chat.bookingId}`).emit("chat:reaction", {
         bookingId: chat.bookingId,
         messageId: chat._id,
         reactions: chat.reactions,
@@ -626,8 +673,19 @@ const markChatAsSeen = async (req, res) => {
         return res.status(400).json({ message: "Invalid bookingId" });
     }
     const actorId = new mongoose_1.default.Types.ObjectId(user.id);
+    const booking = await booking_model_1.Booking.findById(bookingId);
+    if (!booking)
+        return res.status(404).json({ message: "Booking not found" });
+    if (!booking.userId.equals(actorId) && !booking.creatorId.equals(actorId))
+        return res.status(403).json({ message: "Access denied" });
+    if (isTerminalChatBooking(booking.status))
+        return terminalChatReadOnly(res);
     await chat_model_1.Chat.updateMany({ bookingId, seenBy: { $ne: actorId } }, { $push: { seenBy: actorId } });
-    server_1.io.to(`booking:${bookingId}`).emit("chat:seen", {
+    getIo().to(`booking:${bookingId}`).emit("chat:seen", {
+        bookingId,
+        seenBy: actorId,
+    });
+    getIo().to((0, chat_socket_1.personalRoom)(actorId.toString())).emit("chat:conversation-seen", {
         bookingId,
         seenBy: actorId,
     });
@@ -647,7 +705,7 @@ const getConversations = async (req, res) => {
        GET BOOKINGS
     ====================================================== */
     const bookings = await booking_model_1.Booking.find({
-        status: "CONFIRMED",
+        status: { $in: ["CONFIRMED", "CANCELLED", "COMPLETED"] },
         $or: [{ userId: actorId }, { creatorId: actorId }],
     }).lean();
     const bookingIds = bookings.map((b) => b._id);
@@ -732,7 +790,9 @@ const getConversations = async (req, res) => {
         : b.userId.toString());
     const userProfiles = await userProfile_model_1.UserProfile.find({
         userId: { $in: userIds },
-    }).lean();
+    })
+        .select("userId username avatar profilePhotos")
+        .lean();
     const userProfileMap = new Map();
     userProfiles.forEach((u) => {
         userProfileMap.set(u.userId.toString(), u);
@@ -753,6 +813,7 @@ const getConversations = async (req, res) => {
         const otherUserProfile = creatorMap.get(otherUserId) || userProfileMap.get(otherUserId) || null;
         return {
             bookingId: booking._id,
+            actorRole: isUser ? "USER" : "CREATOR",
             service: {
                 _id: booking.serviceId,
                 title: booking.serviceTitle || "Service",

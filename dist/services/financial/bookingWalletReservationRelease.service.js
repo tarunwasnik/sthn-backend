@@ -29,6 +29,7 @@ const TERMINATION_CAUSES = new Map([
     [bookingTerminationType_enum_1.BookingTerminationType.CUSTOMER_CANCELLED, bookingWalletReleaseCause_enum_1.BookingWalletReleaseCause.USER_CANCELLED],
     [bookingTerminationType_enum_1.BookingTerminationType.CREATOR_CANCELLED, bookingWalletReleaseCause_enum_1.BookingWalletReleaseCause.CREATOR_CANCELLED],
     [bookingTerminationType_enum_1.BookingTerminationType.ADMIN_CANCELLED, bookingWalletReleaseCause_enum_1.BookingWalletReleaseCause.ADMIN_CANCELLED],
+    [bookingTerminationType_enum_1.BookingTerminationType.GOVERNANCE_TERMINATED, bookingWalletReleaseCause_enum_1.BookingWalletReleaseCause.GOVERNANCE_TERMINATED],
 ]);
 const bookingWalletReleaseCauseForTermination = (terminationType) => TERMINATION_CAUSES.get(terminationType) ?? null;
 exports.bookingWalletReleaseCauseForTermination = bookingWalletReleaseCauseForTermination;
@@ -63,6 +64,7 @@ class BookingWalletReservationReleaseService {
             [bookingWalletReleaseCause_enum_1.BookingWalletReleaseCause.USER_CANCELLED, bookingTerminationType_enum_1.BookingTerminationType.CUSTOMER_CANCELLED],
             [bookingWalletReleaseCause_enum_1.BookingWalletReleaseCause.CREATOR_CANCELLED, bookingTerminationType_enum_1.BookingTerminationType.CREATOR_CANCELLED],
             [bookingWalletReleaseCause_enum_1.BookingWalletReleaseCause.ADMIN_CANCELLED, bookingTerminationType_enum_1.BookingTerminationType.ADMIN_CANCELLED],
+            [bookingWalletReleaseCause_enum_1.BookingWalletReleaseCause.GOVERNANCE_TERMINATED, bookingTerminationType_enum_1.BookingTerminationType.GOVERNANCE_TERMINATED],
         ]).get(cause);
         if (booking.terminationType !== expectedTermination) {
             this.fail("Persisted Booking termination does not match the release cause.", "BOOKING_WALLET_RELEASE_CAUSE_CONFLICT");

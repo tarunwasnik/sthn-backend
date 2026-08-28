@@ -5,6 +5,8 @@ import { authorizeRoles } from "../../middlewares/authorize.middleware";
 import {
   listPendingProfiles,
   listAdminReviewProfiles,
+  getAdminProfileVerificationDetailController,
+  getAdminProfileVerificationCaptureController,
   approveProfile,
   rejectProfile,
 } from "../../controllers/profileVerification.controller";
@@ -24,6 +26,9 @@ router.get(
   authorizeRoles("admin"),
   listAdminReviewProfiles,
 );
+
+router.get("/:verificationReference", protect, authorizeRoles("admin"), getAdminProfileVerificationDetailController);
+router.get("/:verificationReference/captures/:challengeIndex", protect, authorizeRoles("admin"), getAdminProfileVerificationCaptureController);
 
 router.patch(
   "/:profileId/approve",

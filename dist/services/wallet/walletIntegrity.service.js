@@ -10,8 +10,8 @@ const MONEY_FIELDS = [
 ];
 class WalletIntegrityService {
     async validate(userId) {
-        const wallet = await walletQuery_service_1.walletQueryService.getWallet(userId);
-        return wallet ? this.validateWallet(wallet) : false;
+        const wallets = await walletQuery_service_1.walletQueryService.listWallets(userId);
+        return wallets.every((wallet) => this.validateWallet(wallet));
     }
     validateWallet(wallet) { return this.getValidationErrors(wallet).length === 0; }
     requiresSynchronization(wallet) { return !wallet.lastSyncedAt; }

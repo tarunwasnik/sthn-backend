@@ -115,7 +115,10 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
     const normalizedLanguages = normalizeStringArray(languages, "languages", 12);
     const normalizedBio = requireText(bio, "bio", 2000);
 
-    const existingUsername = await UserProfile.findOne({ username: normalizedUsername });
+    const existingUsername = await UserProfile.findOne({
+      username: normalizedUsername,
+      ...(profile ? { _id: { $ne: profile._id } } : {}),
+    });
 
     if (existingUsername) {
       throw new AppError("Username already taken", 409);
@@ -140,7 +143,7 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
       profilePhotos: validatedProfilePhotos,
       profileStatus: "pending_verification",
       verificationSubmittedAt: new Date(),
-      verificationSubmissionVersion: 1,
+      verificationSubmissionVersion: ((profile?.verificationSubmissionVersion ?? 0) + 1),
     };
     if (profile) {
       Object.assign(profile, firstSubmission);

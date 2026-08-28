@@ -10,6 +10,7 @@ const bookingCreatorSettlementFullFlow_test_1 = require("./bookingCreatorSettlem
 const bookingCreatorSettlementRegression_test_1 = require("./bookingCreatorSettlementRegression.test");
 const bookingCreatorSettlementReplay_test_1 = require("./bookingCreatorSettlementReplay.test");
 const bookingCreatorSettlementWalletRace_test_1 = require("./bookingCreatorSettlementWalletRace.test");
+const bookingSettlementRelease_test_1 = require("./bookingSettlementRelease.test");
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "phase8e-test-jwt-secret";
 (0, node_test_1.before)(async () => {
@@ -28,3 +29,4 @@ process.env.JWT_SECRET = "phase8e-test-jwt-secret";
 (0, bookingCreatorSettlementWalletRace_test_1.registerBookingCreatorSettlementWalletRaceTests)();
 (0, bookingCreatorSettlementFailure_test_1.registerBookingCreatorSettlementFailureTests)();
 (0, bookingCreatorSettlementRegression_test_1.registerBookingCreatorSettlementRegressionTests)();
+(0, bookingSettlementRelease_test_1.registerBookingSettlementReleaseTests)();

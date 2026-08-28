@@ -18,6 +18,9 @@ const registerRepairTests = () => {
         const before = await (0, walletConversionOperationalFixtures_1.captureFinancialState)(fixture.conversionReference);
         const reconciled = await fixture.service.reconcile(fixture.conversionReference, fixture.adminId);
         strict_1.default.equal(reconciled.classification, "MISSING_AUDIT");
+        strict_1.default.deepEqual(reconciled.allowedActions, [
+            walletConversionRepairAction_enum_1.WalletConversionRepairAction.RESTORE_MISSING_AUDIT,
+        ]);
         const result = await walletConversionRepair_service_1.walletConversionRepairService.repair(fixture.conversionReference, walletConversionRepairAction_enum_1.WalletConversionRepairAction.RESTORE_MISSING_AUDIT, fixture.adminId);
         strict_1.default.equal(result.classification, "HEALTHY");
         strict_1.default.equal(result.repairPerformed, true);

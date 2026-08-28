@@ -5,6 +5,17 @@ const mongoose_1 = require("mongoose");
 const FxRateSnapshotError_1 = require("../errors/financial/FxRateSnapshotError");
 const fxRateSnapshot_service_1 = require("../services/financial/fxRateSnapshot.service");
 class FxRateSnapshotController {
+    async list(req, res, next) {
+        try {
+            if (!req.user)
+                return res.status(401).json({ success: false, message: "Unauthorized" });
+            const data = await fxRateSnapshot_service_1.fxRateSnapshotService.getAdminReadState();
+            return res.status(200).json({ success: true, data });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
     async refresh(req, res, next) {
         try {
             if (!req.user)

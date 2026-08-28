@@ -11,6 +11,7 @@ const multiCurrencyTopUpRegression_test_1 = require("./multiCurrencyTopUpRegress
 const multiCurrencyTopUpReplay_test_1 = require("./multiCurrencyTopUpReplay.test");
 const multiCurrencyTopUpRollback_test_1 = require("./multiCurrencyTopUpRollback.test");
 const multiCurrencyWalletListing_test_1 = require("./multiCurrencyWalletListing.test");
+const walletIndexMaintenance_test_1 = require("./walletIndexMaintenance.test");
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "phase10d-test-jwt-secret";
 (0, node_test_1.before)(async () => (0, database_1.connectPhase7HDatabase)(), { timeout: 120000 });
@@ -24,3 +25,4 @@ process.env.JWT_SECRET = "phase10d-test-jwt-secret";
 (0, multiCurrencyTopUpRollback_test_1.registerRollbackTests)();
 (0, multiCurrencyWalletListing_test_1.registerWalletListingTests)();
 (0, multiCurrencyTopUpRegression_test_1.registerRegressionTests)();
+(0, walletIndexMaintenance_test_1.registerWalletIndexMaintenanceTests)();

@@ -6,6 +6,9 @@ class BookingRepository {
     async findById(id, session) {
         return booking_model_1.Booking.findById(id).session(session ?? null).exec();
     }
+    async findByBookingReference(bookingReference, session) {
+        return booking_model_1.Booking.findOne({ bookingReference }).session(session ?? null).exec();
+    }
     async transitionToTerminated(input, session) {
         return booking_model_1.Booking.findOneAndUpdate({
             _id: input.bookingId,

@@ -43,6 +43,8 @@ const metadataKeys = new Set([
     "operationalAction",
     "operationalResult",
     "issueCode",
+    "manualReleaseReason",
+    "settlementEligibleAt",
 ]);
 function boundedString(value, field) {
     if (typeof value !== "string" || !value.trim() || value.trim().length > MAX_REFERENCE_LENGTH)
@@ -105,7 +107,7 @@ function validateActor(actor) {
 }
 /** The sole append-only audit authority, including financial audit sanitization. */
 const createAuditLog = async (params) => {
-    const actor = validateActor({ type: params.actorType, id: params.actorId });
+    const actor = validateActor({ type: params.actorType, id: params.actorId, reference: params.actorReference });
     if (!params.action || !params.entityType || !params.entityId)
         throw new Error("AuditLog: action, entity type and entity id are required");
     const data = { ...actor, action: params.action, entityType: params.entityType, entityId: params.entityId, before: params.before, after: params.after };
@@ -159,6 +161,11 @@ const queryAuditLogs = async (input) => {
         if (typeof input.actorId !== "string" || !mongoose_1.default.Types.ObjectId.isValid(input.actorId))
             throw new Error("AuditLog: invalid actor id");
         query.actorId = new mongoose_1.default.Types.ObjectId(input.actorId);
+    }
+    if (input.entityId !== undefined) {
+        if (typeof input.entityId !== "string" || !mongoose_1.default.Types.ObjectId.isValid(input.entityId))
+            throw new Error("AuditLog: invalid entity id");
+        query.entityId = new mongoose_1.default.Types.ObjectId(input.entityId);
     }
     if (input.financialDomain !== undefined) {
         if (typeof input.financialDomain !== "string" || !["PAYMENT", "REFUND", "ESCROW", "SETTLEMENT", "WITHDRAWAL", "PAYOUT", "BOOKING_WALLET"].includes(input.financialDomain))

@@ -69,7 +69,7 @@ class WalletTopUpRequestService {
     async listOwn(userId, page, limit) { const identity = new mongoose_1.default.Types.ObjectId(userId); const p = this.page(page, 1); const l = Math.min(this.page(limit, 20), 100); return (await walletTopUpRequest_repository_1.walletTopUpRequestRepository.listByUser(identity, p, l)).map((item) => this.dto(item)); }
     async getOwn(userId, reference) { const request = await walletTopUpRequest_repository_1.walletTopUpRequestRepository.findByUserAndReference(new mongoose_1.default.Types.ObjectId(userId), reference); if (!request)
         throw new WalletTopUpRequestError_1.WalletTopUpRequestError("Top-up request not found.", "WALLET_TOP_UP_REQUEST_NOT_FOUND"); return this.dto(request); }
-    async listPending(page, limit) { const p = this.page(page, 1); const l = Math.min(this.page(limit, 20), 100); return (await walletTopUpRequest_repository_1.walletTopUpRequestRepository.listPending(p, l)).map((item) => this.dto(item)); }
+    async listAdminByStatus(status, page, limit) { const p = this.page(page, 1); const l = Math.min(this.page(limit, 20), 100); return (await walletTopUpRequest_repository_1.walletTopUpRequestRepository.listByStatus(status, p, l)).map((item) => this.dto(item)); }
     async getAdmin(reference) { const request = await walletTopUpRequest_repository_1.walletTopUpRequestRepository.findByReference(reference); if (!request)
         throw new WalletTopUpRequestError_1.WalletTopUpRequestError("Top-up request not found.", "WALLET_TOP_UP_REQUEST_NOT_FOUND"); return this.dto(request); }
 }

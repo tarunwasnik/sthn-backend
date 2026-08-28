@@ -1,16 +1,23 @@
 "use strict";
 //backend/src/services/adminActions/revokeCreatorCooldown.service.ts
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.revokeCreatorCooldownService = void 0;
 const revokeCreatorCooldown_executor_1 = require("./actionExecutors/revokeCreatorCooldown.executor");
 const creatorProfile_model_1 = require("../../models/creatorProfile.model");
+const User_1 = __importDefault(require("../../models/User"));
 const revokeCreatorCooldownService = async ({ adminId, creatorProfileId, reason, dryRun = false, }) => {
     const creatorProfile = await creatorProfile_model_1.CreatorProfile.findById(creatorProfileId);
     if (!creatorProfile) {
         throw new Error("Creator profile not found");
     }
     const now = new Date();
-    const currentCooldown = creatorProfile.creatorCooldownUntil ?? null;
+    const targetUser = await User_1.default.findById(creatorProfile.userId).select("creatorCooldownUntil").lean();
+    if (!targetUser)
+        throw new Error("Target user not found");
+    const currentCooldown = targetUser.creatorCooldownUntil ?? null;
     const hasCooldown = currentCooldown !== null;
     const isActiveCooldown = hasCooldown && currentCooldown.getTime() > now.getTime();
     // ==========================
@@ -67,12 +74,6 @@ const revokeCreatorCooldownService = async ({ adminId, creatorProfileId, reason,
     // ==========================
     // 🔹 REAL EXECUTION MODE
     // ==========================
-    if (!hasCooldown) {
-        throw new Error("Cannot revoke cooldown: creator has no cooldown");
-    }
-    if (!isActiveCooldown) {
-        throw new Error("Cannot revoke cooldown: cooldown has already expired");
-    }
     return (0, revokeCreatorCooldown_executor_1.revokeCreatorCooldownExecutor)({
         adminId,
         creatorProfileId,

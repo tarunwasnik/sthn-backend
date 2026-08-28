@@ -283,7 +283,7 @@ class BookingEscrowAllocationService {
             entry.amount === graph.reservation.amount &&
             entry.userId?.toString() === graph.reservation.userId.toString() &&
             entry.postingKey === identity.escrowDebitPostingKey);
-        const commissionCredit = entries.find((entry) => entry.account === ledgerAccount_enum_1.LedgerAccount.PLATFORM_COMMISSION_PAYABLE &&
+        const commissionCredit = entries.find((entry) => entry.account === ledgerAccount_enum_1.LedgerAccount.PLATFORM_CREATOR_COMMISSION_REVENUE &&
             entry.direction === moneyDirection_enum_1.MoneyDirection.CREDIT &&
             entry.amount === amounts.commissionAmount &&
             !entry.userId &&
@@ -424,13 +424,13 @@ class BookingEscrowAllocationService {
                     }, session);
                     commissionCredit = await ledger_service_1.ledgerService.createCredit({
                         ...common,
-                        account: ledgerAccount_enum_1.LedgerAccount.PLATFORM_COMMISSION_PAYABLE,
+                        account: ledgerAccount_enum_1.LedgerAccount.PLATFORM_CREATOR_COMMISSION_REVENUE,
                         money: {
                             amount: amounts.commissionAmount,
                             currency: graph.reservation.currency,
                         },
                         postingKey: identity.commissionCreditPostingKey,
-                        description: "Platform commission payable allocated",
+                        description: "Creator commission recognized as platform revenue",
                     }, session);
                     platformFeeCredit = await ledger_service_1.ledgerService.createCredit({
                         ...common,

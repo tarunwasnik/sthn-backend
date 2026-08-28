@@ -56,9 +56,9 @@ test("verification jobs are durable, unique per request, and atomically claimed"
 });
 
 test("expired leases recover and background claims do not depend on an HTTP request", async () => {
-  const { request } = await makeProfile("lease");
-  await ensureProfileVerificationJob(request);
   const started = new Date("2030-01-01T00:00:00.000Z");
+  const { request } = await makeProfile("lease", started);
+  await ensureProfileVerificationJob(request);
   const claim = await claimProfileVerificationJob({ workerId: "worker-a", now: started });
   assert.ok(claim?.job);
   await reconcileProfileVerificationJobs(new Date(started.getTime() + (5 * 60 * 1000) + 1));
@@ -70,26 +70,33 @@ test("expired leases recover and background claims do not depend on an HTTP requ
 
 test("deadline reconciliation escalates exactly at 30 minutes without cancelling active work", async () => {
   const now = new Date("2030-01-01T12:30:00.000Z");
-  const { request, profile } = await makeProfile("deadline", new Date(now.getTime() - (29 * 60 * 1000)));
+  const submittedAt = new Date(now.getTime() - (29 * 60 * 1000));
+  const { request, profile } = await makeProfile("deadline", submittedAt);
   await ensureProfileVerificationJob(request);
-  await reconcileProfileVerificationJobs(now);
+  const beforeDeadline = await reconcileProfileVerificationJobs(now);
+  assert.equal(beforeDeadline.timeoutEscalated, 0);
   assert.equal((await ProfileVerificationRequest.findById(request._id))?.status, "PENDING");
 
   const deadline = new Date(now.getTime() + 60 * 1000);
-  await reconcileProfileVerificationJobs(deadline);
+  const atDeadline = await reconcileProfileVerificationJobs(deadline);
+  assert.equal(atDeadline.timeoutEscalated, 1);
   const escalated = await ProfileVerificationRequest.findById(request._id);
   assert.equal(escalated?.status, "ADMIN_REVIEW_REQUIRED");
+  assert.equal(escalated?.isActive, true);
   assert.equal(escalated?.adminReviewReasonCode, "PROCESSING_TIMEOUT");
+  assert.equal(escalated?.decision, undefined);
+  assert.equal(escalated?.submittedAt.getTime(), submittedAt.getTime());
   assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification");
   assert.equal((await ProfileVerificationJob.findOne({ verificationRequestId: request._id }))?.status, "PENDING");
-  await reconcileProfileVerificationJobs(new Date(deadline.getTime() + 60_000));
+  const replay = await reconcileProfileVerificationJobs(new Date(deadline.getTime() + 60_000));
+  assert.equal(replay.timeoutEscalated, 0);
   assert.equal((await ProfileVerificationRequest.findById(request._id))?.status, "ADMIN_REVIEW_REQUIRED");
 });
 
 test("retry is durable and exhaustion escalates without rejecting the user", async () => {
-  const { request, profile } = await makeProfile("retry");
-  await ensureProfileVerificationJob(request);
   const now = new Date("2030-01-01T00:00:00.000Z");
+  const { request, profile } = await makeProfile("retry", now);
+  await ensureProfileVerificationJob(request);
   let claimed = await claimProfileVerificationJob({ workerId: "retry-worker", now });
   assert.ok(claimed?.job);
   const retry = await recordProfileVerificationJobFailure({ jobId: String(claimed!.job._id), workerId: "retry-worker", errorCode: "TEMPORARY_UNAVAILABLE", now });

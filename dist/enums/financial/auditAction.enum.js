@@ -116,6 +116,7 @@ var AuditAction;
     AuditAction["ADMIN_WITHDRAWAL_PROCESS_REQUESTED"] = "ADMIN_WITHDRAWAL_PROCESS_REQUESTED";
     AuditAction["ADMIN_WITHDRAWAL_SYNC_REQUESTED"] = "ADMIN_WITHDRAWAL_SYNC_REQUESTED";
     AuditAction["ADMIN_PAYOUT_SYNC_REQUESTED"] = "ADMIN_PAYOUT_SYNC_REQUESTED";
+    AuditAction["ADMIN_BOOKING_ESCROW_MANUAL_RELEASED"] = "ADMIN_BOOKING_ESCROW_MANUAL_RELEASED";
     /* =========================================================
        Reconciliation
     ========================================================= */

@@ -14,7 +14,7 @@ const cancelBookingByUser = async (req, res) => {
             actorId: userId,
             actorType: bookingTerminationType_enum_1.BookingTerminationActorType.CUSTOMER,
             terminationType: bookingTerminationType_enum_1.BookingTerminationType.CUSTOMER_CANCELLED,
-            reason: typeof req.body.reason === "string" ? req.body.reason : undefined,
+            reason: typeof req.body?.reason === "string" ? req.body.reason : undefined,
         });
         return res.status(200).json({ message: "Booking cancelled", ...result });
     }

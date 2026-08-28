@@ -26,8 +26,8 @@ class WalletHistoryService {
     /**
      * Returns wallet transaction history.
      */
-    async getHistory(userId) {
-        await walletValidation_service_1.walletValidationService.requireWallet(userId);
+    async getHistory(userId, currency) {
+        await walletValidation_service_1.walletValidationService.requireWallet(userId, currency);
         /**
          * Ledger integration will populate this list.
          */
@@ -36,8 +36,8 @@ class WalletHistoryService {
     /**
      * Returns the most recent wallet transaction.
      */
-    async getLatestTransaction(userId) {
-        const history = await this.getHistory(userId);
+    async getLatestTransaction(userId, currency) {
+        const history = await this.getHistory(userId, currency);
         if (history.length === 0) {
             return null;
         }
@@ -46,8 +46,8 @@ class WalletHistoryService {
     /**
      * Returns the total number of wallet transactions.
      */
-    async getTransactionCount(userId) {
-        const history = await this.getHistory(userId);
+    async getTransactionCount(userId, currency) {
+        const history = await this.getHistory(userId, currency);
         return history.length;
     }
 }

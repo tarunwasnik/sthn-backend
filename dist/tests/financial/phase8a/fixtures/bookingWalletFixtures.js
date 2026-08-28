@@ -17,7 +17,18 @@ const slot_model_1 = require("../../../../models/slot.model");
 const wallet_model_1 = require("../../../../models/wallet.model");
 const topUpFixtures_1 = require("../../phase7h/fixtures/topUpFixtures");
 const marketplacePricing_service_1 = require("../../../../services/financial/marketplacePricing.service");
+const creatorServicePrice_util_1 = require("../../../../utils/financial/creatorServicePrice.util");
+const currencyMetadata_service_1 = require("../../../../services/financial/currencyMetadata.service");
 let bookingSequence = 0;
+// Phase 8A test callers express expected financial amounts in minor units.
+// CreatorService and Slot persist the equivalent creator-facing major amount.
+const minorToCreatorMajor = (amount, currency) => {
+    const minorUnits = currencyMetadata_service_1.currencyMetadataService.get(currency).minorUnits;
+    const raw = String(amount).padStart(minorUnits + 1, "0");
+    const whole = raw.slice(0, -minorUnits) || "0";
+    const fraction = raw.slice(-minorUnits);
+    return Number(minorUnits === 0 ? raw : `${whole}.${fraction}`);
+};
 const fundWallet = async (actors, amount) => {
     const { request } = await (0, topUpFixtures_1.createFundedTopUp)(actors, amount);
     await (0, topUpFixtures_1.completeFundedTopUp)(request.topUpReference);
@@ -28,7 +39,9 @@ const createBookingWalletFixture = async (options = {}) => {
     bookingSequence += 1;
     const actors = options.actors ?? await (0, topUpFixtures_1.createActors)();
     const currency = options.currency ?? "INR";
-    const slotAmounts = options.slotAmounts ?? [400];
+    const supportedCurrency = currency;
+    const slotPrices = options.slotPricesMajor ?? (options.slotAmounts ?? [400])
+        .map((amount) => minorToCreatorMajor(amount, supportedCurrency));
     if ((options.walletAmount ?? 1000) > 0) {
         await (0, exports.fundWallet)(actors, options.walletAmount ?? 1000);
     }
@@ -49,12 +62,12 @@ const createBookingWalletFixture = async (options = {}) => {
         title: `Phase 8A Service ${bookingSequence}`,
         description: "Wallet reservation runtime fixture",
         durationMinutes: 30,
-        price: slotAmounts[0],
+        price: slotPrices[0],
         currency,
         isActive: true,
     });
     const start = Date.now() + 24 * 60 * 60 * 1000;
-    const slots = await slot_model_1.Slot.create(slotAmounts.map((price, index) => ({
+    const slots = await slot_model_1.Slot.create(slotPrices.map((price, index) => ({
         availabilityId: new mongoose_1.Types.ObjectId(),
         creatorId: actors.creatorId,
         serviceId: service._id,
@@ -65,10 +78,11 @@ const createBookingWalletFixture = async (options = {}) => {
         price,
     })));
     const token = jsonwebtoken_1.default.sign({ id: actors.userId.toString(), role: "user" }, process.env.JWT_SECRET);
-    const amount = slotAmounts.reduce((sum, slotAmount) => sum + slotAmount, 0);
+    const amount = slotPrices.reduce((sum, price) => sum +
+        (0, creatorServicePrice_util_1.creatorServiceMajorToMinor)(price, supportedCurrency), 0);
     const pricing = marketplacePricing_service_1.marketplacePricingService.calculate({
         serviceAmount: amount,
-        currency: currency,
+        currency: supportedCurrency,
     });
     return {
         actors,

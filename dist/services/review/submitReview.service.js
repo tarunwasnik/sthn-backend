@@ -9,6 +9,10 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const review_model_1 = require("../../models/review.model");
 const booking_model_1 = require("../../models/booking.model");
 const creatorProfile_model_1 = require("../../models/creatorProfile.model");
+const isReviewDuplicateKeyError = (error) => typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === 11000;
 const submitReviewService = async ({ bookingId, reviewerId, rating, comment, reportFlag, }) => {
     if (!mongoose_1.default.Types.ObjectId.isValid(bookingId)) {
         throw new Error("Invalid bookingId");
@@ -119,6 +123,9 @@ const submitReviewService = async ({ bookingId, reviewerId, rating, comment, rep
     catch (err) {
         await session.abortTransaction();
         session.endSession();
+        if (isReviewDuplicateKeyError(err)) {
+            throw new Error("You already reviewed this booking");
+        }
         throw err;
     }
 };

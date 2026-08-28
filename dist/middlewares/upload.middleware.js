@@ -4,9 +4,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.chatImageUpload = exports.chatDocumentUpload = exports.upload = void 0;
+exports.assertFaceVerificationImageBytes = exports.faceVerificationCaptureUpload = exports.chatImageUpload = exports.chatDocumentUpload = exports.upload = void 0;
 const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
+const faceVerificationEvidenceValidation_service_1 = require("../services/profile/faceVerificationEvidenceValidation.service");
 const storage = multer_1.default.memoryStorage();
 /* ======================================================
    DOCUMENT MIME TYPES
@@ -163,3 +164,13 @@ exports.chatImageUpload = (0, multer_1.default)({
         files: 20,
     },
 });
+const faceEvidenceMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+exports.faceVerificationCaptureUpload = (0, multer_1.default)({
+    storage,
+    limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+    fileFilter: (_req, file, cb) => cb(null, faceEvidenceMimeTypes.has(file.mimetype)),
+});
+const assertFaceVerificationImageBytes = (file) => {
+    (0, faceVerificationEvidenceValidation_service_1.assertFaceVerificationImageBuffer)(file.buffer);
+};
+exports.assertFaceVerificationImageBytes = assertFaceVerificationImageBytes;

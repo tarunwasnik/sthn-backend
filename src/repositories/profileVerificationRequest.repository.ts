@@ -7,6 +7,7 @@ import {
   ProfileVerificationRequestDocument,
   ProfileVerificationRequestStatus,
 } from "../models/profileVerificationRequest.model";
+import { FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS } from "../services/profile/faceVerification.constants";
 
 const activeStatuses: ProfileVerificationRequestStatus[] = ["PENDING", "PROCESSING", "ADMIN_REVIEW_REQUIRED"];
 
@@ -21,6 +22,10 @@ export class ProfileVerificationRequestRepository {
 
   findById(requestId: Types.ObjectId) {
     return ProfileVerificationRequest.findById(requestId).exec();
+  }
+
+  findByVerificationReference(verificationReference: string) {
+    return ProfileVerificationRequest.findOne({ verificationReference }).exec();
   }
 
   listActive() {
@@ -49,11 +54,12 @@ export class ProfileVerificationRequestRepository {
     reason?: string;
     decidedBy?: Types.ObjectId;
     decidedAt: Date;
+    now: Date;
     session?: ClientSession;
   }) {
     const terminalStatus = input.decision === "APPROVE" ? "APPROVED" : "REJECTED";
     return ProfileVerificationRequest.findOneAndUpdate(
-      { _id: input.requestId, isActive: true, status: { $in: activeStatuses }, decision: { $exists: false } },
+      { _id: input.requestId, isActive: true, status: { $in: activeStatuses }, decision: { $exists: false }, submittedAt: { $gt: new Date(input.now.getTime() - FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS) } },
       {
         $set: {
           status: terminalStatus,
@@ -70,15 +76,24 @@ export class ProfileVerificationRequestRepository {
     ).exec();
   }
 
+  transitionToExpired(input: { requestId: Types.ObjectId; now: Date; retentionDeadline: Date; session?: ClientSession }) {
+    return ProfileVerificationRequest.findOneAndUpdate(
+      { _id: input.requestId, isActive: true, status: { $in: activeStatuses }, submittedAt: { $lte: input.retentionDeadline } },
+      { $set: { status: "EXPIRED", isActive: false, expiredAt: input.now } },
+      { new: true, runValidators: true, session: input.session },
+    ).exec();
+  }
+
   transitionToAdminReview(input: {
     requestId: Types.ObjectId;
     reasonCode: string;
     reason?: string;
     requiredAt: Date;
+    now: Date;
     session?: ClientSession;
   }) {
     return ProfileVerificationRequest.findOneAndUpdate(
-      { _id: input.requestId, isActive: true, status: { $in: ["PENDING", "PROCESSING"] }, decision: { $exists: false } },
+      { _id: input.requestId, isActive: true, status: { $in: ["PENDING", "PROCESSING"] }, decision: { $exists: false }, submittedAt: { $gt: new Date(input.now.getTime() - FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS) } },
       {
         $set: {
           status: "ADMIN_REVIEW_REQUIRED",
@@ -93,7 +108,7 @@ export class ProfileVerificationRequestRepository {
 
   transitionPendingToProcessing(requestId: Types.ObjectId, processingStartedAt: Date) {
     return ProfileVerificationRequest.findOneAndUpdate(
-      { _id: requestId, isActive: true, status: "PENDING", decision: { $exists: false } },
+      { _id: requestId, isActive: true, status: "PENDING", decision: { $exists: false }, submittedAt: { $gt: new Date(processingStartedAt.getTime() - FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS) } },
       { $set: { status: "PROCESSING", processingStartedAt } },
       { new: true, runValidators: true },
     ).exec();

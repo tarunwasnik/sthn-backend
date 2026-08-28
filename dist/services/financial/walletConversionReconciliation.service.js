@@ -37,6 +37,10 @@ exports.walletConversionReconciliationService = exports.WalletConversionReconcil
 const mongoose_1 = __importStar(require("mongoose"));
 const walletConversionOperational_response_dto_1 = require("../../dtos/wallet/walletConversionOperational.response.dto");
 const walletConversionAuditAction_enum_1 = require("../../enums/financial/walletConversionAuditAction.enum");
+const walletConversionOperationalClassification_enum_1 = require("../../enums/financial/walletConversionOperationalClassification.enum");
+const walletConversionOperationalIssue_enum_1 = require("../../enums/financial/walletConversionOperationalIssue.enum");
+const walletConversionRepairAction_enum_1 = require("../../enums/financial/walletConversionRepairAction.enum");
+const walletConversionRequestStatus_enum_1 = require("../../enums/financial/walletConversionRequestStatus.enum");
 const WalletConversionOperationalError_1 = require("../../errors/financial/WalletConversionOperationalError");
 const walletConversionAudit_model_1 = require("../../models/walletConversionAudit.model");
 const walletConversionAudit_repository_1 = require("../../repositories/walletConversionAudit.repository");
@@ -51,6 +55,38 @@ class WalletConversionReconciliationService {
     }
     async inject(stage) {
         await this.options.failureInjector?.(stage);
+    }
+    allowedActions(inspection, authority) {
+        if (authority.retryPerformed || authority.repairPerformed)
+            return [];
+        const only = (issue) => inspection.issues.length === 1 &&
+            inspection.issues[0] === issue;
+        if (inspection.classification === walletConversionOperationalClassification_enum_1.WalletConversionOperationalClassification.REPLAY_REQUIRED &&
+            inspection.request.status === walletConversionRequestStatus_enum_1.WalletConversionRequestStatus.APPROVED &&
+            inspection.graph && inspection.request.accountingReference &&
+            inspection.request.accountingTransactionReference &&
+            inspection.request.completedAt &&
+            only(walletConversionOperationalIssue_enum_1.WalletConversionOperationalIssue.ACCOUNTING_COMPLETION_REPLAY_REQUIRED))
+            return ["RETRY"];
+        if (inspection.request.status !== walletConversionRequestStatus_enum_1.WalletConversionRequestStatus.COMPLETED ||
+            !inspection.graph)
+            return [];
+        if (inspection.classification === walletConversionOperationalClassification_enum_1.WalletConversionOperationalClassification.MISSING_AUDIT &&
+            only(walletConversionOperationalIssue_enum_1.WalletConversionOperationalIssue.TERMINAL_AUDIT_MISSING)) {
+            return [walletConversionRepairAction_enum_1.WalletConversionRepairAction.RESTORE_MISSING_AUDIT];
+        }
+        if (inspection.classification !== walletConversionOperationalClassification_enum_1.WalletConversionOperationalClassification.REPLAY_REQUIRED)
+            return [];
+        if (only(walletConversionOperationalIssue_enum_1.WalletConversionOperationalIssue.LEDGER_REFERENCES_MISSING)) {
+            return [walletConversionRepairAction_enum_1.WalletConversionRepairAction.RESTORE_LEDGER_REFERENCES];
+        }
+        if (only(walletConversionOperationalIssue_enum_1.WalletConversionOperationalIssue.PROJECTION_REFERENCES_MISSING)) {
+            return [walletConversionRepairAction_enum_1.WalletConversionRepairAction.RESTORE_PROJECTION_REFERENCES];
+        }
+        if (only(walletConversionOperationalIssue_enum_1.WalletConversionOperationalIssue.ACCOUNTING_REFERENCES_MISSING)) {
+            return [walletConversionRepairAction_enum_1.WalletConversionRepairAction.RESTORE_ACCOUNTING_REFERENCES];
+        }
+        return [];
     }
     async reconcile(conversionReference, adminUserId, transactionAttempt = 0) {
         const inspection = await walletConversionOperationalInspection_service_1.walletConversionOperationalInspectionService
@@ -68,7 +104,7 @@ class WalletConversionReconciliationService {
             replay.classification === inspection.classification &&
             replay.severity === inspection.severity &&
             JSON.stringify(replay.issues) === JSON.stringify(inspection.issues)) {
-            return (0, walletConversionOperational_response_dto_1.toWalletConversionOperationalResponseDto)(replay);
+            return (0, walletConversionOperational_response_dto_1.toWalletConversionOperationalResponseDto)(replay, this.allowedActions(inspection, replay));
         }
         const session = await mongoose_1.default.startSession();
         try {
@@ -106,7 +142,7 @@ class WalletConversionReconciliationService {
             });
             if (!result)
                 throw new WalletConversionOperationalError_1.WalletConversionOperationalError("Wallet conversion reconciliation did not commit.", "WALLET_CONVERSION_OPERATIONAL_TRANSACTION_CONFLICT");
-            return (0, walletConversionOperational_response_dto_1.toWalletConversionOperationalResponseDto)(result);
+            return (0, walletConversionOperational_response_dto_1.toWalletConversionOperationalResponseDto)(result, this.allowedActions(inspection, result));
         }
         catch (error) {
             if (error instanceof WalletConversionOperationalError_1.WalletConversionOperationalError)
@@ -115,7 +151,7 @@ class WalletConversionReconciliationService {
                 const winner = await walletConversionReconciliation_repository_1.walletConversionReconciliationRepository
                     .findByConversionReference(inspection.request.conversionReference);
                 if (winner)
-                    return (0, walletConversionOperational_response_dto_1.toWalletConversionOperationalResponseDto)(winner);
+                    return (0, walletConversionOperational_response_dto_1.toWalletConversionOperationalResponseDto)(winner, this.allowedActions(inspection, winner));
                 return this.reconcile(conversionReference, adminUserId, transactionAttempt + 1);
             }
             throw new WalletConversionOperationalError_1.WalletConversionOperationalError("Wallet conversion reconciliation transaction failed.", "WALLET_CONVERSION_OPERATIONAL_TRANSACTION_CONFLICT", error);
@@ -149,7 +185,7 @@ class WalletConversionReconciliationService {
             !audits[0].adminActorId?.equals(authority.inspectedBy)) {
             throw new WalletConversionOperationalError_1.WalletConversionOperationalError("Wallet conversion reconciliation replay conflicts.", "WALLET_CONVERSION_OPERATIONAL_REPLAY_CONFLICT");
         }
-        return (0, walletConversionOperational_response_dto_1.toWalletConversionOperationalResponseDto)(authority);
+        return (0, walletConversionOperational_response_dto_1.toWalletConversionOperationalResponseDto)(authority, this.allowedActions(inspection, authority));
     }
 }
 exports.WalletConversionReconciliationService = WalletConversionReconciliationService;

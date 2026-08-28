@@ -39,6 +39,15 @@ const mongoose_1 = __importStar(require("mongoose"));
 const bookingTerminationType_enum_1 = require("../enums/booking/bookingTerminationType.enum");
 const paymentMethod_enum_1 = require("../enums/financial/paymentMethod.enum");
 const bookingWalletCaptureCause_enum_1 = require("../enums/financial/bookingWalletCaptureCause.enum");
+const BookingServiceSnapshotSchema = new mongoose_1.Schema({
+    serviceId: { type: mongoose_1.Schema.Types.ObjectId, ref: "CreatorService", required: true },
+    title: { type: String, required: true, trim: true },
+    description: { type: String, required: true, trim: true },
+    durationMinutes: { type: Number, required: true, min: 15, max: 480 },
+    price: { type: Number, required: true, min: 0 },
+    currency: { type: String, required: true, trim: true },
+    media: { type: [String], default: [] },
+}, { _id: false, id: false });
 const BookingSchema = new mongoose_1.Schema({
     slotIds: [
         {
@@ -64,6 +73,10 @@ const BookingSchema = new mongoose_1.Schema({
         ref: "CreatorService",
         required: true,
         index: true,
+    },
+    serviceSnapshot: {
+        type: BookingServiceSnapshotSchema,
+        immutable: true,
     },
     paymentId: {
         type: mongoose_1.Schema.Types.ObjectId,

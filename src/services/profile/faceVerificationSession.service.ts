@@ -108,6 +108,7 @@ export const acceptFaceVerificationCapture = async (input: { userId: string; ses
   const index = typeof input.challengeIndex === "string" && /^\d+$/.test(input.challengeIndex) ? Number(input.challengeIndex) : -1;
   if (!Number.isInteger(index) || index < 0 || index > 4) throw new AppError("Invalid face verification challenge index", 400);
   const session = await getOwnedFaceVerificationSession(input);
+  if (!session.isCurrent || !["CREATED", "CAPTURING", "CAPTURE_COMPLETE"].includes(session.status)) throw new AppError("Face verification session is not accepting captures", 409);
   const existing = await faceVerificationEvidenceRepository.findSlot(session._id, index);
   if (existing?.status === "STORED") return { session, evidence: existing, replayed: true };
   if (!["CREATED", "CAPTURING"].includes(session.status) || !session.isCurrent) throw new AppError("Face verification session is not accepting captures", 409);

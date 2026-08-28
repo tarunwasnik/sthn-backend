@@ -14,6 +14,7 @@ const booking_model_1 = require("../../../models/booking.model");
 const bookingCreatorSettlement_model_1 = require("../../../models/bookingCreatorSettlement.model");
 const bookingEscrowAllocation_model_1 = require("../../../models/bookingEscrowAllocation.model");
 const dispute_model_1 = require("../../../models/dispute.model");
+const userProfile_model_1 = require("../../../models/userProfile.model");
 const ledgerEntry_model_1 = require("../../../models/ledgerEntry.model");
 const wallet_model_1 = require("../../../models/wallet.model");
 const walletProjectionOperation_model_1 = require("../../../models/walletProjectionOperation.model");
@@ -50,35 +51,54 @@ const assertNoSettlementEffect = async (fixture, before) => {
     strict_1.default.equal((await bookingEscrowAllocation_model_1.BookingEscrowAllocation.findById(fixture.allocation._id).orFail()).status, "ALLOCATED");
 };
 const registerBookingCreatorSettlementFailureTests = () => {
-    (0, node_test_1.test)("phase8e missing Creator Wallet fails closed and preserves Phase 8D", async () => {
+    (0, node_test_1.test)("phase8e missing Creator currency Wallet is created through the User-owned Wallet authority", async () => {
         const server = await (0, bookingCreatorSettlementFixtures_1.startSettlementHttpServer)();
         try {
             const captured = await (0, bookingEscrowAllocationFixtures_1.createCapturedWalletBooking)(server.baseUrl);
             await bookingEscrowAllocation_service_1.bookingEscrowAllocationService.allocate(captured.booking._id.toString());
-            await expectCode(bookingCreatorSettlement_service_1.bookingCreatorSettlementService.settle(captured.booking._id.toString()), "BOOKING_CREATOR_SETTLEMENT_WALLET_NOT_FOUND");
-            strict_1.default.equal(await bookingCreatorSettlement_model_1.BookingCreatorSettlement.countDocuments(), 0);
-            strict_1.default.equal(await ledgerEntry_model_1.LedgerEntry.countDocuments({
-                source: ledgerSource_enum_1.LedgerSource.BOOKING_CREATOR_WALLET_SETTLEMENT,
-            }), 0);
-            strict_1.default.equal((await bookingEscrowAllocation_model_1.BookingEscrowAllocation.findOne({
-                bookingId: captured.booking._id,
-            }).orFail()).status, "ALLOCATED");
+            await userProfile_model_1.UserProfile.create({
+                userId: captured.fixture.actors.creatorId,
+                username: `phase8e_creator_wallet_${captured.booking._id}`,
+                dateOfBirth: new Date("1990-01-01T00:00:00.000Z"),
+                interests: ["finance"],
+                bio: "Phase 8E Creator Wallet creation test",
+                avatar: "https://test.local/avatar",
+                cover: "https://test.local/cover",
+                profilePhotos: ["https://test.local/1", "https://test.local/2"],
+                profileStatus: "verified",
+            });
+            const result = await bookingCreatorSettlement_service_1.bookingCreatorSettlementService.settle(captured.booking._id.toString());
+            strict_1.default.equal(result.replay, false);
+            strict_1.default.equal(result.wallet.currency, "INR");
+            strict_1.default.equal(await wallet_model_1.Wallet.countDocuments({
+                userId: captured.fixture.actors.creatorId,
+                currency: "INR",
+            }), 1);
         }
         finally {
             await server.close();
         }
     });
-    (0, node_test_1.test)("phase8e Creator Wallet currency mismatch fails without conversion", async () => {
+    (0, node_test_1.test)("phase8e Creator Wallet currency buckets remain independent", async () => {
         const server = await (0, bookingCreatorSettlementFixtures_1.startSettlementHttpServer)();
         try {
             const fixture = await (0, bookingCreatorSettlementFixtures_1.createAllocatedCreatorSettlementFixture)(server.baseUrl, { creatorWalletCurrency: "USD" });
-            await expectCode(bookingCreatorSettlement_service_1.bookingCreatorSettlementService.settle(fixture.booking._id.toString()), "BOOKING_CREATOR_SETTLEMENT_CURRENCY_CONFLICT");
-            strict_1.default.equal(await bookingCreatorSettlement_model_1.BookingCreatorSettlement.countDocuments(), 0);
-            strict_1.default.equal(await ledgerEntry_model_1.LedgerEntry.countDocuments({
-                source: ledgerSource_enum_1.LedgerSource.BOOKING_CREATOR_WALLET_SETTLEMENT,
-            }), 0);
-            const wallet = await wallet_model_1.Wallet.findById(fixture.creatorWallet._id).orFail();
-            strict_1.default.equal(wallet.currentBalance, 100);
+            await userProfile_model_1.UserProfile.create({
+                userId: fixture.fixture.actors.creatorId,
+                username: `phase8e_creator_currency_${fixture.booking._id}`,
+                dateOfBirth: new Date("1990-01-01T00:00:00.000Z"),
+                interests: ["finance"],
+                bio: "Phase 8E multi-currency Creator Wallet test",
+                avatar: "https://test.local/avatar",
+                cover: "https://test.local/cover",
+                profilePhotos: ["https://test.local/1", "https://test.local/2"],
+                profileStatus: "verified",
+            });
+            const result = await bookingCreatorSettlement_service_1.bookingCreatorSettlementService.settle(fixture.booking._id.toString());
+            strict_1.default.equal(result.wallet.currency, "INR");
+            strict_1.default.equal(await wallet_model_1.Wallet.countDocuments({
+                userId: fixture.fixture.actors.creatorId,
+            }), 2);
         }
         finally {
             await server.close();

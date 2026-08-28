@@ -1,4 +1,5 @@
 "use strict";
+/// <reference path="../types/express.d.ts" />
 // backend/src/controllers/creatorAvailability.controller.ts
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -441,14 +442,28 @@ exports.getCreatorAvailabilities = getCreatorAvailabilities;
    GET SLOTS FOR AN AVAILABILITY (CREATOR PANEL)
 ========================================================= */
 const getAvailabilitySlots = async (req, res) => {
+    const user = req.user;
     const { availabilityId } = req.params;
+    if (!user) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
     if (!mongoose_1.default.Types.ObjectId.isValid(availabilityId)) {
         return res.status(400).json({
             message: "Invalid availabilityId",
         });
     }
+    const availability = await availability_model_1.Availability.findOne({
+        _id: availabilityId,
+        creatorId: new mongoose_1.default.Types.ObjectId(user.id),
+    });
+    if (!availability) {
+        return res.status(404).json({
+            message: "Availability not found",
+        });
+    }
     const slots = await slot_model_1.Slot.find({
-        availabilityId,
+        availabilityId: availability._id,
+        creatorId: new mongoose_1.default.Types.ObjectId(user.id),
     }).sort({ startTime: 1 });
     return res.status(200).json({
         count: slots.length,
@@ -460,14 +475,24 @@ exports.getAvailabilitySlots = getAvailabilitySlots;
    DISABLE SLOT
 ========================================================= */
 const disableSlot = async (req, res) => {
+    const user = req.user;
     const { slotId } = req.params;
-    const slot = await slot_model_1.Slot.findByIdAndUpdate(slotId, { status: "CANCELLED" }, { new: true });
+    if (!user) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+    if (!mongoose_1.default.Types.ObjectId.isValid(slotId)) {
+        return res.status(400).json({ message: "Invalid slotId" });
+    }
+    const slot = await slot_model_1.Slot.findOneAndUpdate({
+        _id: slotId,
+        creatorId: new mongoose_1.default.Types.ObjectId(user.id),
+    }, { status: "CANCELLED" }, { new: true });
     if (!slot) {
         return res.status(404).json({
             message: "Slot not found",
         });
     }
-    return res.json({
+    return res.status(200).json({
         message: "Slot disabled",
         slot,
     });
@@ -477,14 +502,24 @@ exports.disableSlot = disableSlot;
    ENABLE SLOT
 ========================================================= */
 const enableSlot = async (req, res) => {
+    const user = req.user;
     const { slotId } = req.params;
-    const slot = await slot_model_1.Slot.findByIdAndUpdate(slotId, { status: "AVAILABLE" }, { new: true });
+    if (!user) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+    if (!mongoose_1.default.Types.ObjectId.isValid(slotId)) {
+        return res.status(400).json({ message: "Invalid slotId" });
+    }
+    const slot = await slot_model_1.Slot.findOneAndUpdate({
+        _id: slotId,
+        creatorId: new mongoose_1.default.Types.ObjectId(user.id),
+    }, { status: "AVAILABLE" }, { new: true });
     if (!slot) {
         return res.status(404).json({
             message: "Slot not found",
         });
     }
-    return res.json({
+    return res.status(200).json({
         message: "Slot enabled",
         slot,
     });
@@ -494,14 +529,24 @@ exports.enableSlot = enableSlot;
    DELETE SLOT
 ========================================================= */
 const deleteSlot = async (req, res) => {
+    const user = req.user;
     const { slotId } = req.params;
-    const slot = await slot_model_1.Slot.findByIdAndDelete(slotId);
+    if (!user) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+    if (!mongoose_1.default.Types.ObjectId.isValid(slotId)) {
+        return res.status(400).json({ message: "Invalid slotId" });
+    }
+    const slot = await slot_model_1.Slot.findOneAndDelete({
+        _id: slotId,
+        creatorId: new mongoose_1.default.Types.ObjectId(user.id),
+    });
     if (!slot) {
         return res.status(404).json({
             message: "Slot not found",
         });
     }
-    return res.json({
+    return res.status(200).json({
         message: "Slot deleted",
     });
 };

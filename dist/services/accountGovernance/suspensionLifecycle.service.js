@@ -7,74 +7,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.triggerSuspensionLifecycle = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../../models/User"));
-const booking_model_1 = require("../../models/booking.model");
-const slot_model_1 = require("../../models/slot.model");
 const accountGovernance_1 = require("../../constants/accountGovernance");
 const accountGovernanceResolver_service_1 = require("./accountGovernanceResolver.service");
-const bookingTerminationType_enum_1 = require("../../enums/booking/bookingTerminationType.enum");
-const bookingFinancialTermination_service_1 = require("../financial/bookingFinancialTermination.service");
-/* =========================================================
-   HELPERS
-========================================================= */
-const addHours = (date, hours) => {
-    return new Date(date.getTime() + hours * 60 * 60 * 1000);
-};
-/* =========================================================
-   PROCESS BOOKINGS FOR SUSPENSION
-========================================================= */
-const processSuspensionBookings = async (userId, triggeredAt, protectedUntil, session) => {
-    const bookings = await booking_model_1.Booking.find({
-        $or: [{ userId }, { creatorId: userId }],
-        status: {
-            $in: ["REQUESTED", "CONFIRMED"],
-        },
-    }).session(session);
-    const protectedBookingIds = [];
-    const processedBookingIds = [];
-    for (const booking of bookings) {
-        /* =====================================================
-           REQUESTED BOOKINGS
-        ===================================================== */
-        if (booking.status === "REQUESTED") {
-            processedBookingIds.push(booking._id);
-            continue;
-        }
-        /* =====================================================
-           CONFIRMED BOOKINGS
-        ===================================================== */
-        if (booking.status === "CONFIRMED") {
-            const slots = await slot_model_1.Slot.find({
-                _id: {
-                    $in: booking.slotIds,
-                },
-            })
-                .sort({ startTime: 1 })
-                .session(session);
-            const firstSlot = slots[0];
-            if (!firstSlot) {
-                throw new Error(`Confirmed booking ${booking._id.toString()} has no slots`);
-            }
-            const bookingStartTime = new Date(firstSlot.startTime);
-            const isAlreadyStarted = bookingStartTime.getTime() <= triggeredAt.getTime();
-            const startsInsideProtectionWindow = bookingStartTime.getTime() > triggeredAt.getTime() &&
-                bookingStartTime.getTime() <= protectedUntil.getTime();
-            if (isAlreadyStarted || startsInsideProtectionWindow) {
-                protectedBookingIds.push(booking._id);
-                continue;
-            }
-            processedBookingIds.push(booking._id);
-            continue;
-        }
-    }
-    return {
-        protectedBookingIds,
-        processedBookingIds,
-    };
-};
+const governanceBookingOrchestration_service_1 = require("./governanceBookingOrchestration.service");
 /* =========================================================
    TRIGGER SUSPENSION
 ========================================================= */
-const triggerSuspensionLifecycle = async ({ adminId, userId, reason, }) => {
+const triggerSuspensionLifecycle = async ({ adminId, userId, reason, now: inputNow = new Date(), }) => {
     if (!mongoose_1.default.Types.ObjectId.isValid(userId)) {
         throw new Error("Invalid target user id");
     }
@@ -99,53 +38,47 @@ const triggerSuspensionLifecycle = async ({ adminId, userId, reason, }) => {
             governance.condition === "PENDING_BAN") {
             throw new Error("Suspension cannot override an active ban lifecycle");
         }
-        if (governance.condition === "SUSPENDED" ||
-            governance.condition === "PENDING_SUSPENSION") {
-            throw new Error("Suspension lifecycle is already active for this account");
+        const isReplay = governance.condition === "SUSPENDED" ||
+            governance.condition === "PENDING_SUSPENSION";
+        const previousGovernanceState = user.governanceState;
+        const triggeredAt = user.governanceTriggeredAt ?? new Date();
+        /*
+         * G1 establishes canonical account authority only.  Booking classification
+         * and Wallet-compatible termination are deferred until their financial
+         * release contract exists; this transition must not pretend to process them.
+         */
+        if (!isReplay) {
+            user.governanceState = accountGovernance_1.ACCOUNT_GOVERNANCE_STATE.SUSPENDED;
+            user.governanceTriggeredAt = triggeredAt;
+            user.governanceReason = reason.trim();
+            user.governanceTriggeredBy = new mongoose_1.default.Types.ObjectId(adminId);
+            user.suspensionProtectedUntil = null;
         }
-        const triggeredAt = new Date();
-        const protectedUntil = addHours(triggeredAt, accountGovernance_1.SUSPENSION_BOOKING_PROTECTION_HOURS);
-        const { protectedBookingIds, processedBookingIds } = await processSuspensionBookings(userId, triggeredAt, protectedUntil, session);
-        const hasProtectedBookings = protectedBookingIds.length > 0;
-        user.governanceState = hasProtectedBookings
-            ? accountGovernance_1.ACCOUNT_GOVERNANCE_STATE.PENDING_SUSPENSION
-            : accountGovernance_1.ACCOUNT_GOVERNANCE_STATE.SUSPENDED;
-        user.governanceTriggeredAt = triggeredAt;
-        user.governanceReason = reason.trim();
-        user.governanceTriggeredBy = new mongoose_1.default.Types.ObjectId(adminId);
-        user.suspensionProtectedUntil = hasProtectedBookings
-            ? protectedUntil
-            : null;
         /*
          * Legacy status remains synchronized temporarily.
          *
-         * PENDING_SUSPENSION must remain "active" because the account
-         * still has full dashboard access while protected bookings
-         * are being resolved.
-         *
-         * Final SUSPENDED keeps the legacy field synchronized until
-         * all old status consumers are migrated to governanceState.
+         * Legacy status remains a compatibility projection while governanceState
+         * is the decision authority.
          */
-        user.status = hasProtectedBookings ? "active" : "suspended";
+        user.status = "suspended";
         await user.save({ session });
         await session.commitTransaction();
-        for (const bookingId of processedBookingIds) {
-            await bookingFinancialTermination_service_1.bookingFinancialTerminationService.terminateBookingFinancially({
-                bookingId: bookingId.toString(),
-                actorType: bookingTerminationType_enum_1.BookingTerminationActorType.GOVERNANCE,
-                actorId: adminId,
-                terminationType: bookingTerminationType_enum_1.BookingTerminationType.GOVERNANCE_TERMINATED,
-                reason: reason.trim(),
-            });
-        }
+        const consequences = await (0, governanceBookingOrchestration_service_1.orchestrateGovernanceBookingConsequences)({
+            governedUserId: userId,
+            adminId,
+            reason: user.governanceReason ?? reason.trim(),
+            now: inputNow,
+        });
         return {
             userId: user._id,
+            previousGovernanceState,
             governanceState: user.governanceState,
             triggeredAt,
-            protectedUntil: user.suspensionProtectedUntil,
-            protectedBookingIds,
-            processedBookingIds,
+            status: user.status,
             reason: user.governanceReason,
+            bookingsMutated: consequences.terminatedCount > 0,
+            consequences,
+            replay: isReplay,
         };
     }
     catch (error) {

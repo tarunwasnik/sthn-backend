@@ -4,16 +4,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getCreatorPerformanceService = exports.getAllCreatorsService = void 0;
 const creatorProfile_model_1 = require("../../models/creatorProfile.model");
 const booking_model_1 = require("../../models/booking.model");
+const adminCreatorList_dto_1 = require("../../dtos/admin/adminCreatorList.dto");
 const getAllCreatorsService = async (page, limit) => {
     const skip = (page - 1) * limit;
     const [data, total] = await Promise.all([
         creatorProfile_model_1.CreatorProfile.find()
+            .select("userId slug displayName avatarUrl primaryCategory country city currency rating reviewCount status createdAt")
             .sort({ createdAt: -1 })
             .skip(skip)
-            .limit(limit),
+            .limit(limit)
+            .lean(),
         creatorProfile_model_1.CreatorProfile.countDocuments()
     ]);
-    return { data, total };
+    return { data: data.map(adminCreatorList_dto_1.toAdminCreatorListDto), total };
 };
 exports.getAllCreatorsService = getAllCreatorsService;
 const getCreatorPerformanceService = async () => {

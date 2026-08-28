@@ -100,8 +100,6 @@ class BookingFinancialTerminationService {
                 throw new BookingTerminationError_1.BookingTerminationError("Only an expired requested booking can be expired by the system.", "BOOKING_TERMINATION_CONFLICT", 409);
             }
         }
-        if (booking.hasInteracted && ![bookingTerminationType_enum_1.BookingTerminationActorType.ADMIN, bookingTerminationType_enum_1.BookingTerminationActorType.GOVERNANCE, bookingTerminationType_enum_1.BookingTerminationActorType.SYSTEM].includes(input.actorType))
-            throw new BookingTerminationError_1.BookingTerminationError("Booking cancellation is restricted after interaction.", "BOOKING_ONGOING_TERMINATION_RESTRICTED", 409);
         const payment = booking.paymentId ? await payment_repository_1.paymentRepository.findById(booking.paymentId) : null;
         if (payment && booking.paymentMethod !== payment.method) {
             throw new BookingWalletReservationReleaseError_1.BookingWalletReservationReleaseError("Booking and Payment method links are inconsistent.", "BOOKING_WALLET_RELEASE_PAYMENT_METHOD_CONFLICT");

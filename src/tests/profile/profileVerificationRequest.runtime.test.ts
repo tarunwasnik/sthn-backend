@@ -13,8 +13,11 @@ import {
   escalateProfileVerificationRequest,
   ensureActiveProfileVerificationRequest,
   ensureLegacyPendingProfileVerificationRequest,
+  expireProfileVerificationRequests,
   listProfileVerificationQueue,
 } from "../../services/profile/profileVerificationRequest.service";
+import { FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS } from "../../services/profile/faceVerification.constants";
+import { profileVerificationRequestRepository } from "../../repositories/profileVerificationRequest.repository";
 import { startFaceVerificationSession } from "../../services/profile/faceVerificationSession.service";
 import {
   clearPhase7HDatabase,
@@ -265,4 +268,35 @@ test("legacy pending profiles receive one compatible active request without dupl
   ]);
   assert.equal(aiQueue.some((entry) => entry._id === String(profile._id)), true);
   assert.equal(adminReviewQueue.some((entry) => entry._id === String(profile._id)), false);
+});
+
+test("retention expiry is non-punitive, terminal, and releases a fresh submission version", async () => {
+  const user = await createUser("verification-expired@test.local", "active");
+  const submittedAt = new Date(Date.now() - FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS - 1);
+  const profile = await UserProfile.create({
+    userId: user._id, username: "verification-expired", dateOfBirth: new Date("1990-01-01"), interests: [], bio: "Expired verification.",
+    avatar: "https://example.test/avatar.jpg", cover: "https://example.test/cover.jpg", profilePhotos: ["https://example.test/one.jpg", "https://example.test/two.jpg"],
+    profileStatus: "pending_verification", verificationSubmittedAt: submittedAt, verificationSubmissionVersion: 3,
+  });
+  const request = await ProfileVerificationRequest.create({ verificationReference: "PROFILE_VERIFICATION_EXPIRED_TEST", profileId: profile._id, userId: user._id, attemptNumber: 1, profileSubmissionVersion: 3, submittedAt });
+  await expireProfileVerificationRequests(new Date());
+  const [expired, recoveredProfile] = await Promise.all([ProfileVerificationRequest.findById(request._id), UserProfile.findById(profile._id)]);
+  assert.equal(expired?.status, "EXPIRED"); assert.equal(expired?.isActive, false); assert.ok(expired?.expiredAt);
+  assert.equal(expired?.decision, undefined); assert.equal(recoveredProfile?.profileStatus, "incomplete"); assert.equal(recoveredProfile?.rejectionReason, "");
+});
+
+test("conditional terminal and expiry transitions leave exactly one retention-valid terminal authority", async () => {
+  const user = await createUser("verification-transition-race@test.local", "active");
+  const profile = await UserProfile.create({ userId: user._id, username: "verification-transition-race", dateOfBirth: new Date("1990-01-01"), interests: [], bio: "Transition race.", avatar: "https://example.test/avatar.jpg", cover: "https://example.test/cover.jpg", profilePhotos: ["https://example.test/one.jpg", "https://example.test/two.jpg"], profileStatus: "pending_verification", verificationSubmittedAt: new Date(), verificationSubmissionVersion: 1 });
+  const valid = await ProfileVerificationRequest.create({ verificationReference: "PROFILE_VERIFICATION_TRANSITION_VALID", profileId: profile._id, userId: user._id, attemptNumber: 1, profileSubmissionVersion: 1, submittedAt: new Date() });
+  const approved = await profileVerificationRequestRepository.transitionToTerminal({ requestId: valid._id, decision: "APPROVE", authority: "ADMIN", decidedAt: new Date(), now: new Date() });
+  assert.equal(approved?.status, "APPROVED");
+  assert.equal(await profileVerificationRequestRepository.transitionToExpired({ requestId: valid._id, now: new Date(), retentionDeadline: new Date() }), null);
+
+  const old = new Date(Date.now() - FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS - 1);
+  const expired = await ProfileVerificationRequest.create({ verificationReference: "PROFILE_VERIFICATION_TRANSITION_EXPIRED", profileId: profile._id, userId: user._id, attemptNumber: 2, profileSubmissionVersion: 2, submittedAt: old });
+  assert.equal(await profileVerificationRequestRepository.transitionToTerminal({ requestId: expired._id, decision: "REJECT", authority: "ADMIN", reason: "unused", decidedAt: new Date(), now: new Date() }), null);
+  assert.equal((await profileVerificationRequestRepository.transitionToExpired({ requestId: expired._id, now: new Date(), retentionDeadline: new Date(old.getTime() + FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS) }))?.status, "EXPIRED");
+  await ProfileVerificationRequest.updateOne({ _id: expired._id }, { $set: { submittedAt: new Date() } });
+  assert.equal((await ProfileVerificationRequest.findById(expired._id))?.submittedAt.getTime(), old.getTime());
 });

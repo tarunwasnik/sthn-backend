@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.io = void 0;
+exports.startServer = startServer;
 /// <reference path="./types/express.d.ts" />
 require("dotenv/config");
 const express_1 = __importDefault(require("express"));
@@ -20,6 +21,8 @@ const interactionTrigger_job_1 = require("./jobs/interactionTrigger.job");
 const sessionEndingSoon_job_1 = require("./jobs/sessionEndingSoon.job");
 const disputeEscalation_job_1 = require("./jobs/disputeEscalation.job");
 const settleBookings_job_1 = require("./jobs/settleBookings.job");
+const profileVerificationReconciliation_job_1 = require("./jobs/profileVerificationReconciliation.job");
+const faceVerificationEvidenceCleanup_job_1 = require("./jobs/faceVerificationEvidenceCleanup.job");
 const errorHandler_1 = require("./middlewares/errorHandler"); // ✅ ADDED
 mongoose_1.default.set("bufferCommands", false);
 const app = (0, express_1.default)();
@@ -46,6 +49,10 @@ app.use(express_1.default.json());
 /* ===================== SERVER ===================== */
 const PORT = process.env.PORT || 5000;
 let jobRunning = false;
+let jobLoopStopping = false;
+let jobLoopPromise = null;
+let jobLoopTimer = null;
+let resolveJobLoopDelay = null;
 /* ===================== BACKGROUND JOBS ===================== */
 async function runBackgroundJobs() {
     if (jobRunning)
@@ -59,6 +66,8 @@ async function runBackgroundJobs() {
         await (0, sessionEndingSoon_job_1.sessionEndingSoonJob)();
         await (0, disputeEscalation_job_1.disputeEscalationJob)();
         await (0, settleBookings_job_1.settleBookingsJob)();
+        await (0, profileVerificationReconciliation_job_1.profileVerificationReconciliationJob)();
+        await (0, faceVerificationEvidenceCleanup_job_1.faceVerificationEvidenceCleanupJob)();
         console.log("✅ Background jobs completed");
     }
     catch (err) {
@@ -68,13 +77,46 @@ async function runBackgroundJobs() {
         jobRunning = false;
     }
 }
+const waitForJobLoopDelay = (milliseconds) => new Promise((resolve) => {
+    resolveJobLoopDelay = () => {
+        resolveJobLoopDelay = null;
+        resolve();
+    };
+    jobLoopTimer = setTimeout(() => {
+        jobLoopTimer = null;
+        resolveJobLoopDelay?.();
+    }, milliseconds);
+});
 async function startJobLoop() {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    console.log("⏱ Starting job loop...");
-    while (true) {
-        await runBackgroundJobs();
-        await new Promise((resolve) => setTimeout(resolve, 60 * 1000));
+    if (jobLoopPromise)
+        return jobLoopPromise;
+    jobLoopStopping = false;
+    jobLoopPromise = (async () => {
+        await waitForJobLoopDelay(5000);
+        if (jobLoopStopping)
+            return;
+        console.log("⏱ Starting job loop...");
+        while (!jobLoopStopping) {
+            await runBackgroundJobs();
+            if (jobLoopStopping)
+                break;
+            await waitForJobLoopDelay(60 * 1000);
+        }
+    })().finally(() => {
+        jobLoopPromise = null;
+        jobLoopTimer = null;
+        resolveJobLoopDelay = null;
+    });
+    return jobLoopPromise;
+}
+async function stopJobLoop() {
+    jobLoopStopping = true;
+    if (jobLoopTimer) {
+        clearTimeout(jobLoopTimer);
+        jobLoopTimer = null;
     }
+    resolveJobLoopDelay?.();
+    await jobLoopPromise;
 }
 /* ===================== START SERVER ===================== */
 async function startServer() {
@@ -101,6 +143,7 @@ async function startServer() {
         });
         process.on("SIGINT", async () => {
             console.log("🛑 Shutting down server...");
+            await stopJobLoop();
             await mongoose_1.default.connection.close();
             httpServer.close(() => {
                 process.exit(0);
@@ -112,4 +155,6 @@ async function startServer() {
         process.exit(1);
     }
 }
-startServer();
+if (require.main === module) {
+    void startServer();
+}

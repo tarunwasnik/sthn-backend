@@ -153,8 +153,9 @@ class WalletController {
     }
     currency(req) {
         const value = req.query.currency;
-        if (value === undefined)
-            return undefined;
+        if (value === undefined) {
+            throw new WalletError_1.WalletError("Currency query parameter is required.", "WALLET_INVALID_CURRENCY");
+        }
         if (typeof value !== "string")
             throw new WalletError_1.WalletError("Currency query parameter must be a string.", "WALLET_INVALID_CURRENCY");
         return (0, walletCreation_service_1.normalizeWalletCurrency)(value);

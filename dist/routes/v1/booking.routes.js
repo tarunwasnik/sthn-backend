@@ -4,6 +4,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_middleware_1 = require("../../middlewares/auth.middleware");
 const booking_controller_1 = require("../../controllers/booking.controller");
+const bookingFunding_controller_1 = require("../../controllers/bookingFunding.controller");
 const userCancelBooking_controller_1 = require("../../controllers/userCancelBooking.controller");
 const bookingInteraction_controller_1 = require("../../controllers/bookingInteraction.controller");
 const completeBooking_controller_1 = require("../../controllers/completeBooking.controller");
@@ -12,6 +13,11 @@ const router = (0, express_1.Router)();
    USER BOOKINGS
 ========================================================= */
 router.get("/user", auth_middleware_1.protect, booking_controller_1.getUserBookings);
+/* =========================================================
+   SAFE BOOKING FINANCIAL READS
+========================================================= */
+router.post("/pricing-preview", auth_middleware_1.protect, bookingFunding_controller_1.previewBookingFunding);
+router.get("/:bookingId/funding", auth_middleware_1.protect, bookingFunding_controller_1.getBookingFunding);
 /* =========================================================
    CREATOR JOURNEY ELIGIBILITY
 ========================================================= */

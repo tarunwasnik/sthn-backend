@@ -21,7 +21,7 @@ class WalletTopUpRequestRepository {
         missing.push({ $or: [{ [field]: { $exists: false } }, { [field]: null }] });
     } return walletTopUpRequest_model_1.WalletTopUpRequest.findOneAndUpdate({ topUpReference: input.topUpReference, status: input.expectedStatus, providerFundingId: input.providerFundingId, providerFundingReference: input.providerFundingReference, ...(missing.length ? { $and: missing } : {}) }, { $set: set }, { new: true, runValidators: true }).select("+providerFundingId +ledgerEntryId +walletProjectionOperationId +failureFinalizedBy").exec(); }
     listByUser(userId, page, limit) { return walletTopUpRequest_model_1.WalletTopUpRequest.find({ userId }).sort({ requestedAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).exec(); }
-    listPending(page, limit) { return walletTopUpRequest_model_1.WalletTopUpRequest.find({ status: walletTopUpRequestStatus_enum_1.WalletTopUpRequestStatus.PENDING }).sort({ requestedAt: 1, _id: 1 }).skip((page - 1) * limit).limit(limit).exec(); }
+    listByStatus(status, page, limit) { return walletTopUpRequest_model_1.WalletTopUpRequest.find({ status }).sort({ requestedAt: status === walletTopUpRequestStatus_enum_1.WalletTopUpRequestStatus.PENDING ? 1 : -1, _id: status === walletTopUpRequestStatus_enum_1.WalletTopUpRequestStatus.PENDING ? 1 : -1 }).skip((page - 1) * limit).limit(limit).exec(); }
 }
 exports.WalletTopUpRequestRepository = WalletTopUpRequestRepository;
 exports.walletTopUpRequestRepository = new WalletTopUpRequestRepository();

@@ -1,16 +1,23 @@
 "use strict";
 //backend/src/services/adminActions/applyCreatorCooldown.service.ts
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.applyCreatorCooldownService = void 0;
 const applyCreatorCooldown_executor_1 = require("./actionExecutors/applyCreatorCooldown.executor");
 const creatorProfile_model_1 = require("../../models/creatorProfile.model");
+const User_1 = __importDefault(require("../../models/User"));
 const applyCreatorCooldownService = async ({ adminId, creatorProfileId, days, reason, dryRun = false, }) => {
     const creatorProfile = await creatorProfile_model_1.CreatorProfile.findById(creatorProfileId);
     if (!creatorProfile) {
         throw new Error("Creator profile not found");
     }
     const now = new Date();
-    const currentCooldown = creatorProfile.creatorCooldownUntil ?? null;
+    const targetUser = await User_1.default.findById(creatorProfile.userId).select("creatorCooldownUntil").lean();
+    if (!targetUser)
+        throw new Error("Target user not found");
+    const currentCooldown = targetUser.creatorCooldownUntil ?? null;
     const hasActiveCooldown = currentCooldown !== null && currentCooldown.getTime() > now.getTime();
     const newCooldownUntil = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
     const isFutureCooldown = newCooldownUntil.getTime() > now.getTime();

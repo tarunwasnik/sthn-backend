@@ -65,9 +65,7 @@ const startWalletServer = async () => {
 };
 (0, node_test_1.test)("phase10c creates and reuses supported currency Wallet buckets", async () => {
     const actors = await (0, topUpFixtures_1.createActors)();
-    const defaultWallet = await walletCreation_service_1.walletCreationService.createWallet(actors.userId);
-    strict_1.default.equal(defaultWallet.currency, "INR");
-    strict_1.default.equal(defaultWallet._id.toString(), actors.wallet._id.toString());
+    strict_1.default.equal(await wallet_model_1.Wallet.countDocuments({ userId: actors.userId }), 1);
     const first = await walletCreation_service_1.walletCreationService.createWallet(actors.userId, "USD");
     const replay = await walletCreation_service_1.walletCreationService.createWallet(actors.userId, "USD");
     strict_1.default.equal(first._id.toString(), replay._id.toString());

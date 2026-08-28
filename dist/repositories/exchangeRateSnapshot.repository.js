@@ -45,6 +45,11 @@ class ExchangeRateSnapshotRepository {
         return exchangeRateSnapshot_model_1.ExchangeRateSnapshot.find({ provider, baseCurrency, quoteCurrency })
             .sort({ effectiveDate: -1, createdAt: -1 }).limit(limit).exec();
     }
+    listCurrent(provider) {
+        return exchangeRateSnapshot_model_1.ExchangeRateSnapshot.find({ provider,
+            status: exchangeRateSnapshotStatus_enum_1.ExchangeRateSnapshotStatus.ACTIVE })
+            .sort({ baseCurrency: 1, quoteCurrency: 1, createdAt: -1 }).exec();
+    }
 }
 exports.ExchangeRateSnapshotRepository = ExchangeRateSnapshotRepository;
 exports.exchangeRateSnapshotRepository = new ExchangeRateSnapshotRepository();

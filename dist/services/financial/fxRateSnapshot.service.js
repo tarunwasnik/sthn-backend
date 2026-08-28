@@ -11,7 +11,7 @@ const fxRateSnapshot_response_dto_1 = require("../../dtos/wallet/fxRateSnapshot.
 const exchangeRateSnapshotStatus_enum_1 = require("../../enums/financial/exchangeRateSnapshotStatus.enum");
 const fxRateAuditAction_enum_1 = require("../../enums/financial/fxRateAuditAction.enum");
 const FxRateSnapshotError_1 = require("../../errors/financial/FxRateSnapshotError");
-const configuredReferenceFxRate_provider_1 = require("../../providers/fx/configuredReferenceFxRate.provider");
+const fxRateProvider_selector_1 = require("../../providers/fx/fxRateProvider.selector");
 const exchangeRateSnapshot_repository_1 = require("../../repositories/exchangeRateSnapshot.repository");
 const fxRateAudit_repository_1 = require("../../repositories/fxRateAudit.repository");
 const fxDecimal_util_1 = require("../../utils/financial/fxDecimal.util");
@@ -19,11 +19,11 @@ const reference_util_1 = require("../../utils/financial/reference.util");
 const currencyMetadata_service_1 = require("./currencyMetadata.service");
 const hash = (value) => crypto_1.default.createHash("sha256").update(value).digest("hex");
 class FxRateSnapshotService {
-    constructor(provider = new configuredReferenceFxRate_provider_1.ConfiguredReferenceFxRateProvider(), options = {}) {
-        this.provider = provider;
+    constructor(provider = undefined, options = {}) {
         this.options = options;
         this.config = options.config ?? (0, fxRate_constants_1.loadFxRateConfiguration)();
         this.now = options.now ?? (() => new Date());
+        this.provider = provider ?? (0, fxRateProvider_selector_1.createFxRateProvider)(this.config);
     }
     pair(base, quote) {
         let baseCurrency;
@@ -278,6 +278,22 @@ class FxRateSnapshotService {
         const now = this.now();
         const current = await this.requireCurrentSnapshot(base, quote);
         return (0, fxRateSnapshot_response_dto_1.toFxRateSnapshotResponseDto)(current, { now, cached: true });
+    }
+    async getAdminReadState() {
+        const now = this.now();
+        const configuredPairs = this.config.enabledPairs
+            ? Array.from(this.config.enabledPairs).sort()
+            : this.config.providerMode === "INTERNAL" ? ["INR:USD"] : [];
+        const snapshots = await exchangeRateSnapshot_repository_1.exchangeRateSnapshotRepository.listCurrent(this.provider.providerName);
+        return {
+            provider: this.provider.providerName,
+            providerMode: this.config.providerMode,
+            refreshPairs: configuredPairs.map((pair) => {
+                const [baseCurrency, quoteCurrency] = pair.split(":");
+                return { baseCurrency, quoteCurrency };
+            }),
+            snapshots: snapshots.map((snapshot) => (0, fxRateSnapshot_response_dto_1.toFxRateSnapshotResponseDto)(snapshot, { now })),
+        };
     }
     async lookupOrRefresh(base, quote, actor = { type: "SYSTEM" }) {
         return this.refresh(base, quote, false, actor);

@@ -69,6 +69,7 @@ const bookingCreatorSettlementIdentity_util_1 = require("../../utils/financial/b
 const bookingEscrowAllocationIdentity_util_1 = require("../../utils/financial/bookingEscrowAllocationIdentity.util");
 const auditLog_service_1 = require("../auditLog.service");
 const walletIntegrity_service_1 = require("../wallet/walletIntegrity.service");
+const walletCreation_service_1 = require("../wallet/walletCreation.service");
 const walletProjection_service_1 = require("../wallet/walletProjection.service");
 const bookingWalletReservationCapture_service_1 = require("./bookingWalletReservationCapture.service");
 const ledger_service_1 = require("./ledger.service");
@@ -141,13 +142,9 @@ class BookingCreatorSettlementService {
         if (!creatorUser) {
             this.fail("Creator User not found.", "BOOKING_CREATOR_SETTLEMENT_CREATOR_NOT_FOUND");
         }
-        const creatorWallet = await wallet_repository_1.walletRepository.findByUserAndCurrency(creator.userId, core.allocation.currency, session);
+        let creatorWallet = await wallet_repository_1.walletRepository.findByUserAndCurrency(creator.userId, core.allocation.currency, session);
         if (!creatorWallet) {
-            const otherWallet = await wallet_repository_1.walletRepository.findAnyByUser(creator.userId, session);
-            if (otherWallet) {
-                this.fail("Creator Wallet currency does not match the allocation.", "BOOKING_CREATOR_SETTLEMENT_CURRENCY_CONFLICT");
-            }
-            this.fail("Creator Wallet not found.", "BOOKING_CREATOR_SETTLEMENT_WALLET_NOT_FOUND");
+            creatorWallet = await walletCreation_service_1.walletCreationService.createWallet(creator.userId, core.allocation.currency, session);
         }
         return { ...core, creator, creatorUser, creatorWallet };
     }
@@ -299,7 +296,7 @@ class BookingCreatorSettlementService {
             entry.amount === booking.totalAmount &&
             entry.userId?.toString() === booking.userId.toString() &&
             entry.postingKey === allocationIdentity.escrowDebitPostingKey);
-        const commissionCredit = allocationEntries.find((entry) => entry.account === ledgerAccount_enum_1.LedgerAccount.PLATFORM_COMMISSION_PAYABLE &&
+        const commissionCredit = allocationEntries.find((entry) => entry.account === ledgerAccount_enum_1.LedgerAccount.PLATFORM_CREATOR_COMMISSION_REVENUE &&
             entry.direction === moneyDirection_enum_1.MoneyDirection.CREDIT &&
             entry.amount === amounts.commissionAmount &&
             !entry.userId &&

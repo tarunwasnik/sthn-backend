@@ -18,8 +18,19 @@ const dispute_model_1 = require("../models/dispute.model");
 const appeal_model_1 = require("../models/appeal.model");
 const auditLog_service_1 = require("../services/auditLog.service");
 const disputeLock_service_1 = require("../services/disputeLock.service");
+const suspensionLifecycle_service_1 = require("../services/accountGovernance/suspensionLifecycle.service");
+const unsuspendLifecycle_service_1 = require("../services/accountGovernance/unsuspendLifecycle.service");
+const banLifecycle_service_1 = require("../services/accountGovernance/banLifecycle.service");
+const cooldownLifecycle_service_1 = require("../services/accountGovernance/cooldownLifecycle.service");
+const userTrustAuditSnapshot_dto_1 = require("../dtos/admin/userTrustAuditSnapshot.dto");
 /* ==================== HELPERS ==================== */
 const preventSelfAction = (adminId, targetUserId) => adminId === targetUserId;
+const requiredGovernanceReason = (value) => {
+    if (typeof value !== "string" || !value.trim()) {
+        throw new AppError_1.AppError("A governance reason is required", 400);
+    }
+    return value.trim();
+};
 /* ==================== USER STATUS ==================== */
 const suspendUser = async (req, res) => {
     const adminId = req.user.id;
@@ -27,20 +38,33 @@ const suspendUser = async (req, res) => {
     if (preventSelfAction(adminId, userId)) {
         return res.status(400).json({ message: "Admin cannot suspend themselves" });
     }
-    const before = (await User_1.default.findById(userId).lean()) ?? undefined;
-    const user = await User_1.default.findByIdAndUpdate(userId, { status: "suspended" }, { new: true });
-    if (!user)
-        throw new AppError_1.AppError("User not found", 404);
+    const result = await (0, suspensionLifecycle_service_1.triggerSuspensionLifecycle)({
+        adminId,
+        userId,
+        reason: requiredGovernanceReason(req.body?.reason),
+    });
     await (0, auditLog_service_1.createAuditLog)({
         actorType: "ADMIN",
         actorId: new mongoose_1.default.Types.ObjectId(adminId),
         action: "USER_SUSPENDED",
         entityType: "USER",
-        entityId: user._id,
-        before,
-        after: { status: user.status },
+        entityId: result.userId,
+        before: { governanceState: result.previousGovernanceState },
+        after: {
+            governanceState: result.governanceState,
+            status: result.status,
+            reason: result.reason,
+            triggeredAt: result.triggeredAt,
+            consequences: {
+                terminatedCount: result.consequences.terminatedCount,
+                protectedCount: result.consequences.protectedCount,
+                disputeLockedCount: result.consequences.disputeLockedCount,
+                financialLockedCount: result.consequences.financialLockedCount,
+                failedCount: result.consequences.failedCount,
+            },
+        },
     });
-    res.json({ message: "User suspended", status: user.status });
+    res.json({ message: "User suspended", ...result });
 };
 exports.suspendUser = suspendUser;
 const activateUser = async (req, res) => {
@@ -49,20 +73,25 @@ const activateUser = async (req, res) => {
     if (preventSelfAction(adminId, userId)) {
         return res.status(400).json({ message: "Admin cannot activate themselves" });
     }
-    const before = (await User_1.default.findById(userId).lean()) ?? undefined;
-    const user = await User_1.default.findByIdAndUpdate(userId, { status: "active" }, { new: true });
-    if (!user)
-        throw new AppError_1.AppError("User not found", 404);
+    const result = await (0, unsuspendLifecycle_service_1.removeSuspensionLifecycle)({
+        adminId,
+        userId,
+        reason: requiredGovernanceReason(req.body?.reason),
+    });
     await (0, auditLog_service_1.createAuditLog)({
         actorType: "ADMIN",
         actorId: new mongoose_1.default.Types.ObjectId(adminId),
         action: "USER_ACTIVATED",
         entityType: "USER",
-        entityId: user._id,
-        before,
-        after: { status: user.status },
+        entityId: result.userId,
+        before: { governanceState: result.previousGovernanceState },
+        after: {
+            governanceState: result.governanceState,
+            status: "active",
+            effectiveCondition: result.effectiveCondition,
+        },
     });
-    res.json({ message: "User activated", status: user.status });
+    res.json({ message: "User activated", ...result, status: "active" });
 };
 exports.activateUser = activateUser;
 const banUser = async (req, res) => {
@@ -71,20 +100,33 @@ const banUser = async (req, res) => {
     if (preventSelfAction(adminId, userId)) {
         return res.status(400).json({ message: "Admin cannot ban themselves" });
     }
-    const before = (await User_1.default.findById(userId).lean()) ?? undefined;
-    const user = await User_1.default.findByIdAndUpdate(userId, { status: "banned" }, { new: true });
-    if (!user)
-        throw new AppError_1.AppError("User not found", 404);
+    const result = await (0, banLifecycle_service_1.triggerBanLifecycle)({
+        adminId,
+        userId,
+        reason: requiredGovernanceReason(req.body?.reason),
+    });
     await (0, auditLog_service_1.createAuditLog)({
         actorType: "ADMIN",
         actorId: new mongoose_1.default.Types.ObjectId(adminId),
         action: "USER_BANNED",
         entityType: "USER",
-        entityId: user._id,
-        before,
-        after: { status: user.status },
+        entityId: result.userId,
+        before: { governanceState: result.previousGovernanceState },
+        after: {
+            governanceState: result.governanceState,
+            status: result.status,
+            reason: result.reason,
+            triggeredAt: result.triggeredAt,
+            consequences: {
+                terminatedCount: result.consequences.terminatedCount,
+                protectedCount: result.consequences.protectedCount,
+                disputeLockedCount: result.consequences.disputeLockedCount,
+                financialLockedCount: result.consequences.financialLockedCount,
+                failedCount: result.consequences.failedCount,
+            },
+        },
     });
-    res.json({ message: "User banned", status: user.status });
+    res.json({ message: "User banned", ...result });
 };
 exports.banUser = banUser;
 /* ================= TRUST RESET ================= */
@@ -94,26 +136,21 @@ const resetUserTrust = async (req, res) => {
     if (preventSelfAction(adminId, userId)) {
         throw new AppError_1.AppError("Admin cannot reset own trust", 400);
     }
-    const before = (await User_1.default.findById(userId).lean()) ?? undefined;
-    const user = await User_1.default.findByIdAndUpdate(userId, {
-        abuseScore: 0,
-        userCooldownUntil: null,
-        creatorCooldownUntil: null,
-        status: "active",
-    }, { new: true });
-    if (!user)
+    const beforeUser = await User_1.default.findById(userId)
+        .select("abuseScore status governanceState userCooldownUntil creatorCooldownUntil")
+        .lean();
+    if (!beforeUser) {
         throw new AppError_1.AppError("User not found", 404);
+    }
+    const user = await (0, cooldownLifecycle_service_1.resetAccountTrust)(userId);
     await (0, auditLog_service_1.createAuditLog)({
         actorType: "ADMIN",
         actorId: new mongoose_1.default.Types.ObjectId(adminId),
         action: "USER_TRUST_RESET",
         entityType: "USER",
         entityId: user._id,
-        before,
-        after: {
-            abuseScore: user.abuseScore,
-            status: user.status,
-        },
+        before: (0, userTrustAuditSnapshot_dto_1.toUserTrustAuditSnapshot)(beforeUser),
+        after: (0, userTrustAuditSnapshot_dto_1.toUserTrustAuditSnapshot)(user),
     });
     res.json({ message: "User trust reset successfully" });
 };
@@ -257,7 +294,7 @@ const getAuditLogs = async (req, res) => {
     const result = await (0, auditLog_service_1.queryAuditLogs)(req.query);
     res.json({
         logs: result.logs.map((log) => ({
-            auditReference: log._id.toString(), category: log.category, action: log.action,
+            auditReference: log._id.toString(), category: log.category, action: log.action, entityType: log.entityType, entityId: log.entityId.toString(),
             actor: { type: log.actorType, id: log.actorId?.toString(), reference: log.actorReference },
             financialContext: log.financialContext, transition: log.transition,
             metadata: log.metadata, createdAt: log.createdAt,

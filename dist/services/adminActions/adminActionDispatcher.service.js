@@ -7,6 +7,7 @@ exports.executeAdminActionService = void 0;
 const adminActionRegistry_service_1 = require("./adminActionRegistry.service");
 const applyCreatorCooldown_service_1 = require("./applyCreatorCooldown.service");
 const revokeCreatorCooldown_service_1 = require("./revokeCreatorCooldown.service");
+const governance_executor_1 = require("./actionExecutors/governance.executor");
 const adminActionLogger_service_1 = require("./adminActionLogger.service");
 const adminActionValidator_1 = require("./adminActionValidator");
 const confirmationToken_util_1 = require("./confirmationToken.util");
@@ -151,14 +152,17 @@ const executeAdminActionService = async ({ adminId, adminRole, key, targetId, pa
     // ==========================
     // 2️⃣ REASON + PARAM VALIDATION
     // ==========================
-    if (action.requiresReason && !reason) {
+    if (action.requiresReason && (!reason || typeof reason !== "string" || !reason.trim() || reason.trim().length > 500)) {
         throw new Error("This action requires a reason");
     }
     const validation = (0, adminActionValidator_1.validateAdminActionParams)(action, params);
     if (!validation.ok) {
         throw new Error(validation.error);
     }
-    const paramsHash = (0, confirmationToken_util_1.hashParams)(params);
+    // Reason is a material part of every governance decision and must be bound
+    // to both confirmation and deterministic execution identity, without being
+    // smuggled into the action parameter payload.
+    const paramsHash = (0, confirmationToken_util_1.hashParams)({ ...params, __reason: reason.trim() });
     // ==========================
     // 🔐 CONFIRMATION
     // ==========================
@@ -206,6 +210,8 @@ const executeAdminActionService = async ({ adminId, adminRole, key, targetId, pa
                         outcome: "EXECUTED",
                         action: action.key,
                         summary: "Action already executed",
+                        replay: true,
+                        result: existing.result,
                     };
                 }
                 if (existing?.status === "IN_PROGRESS") {
@@ -235,6 +241,14 @@ const executeAdminActionService = async ({ adminId, adminRole, key, targetId, pa
                 creatorProfileId: targetId,
                 reason,
                 dryRun,
+            });
+            break;
+        case "SUSPEND_USER":
+        case "ACTIVATE_USER":
+        case "BAN_USER":
+        case "RESET_USER_TRUST":
+            rawResult = await (0, governance_executor_1.executeGovernanceAction)({
+                adminId, userId: targetId, reason, action: key, dryRun,
             });
             break;
         default:
@@ -283,8 +297,10 @@ const executeAdminActionService = async ({ adminId, adminRole, key, targetId, pa
     // ==========================
     // 🔹 EXECUTION — FINALIZE
     // ==========================
+    const actionResult = safeActionResult(action.key, rawResult, targetId);
     if (executionRecord) {
         executionRecord.status = "EXECUTED";
+        executionRecord.result = actionResult;
         await executionRecord.save();
     }
     await (0, adminActionLogger_service_1.logAdminAction)({
@@ -297,12 +313,23 @@ const executeAdminActionService = async ({ adminId, adminRole, key, targetId, pa
         params,
         reason,
         status: "SUCCESS",
-        result: rawResult,
+        result: actionResult,
     });
     return {
         outcome: "EXECUTED",
         action: action.key,
         summary: rawResult?.summary,
+        replay: false,
+        result: actionResult,
     };
 };
 exports.executeAdminActionService = executeAdminActionService;
+const safeActionResult = (actionKey, rawResult, targetId) => {
+    if (rawResult.result)
+        return rawResult.result;
+    if (actionKey === "APPLY_CREATOR_COOLDOWN")
+        return { targetId, kind: "CREATOR", until: rawResult.cooldownUntil, reason: rawResult.reason, replay: Boolean(rawResult.replay) };
+    if (actionKey === "REVOKE_CREATOR_COOLDOWN")
+        return { targetId, kind: "CREATOR", revoked: Boolean(rawResult.revoked) };
+    return { targetId };
+};

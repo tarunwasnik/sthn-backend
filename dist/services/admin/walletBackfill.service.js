@@ -2,6 +2,7 @@
 //backend/src/services/admin/walletBackfill.service.ts
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.walletBackfillService = exports.WalletBackfillService = void 0;
+const wallet_constants_1 = require("../../constants/wallet/wallet.constants");
 const userProfile_model_1 = require("../../models/userProfile.model");
 const walletCreation_service_1 = require("../wallet/walletCreation.service");
 class WalletBackfillService {
@@ -39,12 +40,12 @@ class WalletBackfillService {
                 continue;
             }
             try {
-                const existingWallet = await walletCreation_service_1.walletCreationService.getWallet(profile.userId);
+                const existingWallet = await walletCreation_service_1.walletCreationService.getWallet(profile.userId, wallet_constants_1.DEFAULT_WALLET_CURRENCY);
                 if (existingWallet) {
                     result.skipped++;
                     continue;
                 }
-                await walletCreation_service_1.walletCreationService.createWallet(profile.userId);
+                await walletCreation_service_1.walletCreationService.createWallet(profile.userId, wallet_constants_1.DEFAULT_WALLET_CURRENCY);
                 result.created++;
             }
             catch (error) {
@@ -95,12 +96,12 @@ class WalletBackfillService {
                 continue;
             }
             try {
-                const existingWallet = await walletCreation_service_1.walletCreationService.getWallet(profile.userId);
+                const existingWallet = await walletCreation_service_1.walletCreationService.getWallet(profile.userId, wallet_constants_1.DEFAULT_WALLET_CURRENCY);
                 if (existingWallet) {
                     result.skipped++;
                     continue;
                 }
-                await walletCreation_service_1.walletCreationService.createWallet(profile.userId);
+                await walletCreation_service_1.walletCreationService.createWallet(profile.userId, wallet_constants_1.DEFAULT_WALLET_CURRENCY);
                 result.created++;
             }
             catch (error) {

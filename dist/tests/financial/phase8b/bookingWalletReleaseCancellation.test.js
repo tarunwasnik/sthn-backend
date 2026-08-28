@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.registerBookingWalletReleaseCancellationTests = void 0;
 const strict_1 = __importDefault(require("node:assert/strict"));
 const node_test_1 = require("node:test");
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const booking_model_1 = require("../../../models/booking.model");
 const bookingFundReservation_model_1 = require("../../../models/bookingFundReservation.model");
 const payment_model_1 = require("../../../models/payment.model");
@@ -29,6 +30,48 @@ const assertCancelledRelease = async (bookingId, walletId, cause) => {
     strict_1.default.equal(wallet.reservedBalance, 0);
 };
 const registerBookingWalletReleaseCancellationTests = () => {
+    (0, node_test_1.test)("phase8b User cancellation preserves interaction history while releasing an eligible Wallet booking", async () => {
+        const server = await (0, bookingWalletReleaseFixtures_1.startReleaseHttpServer)();
+        try {
+            const { fixture, booking } = await (0, bookingWalletReleaseFixtures_1.createActiveWalletBooking)(server.baseUrl, { walletAmount: 1000, slotAmounts: [400] });
+            await booking_model_1.Booking.updateOne({ _id: booking._id }, { $set: { hasInteracted: true } });
+            const response = await (0, bookingWalletReleaseFixtures_1.postUserCancellation)(server.baseUrl, booking._id.toString(), fixture);
+            strict_1.default.equal(response.status, 200, JSON.stringify(response.body));
+            await assertCancelledRelease(booking._id.toString(), fixture.actors.wallet._id, bookingWalletReleaseCause_enum_1.BookingWalletReleaseCause.USER_CANCELLED);
+            strict_1.default.equal((await booking_model_1.Booking.findById(booking._id).orFail()).hasInteracted, true);
+        }
+        finally {
+            await server.close();
+        }
+    });
+    (0, node_test_1.test)("phase8b Creator-as-Customer can cancel an eligible booking without an optional request body", async () => {
+        const server = await (0, bookingWalletReleaseFixtures_1.startReleaseHttpServer)();
+        try {
+            const { fixture, booking } = await (0, bookingWalletReleaseFixtures_1.createActiveWalletBooking)(server.baseUrl, { walletAmount: 1000, slotAmounts: [400] });
+            const creatorAsCustomerToken = jsonwebtoken_1.default.sign({ id: fixture.actors.userId.toString(), role: "creator" }, process.env.JWT_SECRET);
+            const response = await fetch(`${server.baseUrl}/api/v1/bookings/${booking._id.toString()}/cancel`, { method: "POST", headers: { authorization: `Bearer ${creatorAsCustomerToken}` } });
+            strict_1.default.equal(response.status, 200, await response.text());
+            await assertCancelledRelease(booking._id.toString(), fixture.actors.wallet._id, bookingWalletReleaseCause_enum_1.BookingWalletReleaseCause.USER_CANCELLED);
+        }
+        finally {
+            await server.close();
+        }
+    });
+    (0, node_test_1.test)("phase8b Creator-as-Customer cancellation preserves interaction history", async () => {
+        const server = await (0, bookingWalletReleaseFixtures_1.startReleaseHttpServer)();
+        try {
+            const { fixture, booking } = await (0, bookingWalletReleaseFixtures_1.createActiveWalletBooking)(server.baseUrl, { walletAmount: 1000, slotAmounts: [400] });
+            await booking_model_1.Booking.updateOne({ _id: booking._id }, { $set: { hasInteracted: true } });
+            const creatorAsCustomerToken = jsonwebtoken_1.default.sign({ id: fixture.actors.userId.toString(), role: "creator" }, process.env.JWT_SECRET);
+            const response = await fetch(`${server.baseUrl}/api/v1/bookings/${booking._id.toString()}/cancel`, { method: "POST", headers: { authorization: `Bearer ${creatorAsCustomerToken}` } });
+            strict_1.default.equal(response.status, 200, await response.text());
+            await assertCancelledRelease(booking._id.toString(), fixture.actors.wallet._id, bookingWalletReleaseCause_enum_1.BookingWalletReleaseCause.USER_CANCELLED);
+            strict_1.default.equal((await booking_model_1.Booking.findById(booking._id).orFail()).hasInteracted, true);
+        }
+        finally {
+            await server.close();
+        }
+    });
     (0, node_test_1.test)("phase8b User cancellation releases a REQUESTED Wallet booking using authenticated identity", async () => {
         const server = await (0, bookingWalletReleaseFixtures_1.startReleaseHttpServer)();
         try {

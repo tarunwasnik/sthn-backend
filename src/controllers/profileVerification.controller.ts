@@ -7,6 +7,7 @@ import {
   decideProfileVerificationRequest,
   listProfileVerificationQueue,
 } from "../services/profile/profileVerificationRequest.service";
+import { getAdminProfileVerificationDetail, readAdminProfileVerificationCapture } from "../services/profile/profileVerificationAdminRead.service";
 
 /* ================= LIST PENDING PROFILES ================= */
 
@@ -18,6 +19,17 @@ export const listPendingProfiles = catchAsync(async (_req: Request, res: Respons
 export const listAdminReviewProfiles = catchAsync(async (_req: Request, res: Response) => {
   const profiles = await listProfileVerificationQueue("ADMIN_REVIEW");
   res.json({ profiles });
+});
+
+export const getAdminProfileVerificationDetailController = catchAsync(async (req: Request, res: Response) => {
+  res.json({ verification: await getAdminProfileVerificationDetail(req.params.verificationReference) });
+});
+
+export const getAdminProfileVerificationCaptureController = catchAsync(async (req: Request, res: Response) => {
+  const challengeIndex = Number(req.params.challengeIndex);
+  const capture = await readAdminProfileVerificationCapture({ verificationReference: req.params.verificationReference, challengeIndex });
+  res.set({ "Cache-Control": "no-store", "Pragma": "no-cache", "X-Content-Type-Options": "nosniff" });
+  res.type(capture.mimeType).send(capture.bytes);
 });
 
 /* ================= APPROVE PROFILE ================= */

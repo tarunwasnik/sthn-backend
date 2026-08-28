@@ -52,9 +52,31 @@ const UserProfileSchema = new mongoose_1.Schema({
         lowercase: true,
         index: true,
     },
+    realName: {
+        type: String,
+        default: null,
+        trim: true,
+        maxlength: 120,
+    },
     dateOfBirth: {
         type: Date,
-        required: true,
+        required: function () { return this.profileStatus !== "incomplete"; },
+    },
+    country: {
+        type: String,
+        default: null,
+        trim: true,
+        maxlength: 100,
+    },
+    city: {
+        type: String,
+        default: null,
+        trim: true,
+        maxlength: 100,
+    },
+    languages: {
+        type: [String],
+        default: [],
     },
     interests: {
         type: [String],
@@ -62,26 +84,26 @@ const UserProfileSchema = new mongoose_1.Schema({
     },
     bio: {
         type: String,
-        required: true,
+        required: function () { return this.profileStatus !== "incomplete"; },
         trim: true,
     },
     avatar: {
         type: String,
-        required: true,
+        required: function () { return this.profileStatus !== "incomplete"; },
     },
     cover: {
         type: String,
-        required: true,
+        required: function () { return this.profileStatus !== "incomplete"; },
     },
     profilePhotos: {
         type: [String],
         validate: {
             validator: function (value) {
-                return value.length >= 2 && value.length <= 6;
+                return this.profileStatus === "incomplete" || (value.length >= 2 && value.length <= 6);
             },
             message: "Gallery must contain between 2 and 6 images",
         },
-        required: true,
+        required: function () { return this.profileStatus !== "incomplete"; },
     },
     profileStatus: {
         type: String,
@@ -98,6 +120,11 @@ const UserProfileSchema = new mongoose_1.Schema({
         type: Date,
         default: null,
         index: true,
+    },
+    verificationSubmissionVersion: {
+        type: Number,
+        default: 0,
+        min: 0,
     },
 }, { timestamps: true });
 exports.UserProfile = mongoose_1.default.model("UserProfile", UserProfileSchema);

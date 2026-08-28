@@ -80,7 +80,7 @@ const registerBookingEscrowAllocationFullFlowTests = () => {
             strict_1.default.equal(allocation.status, bookingEscrowAllocationStatus_enum_1.BookingEscrowAllocationStatus.ALLOCATED);
             strict_1.default.equal(allocation.allocationLedgerEntryIds.length, 4);
             strict_1.default.equal(accountBalance(entries, ledgerAccount_enum_1.LedgerAccount.PLATFORM_ESCROW), 0);
-            strict_1.default.equal(accountBalance(entries, ledgerAccount_enum_1.LedgerAccount.PLATFORM_COMMISSION_PAYABLE), 200);
+            strict_1.default.equal(accountBalance(entries, ledgerAccount_enum_1.LedgerAccount.PLATFORM_CREATOR_COMMISSION_REVENUE), 200);
             strict_1.default.equal(accountBalance(entries, ledgerAccount_enum_1.LedgerAccount.CREATOR_PAYABLE), 800);
             strict_1.default.equal(accountBalance(entries, ledgerAccount_enum_1.LedgerAccount.PLATFORM_SERVICE_FEE_REVENUE), 50);
             const allocationEntries = entries.filter((entry) => entry.source === ledgerSource_enum_1.LedgerSource.BOOKING_ESCROW_ALLOCATION);

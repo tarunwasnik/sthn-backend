@@ -82,7 +82,7 @@ const registerBookingCreatorSettlementFullFlowTests = () => {
                 wallet.currentBalance,
             ], [900, 0, 0, 900]);
             const entries = await ledgerEntry_model_1.LedgerEntry.find({ bookingId: booking._id });
-            strict_1.default.equal(accountBalance(entries, ledgerAccount_enum_1.LedgerAccount.PLATFORM_COMMISSION_PAYABLE), 200);
+            strict_1.default.equal(accountBalance(entries, ledgerAccount_enum_1.LedgerAccount.PLATFORM_CREATOR_COMMISSION_REVENUE), 200);
             strict_1.default.equal(accountBalance(entries, ledgerAccount_enum_1.LedgerAccount.CREATOR_PAYABLE), 0);
             strict_1.default.equal(accountBalance(entries.filter((entry) => entry.userId?.toString() === fixture.fixture.actors.creatorId.toString()), ledgerAccount_enum_1.LedgerAccount.WALLET_AVAILABLE), 800);
             const settlementEntries = entries.filter((entry) => entry.source === ledgerSource_enum_1.LedgerSource.BOOKING_CREATOR_WALLET_SETTLEMENT);

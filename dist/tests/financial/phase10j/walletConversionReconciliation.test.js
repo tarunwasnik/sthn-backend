@@ -14,9 +14,12 @@ const registerReconciliationTests = () => {
     (0, node_test_1.test)("phase10j reconciliation classifies a healthy full graph", async () => {
         const fixture = await (0, walletConversionOperationalFixtures_1.createHealthyOperationalFixture)();
         const result = await fixture.service.reconcile(fixture.conversionReference, fixture.adminId);
-        strict_1.default.deepEqual(Object.keys(result).sort(), ["classification",
-            "conversionReference", "issues", "repairPerformed", "retryPerformed",
+        strict_1.default.deepEqual(Object.keys(result).sort(), ["allowedActions",
+            "classification", "conversionReference", "issues",
+            "reconciliationReference", "repairPerformed", "retryPerformed",
             "severity"].sort());
+        strict_1.default.match(result.reconciliationReference, /^WCR-[A-F0-9]{20}$/);
+        strict_1.default.deepEqual(result.allowedActions, []);
         strict_1.default.equal(result.classification, "HEALTHY");
         strict_1.default.equal(result.severity, "INFO");
         strict_1.default.deepEqual(result.issues, []);

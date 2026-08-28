@@ -43,6 +43,7 @@ const creatorService_model_1 = require("../models/creatorService.model");
 const creatorProfile_model_1 = require("../models/creatorProfile.model");
 const AppError_1 = require("../utils/AppError");
 const cloudinary_1 = __importStar(require("../config/cloudinary"));
+const creatorServicePrice_util_1 = require("../utils/financial/creatorServicePrice.util");
 /**
  * CREATE SERVICE
  */
@@ -67,7 +68,13 @@ const createCreatorService = async (req, res) => {
         durationMinutes > 480) {
         throw new AppError_1.AppError("Invalid durationMinutes", 400);
     }
-    if (typeof price !== "number" || price < 0) {
+    if (typeof price !== "number") {
+        throw new AppError_1.AppError("Invalid price", 400);
+    }
+    try {
+        (0, creatorServicePrice_util_1.creatorServiceMajorToMinor)(price, creatorProfile.currency);
+    }
+    catch {
         throw new AppError_1.AppError("Invalid price", 400);
     }
     const service = await creatorService_model_1.CreatorService.create({
@@ -154,7 +161,13 @@ const updateCreatorService = async (req, res) => {
         service.durationMinutes = durationMinutes;
     }
     if (price !== undefined) {
-        if (typeof price !== "number" || price < 0) {
+        if (typeof price !== "number") {
+            throw new AppError_1.AppError("Invalid price", 400);
+        }
+        try {
+            (0, creatorServicePrice_util_1.creatorServiceMajorToMinor)(price, service.currency);
+        }
+        catch {
             throw new AppError_1.AppError("Invalid price", 400);
         }
         service.price = price;

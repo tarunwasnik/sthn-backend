@@ -8,4 +8,5 @@ var BookingWalletReleaseCause;
     BookingWalletReleaseCause["USER_CANCELLED"] = "USER_CANCELLED";
     BookingWalletReleaseCause["CREATOR_CANCELLED"] = "CREATOR_CANCELLED";
     BookingWalletReleaseCause["ADMIN_CANCELLED"] = "ADMIN_CANCELLED";
+    BookingWalletReleaseCause["GOVERNANCE_TERMINATED"] = "GOVERNANCE_TERMINATED";
 })(BookingWalletReleaseCause || (exports.BookingWalletReleaseCause = BookingWalletReleaseCause = {}));

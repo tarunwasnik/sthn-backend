@@ -3,7 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.walletCreationService = exports.WalletCreationService = void 0;
 exports.normalizeWalletCurrency = normalizeWalletCurrency;
 const mongoose_1 = require("mongoose");
-const wallet_constants_1 = require("../../constants/wallet/wallet.constants");
 const WalletError_1 = require("../../errors/financial/WalletError");
 const userProfile_model_1 = require("../../models/userProfile.model");
 const wallet_repository_1 = require("../../repositories/wallet/wallet.repository");
@@ -29,7 +28,7 @@ class WalletCreationService {
             throw new WalletError_1.WalletError("Wallet creation requires a verified user profile.", "WALLET_PROFILE_NOT_VERIFIED");
         }
     }
-    async createWallet(userId, currency = wallet_constants_1.DEFAULT_WALLET_CURRENCY, session) {
+    async createWallet(userId, currency, session) {
         if (!mongoose_1.Types.ObjectId.isValid(userId)) {
             throw new WalletError_1.WalletError("Wallet user identity is invalid.", "WALLET_INVALID_USER");
         }
@@ -54,10 +53,10 @@ class WalletCreationService {
             throw new WalletError_1.WalletError("Wallet creation conflicted. Retry the operation.", "WALLET_CREATION_CONFLICT", error);
         }
     }
-    async getWallet(userId, currency = wallet_constants_1.DEFAULT_WALLET_CURRENCY) {
+    async getWallet(userId, currency) {
         return wallet_repository_1.walletRepository.findByUserAndCurrency(userId, normalizeWalletCurrency(currency));
     }
-    async walletExists(userId, currency = wallet_constants_1.DEFAULT_WALLET_CURRENCY) {
+    async walletExists(userId, currency) {
         return wallet_repository_1.walletRepository.exists(userId, normalizeWalletCurrency(currency));
     }
 }

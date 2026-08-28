@@ -15,10 +15,13 @@ const adminWalletConversionDecision_controller_1 = require("../../controllers/ad
 const adminWalletConversionProviderExecution_controller_1 = require("../../controllers/adminWalletConversionProviderExecution.controller");
 const adminWalletConversionAccounting_controller_1 = require("../../controllers/adminWalletConversionAccounting.controller");
 const adminWalletConversionOperational_controller_1 = require("../../controllers/adminWalletConversionOperational.controller");
+const adminBookingEscrow_controller_1 = require("../../controllers/adminBookingEscrow.controller");
+const adminPlatformRevenue_controller_1 = require("../../controllers/adminPlatformRevenue.controller");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.protect, (0, authorize_middleware_1.authorizeRoles)("admin"));
 router.get("/overview", adminFinancial_controller_1.adminFinancialController.overview);
 router.get("/payments", adminFinancial_controller_1.adminFinancialController.listPayments);
+router.get("/payments/:paymentReference/financial-detail", adminFinancial_controller_1.adminFinancialController.paymentFinancialDetail);
 router.get("/payments/:paymentReference", adminFinancial_controller_1.adminFinancialController.payment);
 router.post("/payments/:paymentReference/sync", adminFinancial_controller_1.adminFinancialController.syncPayment);
 router.get("/refunds", adminFinancial_controller_1.adminFinancialController.listRefunds);
@@ -52,7 +55,13 @@ router.get("/creator-withdrawal-reconciliations", adminCreatorWithdrawalOperatio
 router.post("/creator-withdrawal-reconciliations/:reconciliationReference/retry", adminCreatorWithdrawalOperational_controller_1.adminCreatorWithdrawalOperationalController.retry.bind(adminCreatorWithdrawalOperational_controller_1.adminCreatorWithdrawalOperationalController));
 router.post("/creator-withdrawal-reconciliations/:reconciliationReference/repair", adminCreatorWithdrawalOperational_controller_1.adminCreatorWithdrawalOperationalController.repair.bind(adminCreatorWithdrawalOperational_controller_1.adminCreatorWithdrawalOperationalController));
 router.patch("/creator-withdrawal-reconciliations/:reconciliationReference/status", adminCreatorWithdrawalOperational_controller_1.adminCreatorWithdrawalOperationalController.updateStatus.bind(adminCreatorWithdrawalOperational_controller_1.adminCreatorWithdrawalOperationalController));
+router.get("/fx-rates", fxRateSnapshot_controller_1.fxRateSnapshotController.list.bind(fxRateSnapshot_controller_1.fxRateSnapshotController));
 router.post("/fx-rates/refresh", fxRateSnapshot_controller_1.fxRateSnapshotController.refresh.bind(fxRateSnapshot_controller_1.fxRateSnapshotController));
+router.get("/platform-revenue", adminPlatformRevenue_controller_1.adminPlatformRevenueController.summary);
+router.get("/platform-revenue/entries", adminPlatformRevenue_controller_1.adminPlatformRevenueController.entries);
+router.get("/booking-escrow", adminBookingEscrow_controller_1.adminBookingEscrowController.list.bind(adminBookingEscrow_controller_1.adminBookingEscrowController));
+router.get("/booking-escrow/:bookingReference", adminBookingEscrow_controller_1.adminBookingEscrowController.get.bind(adminBookingEscrow_controller_1.adminBookingEscrowController));
+router.post("/booking-escrow/:bookingReference/release", adminBookingEscrow_controller_1.adminBookingEscrowController.release.bind(adminBookingEscrow_controller_1.adminBookingEscrowController));
 router.get("/wallet-conversion-requests", adminWalletConversionDecision_controller_1.adminWalletConversionDecisionController.list.bind(adminWalletConversionDecision_controller_1.adminWalletConversionDecisionController));
 router.get("/wallet-conversion-requests/:conversionReference", adminWalletConversionDecision_controller_1.adminWalletConversionDecisionController.get.bind(adminWalletConversionDecision_controller_1.adminWalletConversionDecisionController));
 router.patch("/wallet-conversion-requests/:conversionReference/decision", adminWalletConversionDecision_controller_1.adminWalletConversionDecisionController.decide.bind(adminWalletConversionDecision_controller_1.adminWalletConversionDecisionController));

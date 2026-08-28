@@ -36,6 +36,11 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Dispute = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
+const DisputeInputAccessSchema = new mongoose_1.Schema({
+    state: { type: String, enum: ["OPEN", "CLOSED"], required: true, default: "OPEN" },
+    changedAt: Date,
+    changedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: "User" },
+}, { _id: false, id: false });
 const DisputeSchema = new mongoose_1.Schema({
     bookingId: {
         type: mongoose_1.Schema.Types.ObjectId,
@@ -83,6 +88,16 @@ const DisputeSchema = new mongoose_1.Schema({
         default: [],
         index: true,
     },
+    customerInput: {
+        type: DisputeInputAccessSchema,
+        required: true,
+        default: () => ({ state: "OPEN" }),
+    },
+    creatorInput: {
+        type: DisputeInputAccessSchema,
+        required: true,
+        default: () => ({ state: "OPEN" }),
+    },
     /* ================= RESOLUTION ================= */
     resolution: {
         action: {
@@ -96,5 +111,6 @@ const DisputeSchema = new mongoose_1.Schema({
         },
         resolvedAt: Date,
     },
+    finalDecision: { type: { customerOutcome: { type: String, enum: ["NO_ADVERSE_FINDING", "ADVERSE_FINDING", "MIXED", "INCONCLUSIVE"] }, customerSummary: { type: String, maxlength: 2000 }, creatorOutcome: { type: String, enum: ["NO_ADVERSE_FINDING", "ADVERSE_FINDING", "MIXED", "INCONCLUSIVE"] }, creatorSummary: { type: String, maxlength: 2000 }, summary: { type: String, maxlength: 4000 }, financialReviewRequired: Boolean, governanceReviewRequired: Boolean, finalizedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: "User" }, finalizedAt: Date }, default: undefined },
 }, { timestamps: true });
 exports.Dispute = mongoose_1.default.model("Dispute", DisputeSchema);

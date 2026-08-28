@@ -13,6 +13,9 @@ import { createAuditLog } from "../auditLog.service";
 import { AppError } from "../../utils/AppError";
 import { toAdminProfileVerificationQueueDto, AdminProfileVerificationQueueDto, ProfileVerificationQueueProfileSource } from "../../dtos/admin/profileVerificationQueue.dto";
 import { scheduleFaceEvidenceRetentionForDecision } from "./faceVerificationEvidenceCleanup.service";
+import { FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS, FACE_VERIFICATION_SHORT_CLEANUP_MS } from "./faceVerification.constants";
+import { faceVerificationSessionRepository } from "../../repositories/faceVerificationSession.repository";
+import { faceVerificationEvidenceRepository } from "../../repositories/faceVerificationEvidence.repository";
 
 const adminReviewReasonCodes = new Set<ProfileVerificationAdminReviewReasonCode>([
   "FACE_MATCH_UNCERTAIN", "LIVENESS_UNCERTAIN", "TEXT_MODERATION_UNCERTAIN",
@@ -26,6 +29,7 @@ const verificationReference = () => `PROFILE_VERIFICATION_${ulid()}`;
 const duplicateKey = (error: unknown) => (
   typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === 11000
 );
+const requestRetentionDeadline = (request: Pick<ProfileVerificationRequestDocument, "submittedAt">) => new Date(request.submittedAt.getTime() + FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS);
 
 export const ensureActiveProfileVerificationRequest = async (
   profile: UserProfileDocument,
@@ -96,6 +100,7 @@ export const escalateProfileVerificationRequest = async (input: {
   profileId: string;
   reasonCode: ProfileVerificationAdminReviewReasonCode;
   reason?: string;
+  now?: Date;
 }): Promise<{ request: ProfileVerificationRequestDocument; replayed: boolean }> => {
   if (!mongoose.Types.ObjectId.isValid(input.profileId)) throw new AppError("Invalid profileId", 400);
   if (!adminReviewReasonCodes.has(input.reasonCode)) throw new AppError("Invalid admin review reason code", 400);
@@ -103,6 +108,7 @@ export const escalateProfileVerificationRequest = async (input: {
     throw new AppError("Invalid admin review reason", 400);
   }
 
+  const now = input.now ?? new Date();
   const session = await mongoose.startSession();
   try {
     let outcome: { request: ProfileVerificationRequestDocument; replayed: boolean } | null = null;
@@ -126,7 +132,8 @@ export const escalateProfileVerificationRequest = async (input: {
         requestId: request._id,
         reasonCode: input.reasonCode,
         reason: input.reason?.trim(),
-        requiredAt: new Date(),
+        requiredAt: now,
+        now,
         session,
       });
       if (!updated) {
@@ -195,7 +202,7 @@ export const decideProfileVerificationRequest = async (input: {
           outcome = { request: latest, replayed: true };
           return;
         }
-        throw new AppError("Profile verification decision is already final", 409);
+        throw new AppError(latest.status === "EXPIRED" ? "Verification attempt expired; fresh submission required" : "Profile verification decision is already final", 409);
       }
 
       const now = new Date();
@@ -206,6 +213,7 @@ export const decideProfileVerificationRequest = async (input: {
         reason: input.decision === "REJECT" ? input.reason?.trim() : undefined,
         decidedBy: input.decidedBy ? new mongoose.Types.ObjectId(input.decidedBy) : undefined,
         decidedAt: now,
+        now,
         session,
       });
 
@@ -215,7 +223,7 @@ export const decideProfileVerificationRequest = async (input: {
           outcome = { request: latest, replayed: true };
           return;
         }
-        throw new AppError("Profile verification decision is already final", 409);
+        throw new AppError(latest?.status === "EXPIRED" ? "Verification attempt expired; fresh submission required" : "Profile verification decision is already final", 409);
       }
 
       profile.profileStatus = input.decision === "APPROVE" ? "verified" : "rejected";
@@ -248,4 +256,33 @@ export const decideProfileVerificationRequest = async (input: {
   } finally {
     await session.endSession();
   }
+};
+
+/** Reconciles the non-punitive maximum biometric-retention lifecycle. */
+export const expireProfileVerificationRequests = async (now = new Date()) => {
+  const active = await profileVerificationRequestRepository.listActive();
+  let expired = 0;
+  for (const request of active) {
+    const deadline = requestRetentionDeadline(request);
+    if (deadline.getTime() > now.getTime()) continue;
+    const updated = await profileVerificationRequestRepository.transitionToExpired({ requestId: request._id, now, retentionDeadline: deadline });
+    if (!updated) continue;
+    const profile = await UserProfile.findById(updated.profileId);
+    if (profile) {
+      profile.profileStatus = "incomplete";
+      profile.rejectionReason = "";
+      await profile.save();
+    }
+    const cleanupAfter = new Date(Math.min(deadline.getTime(), now.getTime() + FACE_VERIFICATION_SHORT_CLEANUP_MS));
+    const invalidated = await faceVerificationSessionRepository.invalidateForRequestRetentionExpiry({ requestId: updated._id, now, cleanupAfter });
+    if (invalidated) await faceVerificationEvidenceRepository.setCleanupForSession(invalidated._id, cleanupAfter);
+    await createAuditLog({
+      actorType: "SYSTEM", actorReference: "BIOMETRIC_RETENTION_EXPIRED", action: "PROFILE_VERIFICATION_EXPIRED",
+      entityType: "PROFILE_VERIFICATION_REQUEST", entityId: updated._id,
+      before: { status: request.status, profileStatus: "pending_verification" },
+      after: { verificationReference: updated.verificationReference, status: updated.status, expiredAt: updated.expiredAt, submissionVersion: updated.profileSubmissionVersion },
+    });
+    expired += 1;
+  }
+  return { expired };
 };

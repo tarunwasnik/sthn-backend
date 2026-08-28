@@ -24,6 +24,12 @@ class AdminFinancialService {
     getOverview() { return this.read.overview(); }
     getPayments(input) { return this.read.payments(input); }
     getPayment(reference) { return this.read.payment(reference); }
+    async getPaymentFinancialDetail(reference) {
+        const detail = await this.read.paymentFinancialDetail(reference);
+        if (!detail)
+            throw new Error("Payment not found");
+        return detail;
+    }
     getRefunds(input) { return this.read.refunds(input); }
     getRefund(reference) { return this.read.refund(reference); }
     getSettlements(input) { return this.read.settlements(input); }

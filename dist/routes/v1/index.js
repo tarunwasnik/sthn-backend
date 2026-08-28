@@ -8,6 +8,7 @@ const express_1 = require("express");
 const admin_routes_1 = __importDefault(require("./admin.routes"));
 const user_routes_1 = __importDefault(require("./user.routes"));
 const profile_routes_1 = __importDefault(require("../profile.routes"));
+const faceVerification_routes_1 = __importDefault(require("../faceVerification.routes"));
 const profileVerification_routes_1 = __importDefault(require("./profileVerification.routes"));
 const creatorApplication_routes_1 = __importDefault(require("./creatorApplication.routes"));
 const creatorProfile_routes_1 = __importDefault(require("./creatorProfile.routes"));
@@ -20,6 +21,7 @@ const payoutDestination_routes_1 = __importDefault(require("./payoutDestination.
 const booking_routes_1 = __importDefault(require("./booking.routes"));
 const userCancelBooking_routes_1 = __importDefault(require("./userCancelBooking.routes"));
 const dispute_routes_1 = __importDefault(require("./dispute.routes"));
+const review_routes_1 = __importDefault(require("./review.routes"));
 const chat_routes_1 = __importDefault(require("./chat.routes"));
 const admin_dashboard_routes_1 = __importDefault(require("./admin.dashboard.routes"));
 const admin_actions_routes_1 = __importDefault(require("./admin.actions.routes"));
@@ -40,6 +42,7 @@ router.use("/admin/financial", admin_financial_routes_1.default);
 /* ================= USERS ================= */
 router.use("/users", user_routes_1.default);
 router.use("/profile", profile_routes_1.default);
+router.use("/profile/face-verification", faceVerification_routes_1.default);
 /* ================= WALLET ================= */
 router.use("/wallet", wallet_routes_1.default);
 router.use("/withdrawals", withdrawal_routes_1.default);
@@ -49,6 +52,8 @@ router.use("/bookings", userCancelBooking_routes_1.default);
 router.use("/bookings/creator", creatorCancelBooking_routes_1.default); // ✅ IMPORTANT
 /* ================= DISPUTES ================= */
 router.use("/disputes", dispute_routes_1.default);
+/* ================= REVIEWS ================= */
+router.use("/reviews", review_routes_1.default);
 /* ================= CREATORS ================= */
 router.use("/creator-applications", creatorApplication_routes_1.default);
 router.use("/creator", creatorProfile_routes_1.default);

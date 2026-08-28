@@ -20,7 +20,7 @@ import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase
 process.env.NODE_ENV = "test";
 
 const storage = require("../../services/profile/faceVerificationEvidenceStorage.service") as { storeFaceVerificationEvidence: (input: { buffer: Buffer; publicId: string }) => Promise<unknown> };
-const deletionStorage = require("../../services/profile/faceVerificationEvidenceStorage.service") as { deleteFaceVerificationEvidence: (publicId: string) => Promise<void> };
+const deletionStorage = require("../../services/profile/faceVerificationEvidenceStorage.service") as { deleteFaceVerificationEvidence: (publicId: string) => Promise<"DELETED" | "ALREADY_MISSING" | "RETRYABLE_FAILURE" | "PROVIDER_FAILURE"> };
 const originalStore = storage.storeFaceVerificationEvidence;
 const originalDelete = deletionStorage.deleteFaceVerificationEvidence;
 let uploadCalls = 0;
@@ -83,7 +83,9 @@ test("current-session, challenge, index, replay, sixth-capture, and terminal-mut
   assert.equal(await FaceVerificationSession.countDocuments({ profileId: session.profileId, isCurrent: true }), 1);
   assert.equal(session.challenges.length, 5); assert.equal(new Set(session.challenges).size, 5);
   for (const invalid of ["-1", "5", "bad"]) await assert.rejects(acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: session.sessionReference, challengeIndex: invalid, file: file(0) }), /Invalid/);
-  await acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: session.sessionReference, challengeIndex: "0", file: file(0) });
+  const accepted = await acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: session.sessionReference, challengeIndex: "0", file: file(0) });
+  assert.equal(accepted.evidence.status, "STORED");
+  assert.equal((await FaceVerificationEvidence.findOne({ sessionId: session._id, challengeIndex: 0 }))?.status, "STORED");
   const replay = await acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: session.sessionReference, challengeIndex: "0", file: file(9) });
   assert.equal(replay.replayed, true); assert.equal(await FaceVerificationEvidence.countDocuments({ sessionId: session._id }), 1);
   for (let index = 1; index < 5; index += 1) await acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: session.sessionReference, challengeIndex: String(index), file: file(index) });
@@ -144,8 +146,10 @@ test("retention defaults start at terminal decision, not capture completion", as
   await acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: session.sessionReference, challengeIndex: "0", file: file(0) });
   const evidence = await FaceVerificationEvidence.findOne({ sessionId: session._id }); assert.equal(evidence?.cleanupAfter, undefined);
   const requestId = new (require("mongoose").Types.ObjectId)();
+  const approvedAt = new Date();
+  await ProfileVerificationRequest.create({ _id: requestId, verificationReference: `PROFILE_VERIFICATION_RETENTION_${Date.now()}`, profileId: session.profileId, userId: user._id, attemptNumber: 1, profileSubmissionVersion: 1, submittedAt: approvedAt });
   await FaceVerificationEvidence.updateOne({ _id: evidence?._id }, { $set: { verificationRequestId: requestId } });
-  const approvedAt = new Date(); await scheduleFaceEvidenceRetentionForDecision(requestId, "APPROVE", approvedAt);
+  await scheduleFaceEvidenceRetentionForDecision(requestId, "APPROVE", approvedAt);
   assert.equal((await FaceVerificationEvidence.findById(evidence?._id))?.cleanupAfter?.getTime(), approvedAt.getTime() + FACE_VERIFICATION_APPROVED_RETENTION_MS);
   await FaceVerificationEvidence.updateOne({ _id: evidence?._id }, { $set: { status: "STORED" } });
   await scheduleFaceEvidenceRetentionForDecision(requestId, "REJECT", approvedAt);
@@ -187,7 +191,7 @@ test("cleanup is idempotent and only deletes evidence that is due", async () => 
   await acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: session.sessionReference, challengeIndex: "0", file: file(0) });
   const evidence = await FaceVerificationEvidence.findOne({ sessionId: session._id }); assert.ok(evidence);
   await FaceVerificationEvidence.updateOne({ _id: evidence._id }, { $set: { status: "DELETE_PENDING", cleanupAfter: new Date(Date.now() - 1) } });
-  let deletes = 0; deletionStorage.deleteFaceVerificationEvidence = async () => { deletes += 1; };
+  let deletes = 0; deletionStorage.deleteFaceVerificationEvidence = async () => { deletes += 1; return "DELETED"; };
   await reconcileFaceVerificationEvidenceRetention(new Date());
   await reconcileFaceVerificationEvidenceRetention(new Date());
   assert.equal(deletes, 1); assert.equal((await FaceVerificationEvidence.findById(evidence._id))?.status, "DELETED");
@@ -222,7 +226,7 @@ test("avatar mismatch replaces created, partial, and completed sessions without 
   for (let index = 0; index < 5; index += 1) await acceptFaceVerificationCapture({ userId: String(completeUser._id), sessionReference: complete.sessionReference, challengeIndex: String(index), file: file(index) });
   const completeReplacement = await startFaceVerificationSession({ userId: String(completeUser._id), avatar: "https://example.test/avatar-complete-b.jpg" });
   const invalidatedComplete = await FaceVerificationSession.findById(complete._id); assert.equal(invalidatedComplete?.status, "INVALIDATED"); assert.equal(invalidatedComplete?.isCurrent, false); assert.ok(invalidatedComplete?.cleanupAfter);
-  assert.equal(await FaceVerificationEvidence.countDocuments({ sessionId: complete._id, status: "DELETE_PENDING" }), 5); assert.equal(completeReplacement.acceptedCaptureCount, 0);
+  assert.equal(await FaceVerificationEvidence.countDocuments({ sessionId: complete._id, status: "STORED" }), 5); assert.equal(completeReplacement.acceptedCaptureCount, 0);
 });
 
 test("matching completed sessions replay while expired, terminal, and version-mismatched sessions are replaced", async () => {

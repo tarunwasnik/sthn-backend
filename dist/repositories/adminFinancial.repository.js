@@ -7,11 +7,27 @@ const settlement_model_1 = require("../models/settlement.model");
 const creatorBalance_model_1 = require("../models/creatorBalance.model");
 const withdrawal_model_1 = require("../models/withdrawal.model");
 const payout_model_1 = require("../models/payout.model");
+const booking_model_1 = require("../models/booking.model");
+const bookingFundReservation_model_1 = require("../models/bookingFundReservation.model");
+const bookingEscrowAllocation_model_1 = require("../models/bookingEscrowAllocation.model");
+const bookingCreatorSettlement_model_1 = require("../models/bookingCreatorSettlement.model");
 class AdminFinancialRepository {
     page(input) { const page = Math.max(1, Number(input.page) || 1); const limit = Math.min(100, Math.max(1, Number(input.limit) || 25)); return { page, limit, skip: (page - 1) * limit }; }
     async list(model, filter, input) { const { page, limit, skip } = this.page(input); const [items, total] = await Promise.all([model.find(filter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(), model.countDocuments(filter)]); return { items, pagination: { page, limit, total } }; }
     payments(input) { return this.list(payment_model_1.Payment, this.filter(input, ["status", "provider", "currency", "bookingId", "userId", "creatorId"]), input); }
     payment(reference) { return payment_model_1.Payment.findOne({ paymentReference: reference }).select("-providerPayload -attributes").lean(); }
+    async paymentFinancialDetail(reference) {
+        const payment = await this.payment(reference);
+        if (!payment)
+            return null;
+        const [booking, reservation, escrow, settlement] = await Promise.all([
+            booking_model_1.Booking.findById(payment.bookingId).select("bookingReference status paymentMethod completedAt settlementEligibleAt").lean(),
+            bookingFundReservation_model_1.BookingFundReservation.findOne({ paymentId: payment._id }).select("reservationReference status amount currency authorizedAt releasedAt releaseReference releaseCause capturedAt captureReference captureCause").lean(),
+            bookingEscrowAllocation_model_1.BookingEscrowAllocation.findOne({ paymentId: payment._id }).select("allocationReference status allocatedAt").lean(),
+            bookingCreatorSettlement_model_1.BookingCreatorSettlement.findOne({ paymentId: payment._id }).select("settlementReference status settledAt").lean(),
+        ]);
+        return { payment, booking, reservation, escrow, settlement };
+    }
     refunds(input) { return this.list(refund_model_1.Refund, this.filter(input, ["status", "provider", "currency", "paymentId", "bookingId", "userId", "creatorId"]), input); }
     refund(reference) { return refund_model_1.Refund.findOne({ refundReference: reference }).select("-providerPayload -attributes").lean(); }
     settlements(input) { return this.list(settlement_model_1.Settlement, this.filter(input, ["status", "currency", "creatorId", "paymentId", "bookingId"]), input); }

@@ -19,6 +19,8 @@ export interface FaceVerificationEvidenceDocument extends Document {
   status: FaceVerificationEvidenceStatus;
   captureReceivedAt?: Date;
   cleanupAfter?: Date;
+  deletionClaimToken?: string;
+  deletionClaimedAt?: Date;
   deletedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -38,7 +40,8 @@ const schema = new Schema<FaceVerificationEvidenceDocument>({
   bytes: { type: Number, min: 1 },
   format: { type: String, trim: true, maxlength: 20 },
   status: { type: String, required: true, enum: ["UPLOADING", "STORED", "DELETE_PENDING", "DELETED"], default: "UPLOADING", index: true },
-  captureReceivedAt: { type: Date }, cleanupAfter: { type: Date, index: true }, deletedAt: { type: Date },
+  captureReceivedAt: { type: Date }, cleanupAfter: { type: Date, index: true },
+  deletionClaimToken: { type: String, trim: true, maxlength: 64 }, deletionClaimedAt: { type: Date, index: true }, deletedAt: { type: Date },
 }, { timestamps: true });
 
 schema.index({ sessionId: 1, challengeIndex: 1 }, { unique: true, name: "one_face_evidence_per_session_challenge" });

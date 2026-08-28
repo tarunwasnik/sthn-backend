@@ -7,6 +7,7 @@ const authorize_middleware_1 = require("../../middlewares/authorize.middleware")
 const profileVerification_controller_1 = require("../../controllers/profileVerification.controller");
 const router = (0, express_1.Router)();
 router.get("/pending", auth_middleware_1.protect, (0, authorize_middleware_1.authorizeRoles)("admin"), profileVerification_controller_1.listPendingProfiles);
+router.get("/admin-review", auth_middleware_1.protect, (0, authorize_middleware_1.authorizeRoles)("admin"), profileVerification_controller_1.listAdminReviewProfiles);
 router.patch("/:profileId/approve", auth_middleware_1.protect, (0, authorize_middleware_1.authorizeRoles)("admin"), profileVerification_controller_1.approveProfile);
 router.patch("/:profileId/reject", auth_middleware_1.protect, (0, authorize_middleware_1.authorizeRoles)("admin"), profileVerification_controller_1.rejectProfile);
 exports.default = router;

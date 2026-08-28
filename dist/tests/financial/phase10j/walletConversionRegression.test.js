@@ -66,9 +66,12 @@ const registerRegressionTests = () => {
             const accepted = await send((0, walletConversionDecisionFixtures_1.authToken)(fixture.actors.adminId));
             const body = await accepted.json();
             strict_1.default.equal(accepted.status, 200);
-            strict_1.default.deepEqual(Object.keys(body.data).sort(), ["classification",
-                "conversionReference", "issues", "repairPerformed", "retryPerformed",
+            strict_1.default.deepEqual(Object.keys(body.data).sort(), ["allowedActions",
+                "classification", "conversionReference", "issues",
+                "reconciliationReference", "repairPerformed", "retryPerformed",
                 "severity"].sort());
+            strict_1.default.match(body.data.reconciliationReference, /^WCR-[A-F0-9]{20}$/);
+            strict_1.default.deepEqual(body.data.allowedActions, []);
         }
         finally {
             await server.close();
