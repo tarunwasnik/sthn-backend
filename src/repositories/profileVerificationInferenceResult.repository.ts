@@ -24,6 +24,12 @@ export class ProfileVerificationInferenceResultRepository {
   findForAttempt(input: { requestId: import("mongoose").Types.ObjectId; profileSubmissionVersion: number; sessionId: import("mongoose").Types.ObjectId }) {
     return ProfileVerificationInferenceResult.findOne({ verificationRequestId: input.requestId, profileSubmissionVersion: input.profileSubmissionVersion, faceVerificationSessionId: input.sessionId }).sort({ createdAt: -1, _id: -1 }).exec();
   }
+  findAnyByRequestId(requestId: import("mongoose").Types.ObjectId) {
+    return ProfileVerificationInferenceResult.findOne({ verificationRequestId: requestId }).sort({ createdAt: -1, _id: -1 }).exec();
+  }
+  findByRequestIds(requestIds: import("mongoose").Types.ObjectId[]) {
+    return ProfileVerificationInferenceResult.find({ verificationRequestId: { $in: requestIds } }).sort({ createdAt: -1, _id: -1 }).exec();
+  }
 
   create(input: CreateProfileVerificationInferenceResultInput) {
     return ProfileVerificationInferenceResult.create(input);

@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 
 import { ProfileVerificationRequestDocument } from "../../models/profileVerificationRequest.model";
+import { ProfileVerificationLifecycleStage } from "../../services/profile/profileVerificationLifecycle.service";
 
 export interface AdminProfileVerificationQueueDto {
   _id: string;
@@ -24,6 +25,7 @@ export interface AdminProfileVerificationQueueDto {
     adminReviewRequiredAt: Date | null;
     adminReviewReasonCode: string | null;
     adminReviewReason: string | null;
+    lifecycleStage: ProfileVerificationLifecycleStage;
   };
 }
 
@@ -45,6 +47,7 @@ export interface ProfileVerificationQueueProfileSource {
 export const toAdminProfileVerificationQueueDto = (
   request: ProfileVerificationRequestDocument,
   profile: ProfileVerificationQueueProfileSource,
+  lifecycleStage: ProfileVerificationLifecycleStage,
 ): AdminProfileVerificationQueueDto => ({
   _id: String(profile._id),
   username: profile.username,
@@ -67,5 +70,6 @@ export const toAdminProfileVerificationQueueDto = (
     adminReviewRequiredAt: request.adminReviewRequiredAt ?? null,
     adminReviewReasonCode: request.adminReviewReasonCode ?? null,
     adminReviewReason: request.adminReviewReason ?? null,
+    lifecycleStage,
   },
 });

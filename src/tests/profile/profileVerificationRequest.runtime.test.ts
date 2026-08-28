@@ -7,6 +7,7 @@ import { UserProfile } from "../../models/userProfile.model";
 import { ProfileVerificationRequest } from "../../models/profileVerificationRequest.model";
 import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
 import { FaceVerificationSession } from "../../models/faceVerificationSession.model";
+import { FaceVerificationEvidence } from "../../models/faceVerificationEvidence.model";
 import { upsertProfile, updateMyProfile } from "../../controllers/profile.controller";
 import {
   decideProfileVerificationRequest,
@@ -222,6 +223,15 @@ test("admin rejection preserves reason and a rejected resubmission creates a new
   const rejected = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "REJECT", authority: "ADMIN", decidedBy: String(admin._id), reason: "Please improve the profile information." });
   assert.equal(rejected.request.status, "REJECTED");
   assert.equal((await UserProfile.findById(profile._id))?.rejectionReason, "Please improve the profile information.");
+
+  const resubmissionSession = await startFaceVerificationSession({ userId: String(user._id), avatar: profileBody("verification-reject").avatar });
+  await FaceVerificationEvidence.insertMany(resubmissionSession.challenges.map((challenge, challengeIndex) => ({
+    evidenceReference: `REQUEST_RESUBMIT_${String(resubmissionSession._id)}_${challengeIndex}`,
+    sessionId: resubmissionSession._id, userId: user._id, profileId: profile._id,
+    challengeIndex, challenge, cloudinaryPublicId: `opaque-${String(resubmissionSession._id)}-${challengeIndex}`,
+    cloudinaryResourceType: "image", status: "STORED", mimeType: "image/jpeg", bytes: 10, format: "jpg", captureReceivedAt: new Date(),
+  })));
+  await FaceVerificationSession.updateOne({ _id: resubmissionSession._id }, { $set: { status: "CAPTURE_COMPLETE", acceptedCaptureCount: 5, captureCompletedAt: new Date() } });
 
   await invoke(updateMyProfile, {
     user: { id: String(user._id), role: "user", status: "active" },

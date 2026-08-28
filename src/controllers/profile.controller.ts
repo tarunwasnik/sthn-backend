@@ -11,7 +11,11 @@ import { calculateAge } from "../utils/calculateAge";
 import { migrateLegacyProfileMobileContact } from "../services/profile/legacyMobileContactMigration.service";
 import { ensureActiveProfileVerificationRequest } from "../services/profile/profileVerificationRequest.service";
 import { ensureProfileVerificationJob } from "../services/profile/profileVerificationJob.service";
-import { bindCompletedFaceSessionToVerificationRequest, invalidateFaceSessionsForAvatar, requireCompletedFaceSessionForInitialSubmission } from "../services/profile/faceVerificationSession.service";
+import { bindCompletedFaceSessionToVerificationRequest, invalidateFaceSessionsForAvatar, requireCompletedFaceSessionForInitialSubmission, requireCompletedFaceSessionForRejectedResubmission } from "../services/profile/faceVerificationSession.service";
+import { profileVerificationRequestRepository } from "../repositories/profileVerificationRequest.repository";
+import { profileVerificationJobRepository } from "../repositories/profileVerificationJob.repository";
+import { profileVerificationInferenceResultRepository } from "../repositories/profileVerificationInferenceResult.repository";
+import { deriveProfileVerificationLifecycleStage } from "../services/profile/profileVerificationLifecycle.service";
 
 const requireText = (value: unknown, field: string, maxLength: number): string => {
   if (typeof value !== "string" || !value.trim() || value.trim().length > maxLength) {
@@ -100,6 +104,9 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
 
   if (isFirstSubmission) {
     await requireCompletedFaceSessionForInitialSubmission({ userId, avatar: validatedAvatar });
+  }
+  if (profile?.profileStatus === "rejected") {
+    await requireCompletedFaceSessionForRejectedResubmission({ userId, avatar: validatedAvatar });
   }
 
   /* ================= CREATE ================= */
@@ -307,10 +314,28 @@ export const getMyProfile = catchAsync(async (req: Request, res: Response) => {
   const age = profile.dateOfBirth
     ? calculateAge(new Date(profile.dateOfBirth))
     : null;
+  const account = await User.findById(userId).select("mobileCountryCode mobileNumber").lean();
+  const request = await profileVerificationRequestRepository.findActiveByProfileId(profile._id);
+  const job = request ? await profileVerificationJobRepository.findByRequestId(request._id) : null;
+  const inference = request && job?.status === "COMPLETED"
+    ? await profileVerificationInferenceResultRepository.findAnyByRequestId(request._id)
+    : null;
+  const verification = {
+    stage: deriveProfileVerificationLifecycleStage({
+      profileStatus: profile.profileStatus,
+      requestStatus: request?.status,
+      jobStatus: job?.status,
+      hasCompletedInference: Boolean(inference),
+    }),
+    submittedAt: request?.submittedAt ?? profile.verificationSubmittedAt ?? null,
+  };
 
   res.json({
     ...profile.toObject(),
     age,
+    mobileCountryCode: account?.mobileCountryCode ?? null,
+    mobileNumber: account?.mobileNumber ?? null,
+    verification,
   });
 });
 
@@ -342,6 +367,13 @@ export const updateMyProfile = catchAsync(
 
     if (profile.profileStatus === "pending_verification") {
       throw new AppError("Profile is pending verification and cannot be edited", 409);
+    }
+
+    // Validate before mutating profile/media or creating a request. A rejected
+    // profile may only become pending through a fresh next-version session.
+    if (profile.profileStatus === "rejected") {
+      const resubmissionAvatar = avatar === undefined ? profile.avatar : requireText(avatar, "avatar", 2048);
+      await requireCompletedFaceSessionForRejectedResubmission({ userId, avatar: resubmissionAvatar });
     }
 
     /* 🔥 CLOUDINARY CLEANUP */

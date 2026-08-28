@@ -16,6 +16,9 @@ import { scheduleFaceEvidenceRetentionForDecision } from "./faceVerificationEvid
 import { FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS, FACE_VERIFICATION_SHORT_CLEANUP_MS } from "./faceVerification.constants";
 import { faceVerificationSessionRepository } from "../../repositories/faceVerificationSession.repository";
 import { faceVerificationEvidenceRepository } from "../../repositories/faceVerificationEvidence.repository";
+import { profileVerificationJobRepository } from "../../repositories/profileVerificationJob.repository";
+import { profileVerificationInferenceResultRepository } from "../../repositories/profileVerificationInferenceResult.repository";
+import { deriveProfileVerificationLifecycleStage } from "./profileVerificationLifecycle.service";
 
 const adminReviewReasonCodes = new Set<ProfileVerificationAdminReviewReasonCode>([
   "FACE_MATCH_UNCERTAIN", "LIVENESS_UNCERTAIN", "TEXT_MODERATION_UNCERTAIN",
@@ -85,13 +88,26 @@ export const listProfileVerificationQueue = async (
     .populate("userId", "email")
     .exec();
   const profilesById = new Map(profiles.map((profile) => [String(profile._id), profile]));
+  const [jobs, inferenceResults] = await Promise.all([
+    profileVerificationJobRepository.findByRequestIds(requests.map((request) => request._id)),
+    profileVerificationInferenceResultRepository.findByRequestIds(requests.map((request) => request._id)),
+  ]);
+  const jobsByRequestId = new Map(jobs.map((job) => [String(job.verificationRequestId), job]));
+  const inferenceRequestIds = new Set(inferenceResults.map((result) => String(result.verificationRequestId)));
 
   return requests.flatMap((request) => {
     const profile = profilesById.get(String(request.profileId));
     if (!profile) return [];
+    const job = jobsByRequestId.get(String(request._id));
     return [toAdminProfileVerificationQueueDto(
       request,
       profile.toObject() as unknown as ProfileVerificationQueueProfileSource,
+      deriveProfileVerificationLifecycleStage({
+        profileStatus: profile.profileStatus,
+        requestStatus: request.status,
+        jobStatus: job?.status,
+        hasCompletedInference: inferenceRequestIds.has(String(request._id)),
+      }),
     )];
   });
 };

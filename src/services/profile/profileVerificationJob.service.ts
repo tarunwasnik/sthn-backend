@@ -9,6 +9,7 @@ import { FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS } from "./faceVerification.c
 import { finalizeProfileVerificationInference } from "./profileVerificationInference.service";
 import { createSFaceProfileVerificationAdapter } from "./profileVerificationSFaceAdapter";
 import { ProfileVerificationInferenceError } from "../../errors/profile/ProfileVerificationInferenceError";
+import { profileVerificationInferenceResultRepository } from "../../repositories/profileVerificationInferenceResult.repository";
 
 const LEASE_MS = 5 * 60 * 1000;
 const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000];
@@ -146,7 +147,12 @@ export const reconcileProfileVerificationJobs = async (now = new Date()) => {
     if (ensured.created) report.jobsCreated += 1;
     const timeoutReached = request.submittedAt.getTime() + PROCESSING_TIMEOUT_MS <= now.getTime();
     const retentionValid = request.submittedAt.getTime() + FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS > now.getTime();
-    if (timeoutReached && retentionValid && (request.status === "PENDING" || request.status === "PROCESSING")) {
+    // A completed job with a persisted inference result is awaiting an Admin
+    // decision, not still processing.  Keep its active request in the AI
+    // queue and never re-label it as a processing timeout.
+    const hasCompletedInference = ensured.job.status === "COMPLETED"
+      && Boolean(await profileVerificationInferenceResultRepository.findAnyByRequestId(request._id));
+    if (timeoutReached && retentionValid && !hasCompletedInference && (request.status === "PENDING" || request.status === "PROCESSING")) {
       const { escalateProfileVerificationRequest } = await import("./profileVerificationRequest.service");
       const escalation = await escalateProfileVerificationRequest({
         profileId: String(request.profileId),

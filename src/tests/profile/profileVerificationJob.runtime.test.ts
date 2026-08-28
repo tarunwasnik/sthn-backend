@@ -5,6 +5,8 @@ import User from "../../models/User";
 import { UserProfile } from "../../models/userProfile.model";
 import { ProfileVerificationRequest } from "../../models/profileVerificationRequest.model";
 import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
+import { ProfileVerificationInferenceResult } from "../../models/profileVerificationInferenceResult.model";
+import { Types } from "mongoose";
 import { ensureActiveProfileVerificationRequest, decideProfileVerificationRequest, escalateProfileVerificationRequest } from "../../services/profile/profileVerificationRequest.service";
 import {
   claimProfileVerificationJob,
@@ -32,6 +34,23 @@ const makeProfile = async (suffix: string, submittedAt = new Date()) => {
   });
   const request = await ensureActiveProfileVerificationRequest(profile);
   return { user, profile, request: request.request };
+};
+
+const recordCompletedInference = async (request: Awaited<ReturnType<typeof makeProfile>>["request"]) => {
+  await ProfileVerificationInferenceResult.create({
+    inferenceReference: `PROFILE_INFERENCE_COMPLETED_${String(request._id)}`,
+    inferenceRunFingerprint: "a".repeat(63) + "1",
+    verificationRequestId: request._id, profileId: request.profileId, userId: request.userId,
+    profileSubmissionVersion: request.profileSubmissionVersion, faceVerificationSessionId: new Types.ObjectId(),
+    evidenceSetFingerprint: "b".repeat(64), pipelineManifestFingerprint: "c".repeat(64),
+    pipeline: { kind: "TEST_SYNTHETIC", pipelineVersion: "test", runtimeIdentifier: "test", runtimeVersion: "1" },
+    findings: {
+      captures: [0, 1, 2, 3, 4].map((challengeIndex) => ({ challengeIndex, challenge: "NEUTRAL", faceCount: "ONE", usability: "USABLE", reasonCodes: [] })),
+      crossCapture: { status: "CONSISTENT", usableCaptureCount: 5, outlierCaptureCount: 0 }, avatar: { status: "MATCH_UNCERTAIN" }, antiSpoof: { status: "NOT_RUN" },
+    },
+    shadowIdentityAnalysis: { status: "COMPLETED", conclusion: "UNABLE_TO_DETERMINE", similarity: 0.42, model: { identifier: "TEST", version: "1" }, processedAt: new Date(), reasonCode: "THRESHOLD_NOT_CONFIGURED", reason: "Threshold is not configured." },
+    retentionDeadline: new Date(request.submittedAt.getTime() + 86_400_000),
+  });
 };
 
 before(async () => connectPhase7HDatabase(), { timeout: 120_000 });
@@ -91,6 +110,17 @@ test("deadline reconciliation escalates exactly at 30 minutes without cancelling
   const replay = await reconcileProfileVerificationJobs(new Date(deadline.getTime() + 60_000));
   assert.equal(replay.timeoutEscalated, 0);
   assert.equal((await ProfileVerificationRequest.findById(request._id))?.status, "ADMIN_REVIEW_REQUIRED");
+});
+
+test("completed shadow inference is awaiting Admin and never becomes a processing timeout", async () => {
+  const now = new Date("2030-01-01T12:30:00.000Z");
+  const { request } = await makeProfile("completed", new Date(now.getTime() - 30 * 60 * 1000));
+  const { job } = await ensureProfileVerificationJob(request);
+  await ProfileVerificationJob.updateOne({ _id: job._id }, { $set: { status: "COMPLETED", completedAt: now } });
+  await recordCompletedInference(request);
+  const report = await reconcileProfileVerificationJobs(now);
+  assert.equal(report.timeoutEscalated, 0);
+  assert.equal((await ProfileVerificationRequest.findById(request._id))?.status, "PENDING");
 });
 
 test("retry is durable and exhaustion escalates without rejecting the user", async () => {

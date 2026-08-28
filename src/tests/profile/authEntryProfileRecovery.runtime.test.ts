@@ -19,11 +19,14 @@ const invoke = (user: Record<string, unknown>) => new Promise<Record<string, unk
 });
 const profile = (userId: Types.ObjectId, status: "incomplete" | "pending_verification" | "verified" | "rejected") => UserProfile.create({ userId, username: `entry-${status}-${Date.now()}`, dateOfBirth: new Date("1990-01-01"), interests: [], bio: "Entry profile.", avatar: "a", cover: "c", profilePhotos: ["one", "two"], profileStatus: status });
 
-test("auth entry routes only active incomplete profiles to onboarding recovery", async () => {
+test("auth entry routes active incomplete and rejected profiles to onboarding recovery", async () => {
   const active = await User.create({ email: "entry-incomplete@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });
   await profile(active._id, "incomplete");
   assert.equal((await invoke({ id: String(active._id), _id: active._id, status: "active", role: "user" })).entryRoute, "/onboarding");
-  for (const status of ["pending_verification", "verified", "rejected"] as const) {
+  const rejected = await User.create({ email: "entry-rejected@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });
+  await profile(rejected._id, "rejected");
+  assert.equal((await invoke({ id: String(rejected._id), _id: rejected._id, status: "active", role: "user" })).entryRoute, "/onboarding");
+  for (const status of ["pending_verification", "verified"] as const) {
     const user = await User.create({ email: `entry-${status}@test.local`, password: "test-password", status: "active", governanceState: "ACTIVE" });
     await profile(user._id, status);
     assert.equal((await invoke({ id: String(user._id), _id: user._id, status: "active", role: "user" })).entryRoute, "/dashboard/user");

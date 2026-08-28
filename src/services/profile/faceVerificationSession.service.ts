@@ -151,6 +151,35 @@ export const requireCompletedFaceSessionForInitialSubmission = async (input: { u
   return session;
 };
 
+/**
+ * The rejected-profile path creates a new submission version.  It must have
+ * the same exact, completed capture authority as first-time onboarding before
+ * the profile is allowed to become pending again.
+ */
+export const requireCompletedFaceSessionForRejectedResubmission = async (input: { userId: string; avatar: string }) => {
+  if (!Types.ObjectId.isValid(input.userId)) throw new AppError("Unauthorized", 401);
+  const userId = new Types.ObjectId(input.userId);
+  const profile = await UserProfile.findOne({ userId });
+  if (!profile || profile.profileStatus !== "rejected") {
+    throw new AppError("A rejected profile is required for verification resubmission.", 409);
+  }
+  const expectedVersion = (profile.verificationSubmissionVersion ?? 0) + 1;
+  const session = await faceVerificationSessionRepository.findCurrentCompletedForInitialSubmission({
+    profileId: profile._id,
+    userId,
+    version: expectedVersion,
+    avatarFingerprint: fingerprintAvatarReference(input.avatar),
+  });
+  if (!session || session.acceptedCaptureCount !== 5) {
+    throw new AppError("Complete fresh live face verification for the current avatar before resubmitting.", 409);
+  }
+  const storedCaptureCount = await faceVerificationEvidenceRepository.countStored(session._id);
+  if (storedCaptureCount !== 5) {
+    throw new AppError("Complete fresh live face verification for the current avatar before resubmitting.", 409);
+  }
+  return session;
+};
+
 export const invalidateFaceSessionsForAvatar = async (profile: UserProfileDocument) => {
   if (!profile.avatar?.trim()) return;
   const cleanupAfter = cleanAt();

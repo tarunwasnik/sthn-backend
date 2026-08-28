@@ -14,6 +14,10 @@ export class ProfileVerificationJobRepository {
     return ProfileVerificationJob.findOne({ verificationRequestId, jobType: "PROFILE_VERIFICATION_PROCESSING" }).exec();
   }
 
+  findByRequestIds(verificationRequestIds: Types.ObjectId[]) {
+    return ProfileVerificationJob.find({ verificationRequestId: { $in: verificationRequestIds }, jobType: "PROFILE_VERIFICATION_PROCESSING" }).exec();
+  }
+
   async create(input: Pick<ProfileVerificationJobDocument, "jobReference" | "verificationRequestId" | "profileId" | "userId" | "profileSubmissionVersion" | "nextAttemptAt">) {
     const [job] = await ProfileVerificationJob.create([{ ...input, jobType: "PROFILE_VERIFICATION_PROCESSING", status: "PENDING", attemptCount: 0, maxRetryCount: 3 }]);
     return job;

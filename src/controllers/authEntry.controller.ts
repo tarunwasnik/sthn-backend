@@ -12,7 +12,7 @@ export const authEntry = async (req: Request, res: Response) => {
     }
 
     const profile = await UserProfile.findOne({ userId: user.id }).select("profileStatus").lean();
-    const entry = profile?.profileStatus === "incomplete" && user.status === "active" && String(user.role).toLowerCase() !== "admin"
+    const entry = (profile?.profileStatus === "incomplete" || profile?.profileStatus === "rejected") && user.status === "active" && String(user.role).toLowerCase() !== "admin"
       ? { entryType: "ONBOARDING" as const, entryRoute: "/onboarding", userId: user.id }
       : resolveEntry(user);
 
