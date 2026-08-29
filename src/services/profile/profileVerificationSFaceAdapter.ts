@@ -29,7 +29,7 @@ export const createSFaceProfileVerificationAdapter = (dependencies: { evidenceRe
   const embedder = getProductionFaceEmbeddingAdapter();
   return {
     pipelineManifest: {
-      kind: "MODEL_RUNTIME", pipelineVersion: "STHN_SFACE_SHADOW_MEDIAN_3_NO_THRESHOLD_V1", runtimeIdentifier: "onnxruntime-node", runtimeVersion: "1.27.0",
+      kind: "MODEL_RUNTIME", pipelineVersion: "STHN_SFACE_SHADOW_MEDIAN_3_NO_THRESHOLD_V2", runtimeIdentifier: "onnxruntime-node", runtimeVersion: "1.27.0",
       preprocessingVersion: "YUNET_5PT_SFACE_112_BGR_L2_COSINE_MEDIAN_MIN3_NO_THRESHOLD_V1",
       detector: { identifier: YUNET_ARTIFACT.identifier, version: YUNET_ARTIFACT.version, artifactSha256: YUNET_ARTIFACT.sha256 },
       embedding: { identifier: SFACE_ARTIFACT.identifier, version: SFACE_ARTIFACT.version, artifactSha256: SFACE_ARTIFACT.sha256 },

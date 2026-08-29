@@ -7,4 +7,6 @@ export const YUNET_ARTIFACT = {
   version: "2026may",
 } as const;
 export const YUNET_PREPROCESSING_VERSION = "YUNET_DYNAMIC_BGR_DIVISOR32_PAD_V1";
-export const YUNET_LIMITS = { maxWidth: 2048, maxHeight: 2048, maxPixels: 4_194_304, maxChannels: 4, divisor: 32, scoreThreshold: 0.9, nmsThreshold: 0.3, topK: 200 } as const;
+export const YUNET_DETECTOR_SCORE_THRESHOLD = 0.65;
+export const YUNET_CAPTURE_USABILITY_SCORE_THRESHOLD = 0.85;
+export const YUNET_LIMITS = { maxWidth: 2048, maxHeight: 2048, maxPixels: 4_194_304, maxChannels: 4, divisor: 32, scoreThreshold: YUNET_DETECTOR_SCORE_THRESHOLD, nmsThreshold: 0.3, topK: 200 } as const;

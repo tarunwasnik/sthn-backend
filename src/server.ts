@@ -20,6 +20,7 @@ import { disputeEscalationJob } from "./jobs/disputeEscalation.job";
 import { settleBookingsJob } from "./jobs/settleBookings.job";
 import { profileVerificationReconciliationJob } from "./jobs/profileVerificationReconciliation.job";
 import { faceVerificationEvidenceCleanupJob } from "./jobs/faceVerificationEvidenceCleanup.job";
+import { startProfileVerificationWorker, stopProfileVerificationWorker } from "./services/profile/profileVerificationWorker.service";
 
 import { errorHandler } from "./middlewares/errorHandler"; // ✅ ADDED
 
@@ -179,12 +180,14 @@ export async function startServer() {
       console.log(`🚀 Server + Socket.IO running on port ${PORT}`);
 
       startJobLoop();
+      startProfileVerificationWorker();
       console.log("⏱ Background jobs scheduled");
     });
 
     process.on("SIGINT", async () => {
       console.log("🛑 Shutting down server...");
       await stopJobLoop();
+      await stopProfileVerificationWorker();
       await mongoose.connection.close();
       httpServer.close(() => {
         process.exit(0);

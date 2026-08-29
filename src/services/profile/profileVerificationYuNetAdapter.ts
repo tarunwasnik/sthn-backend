@@ -3,14 +3,13 @@ import { FaceVerificationChallenge } from "../../models/faceVerificationSession.
 import { readProfileVerificationEvidenceBytes } from "./faceVerificationEvidenceRead.service";
 import { ProfileVerificationInferenceAdapter, technicalInferenceFailure } from "./profileVerificationInferenceAdapter";
 import { ProfileVerificationInferenceFindings } from "./profileVerificationInference.types";
-import { YUNET_ARTIFACT, YUNET_LIMITS, YUNET_PREPROCESSING_VERSION } from "./profileVerificationYuNet.constants";
+import { YUNET_ARTIFACT, YUNET_CAPTURE_USABILITY_SCORE_THRESHOLD, YUNET_LIMITS, YUNET_PREPROCESSING_VERSION } from "./profileVerificationYuNet.constants";
 import { detectYuNetFaces } from "./profileVerificationYuNetRunner";
 import { YuNetDetection } from "./profileVerificationYuNet.types";
 
 const MIN_FACE_AREA_RATIO = 0.03;
 const MAX_FACE_AREA_RATIO = 0.65;
 const MAX_CENTER_OFFSET_RATIO = 0.35;
-const LOW_CONFIDENCE_MARGIN = 0.02;
 
 type EvidenceReader = typeof readProfileVerificationEvidenceBytes;
 type Detector = (encoded: Buffer) => Promise<YuNetDetection>;
@@ -25,7 +24,7 @@ const classifyDetection = (input: { challengeIndex: number; challenge: FaceVerif
   if (areaRatio < MIN_FACE_AREA_RATIO) return { ...input, faceCount: "ONE" as const, usability: "UNUSABLE" as const, reasonCodes: ["FACE_TOO_SMALL" as const] };
   if (areaRatio > MAX_FACE_AREA_RATIO) return { ...input, faceCount: "ONE" as const, usability: "UNUSABLE" as const, reasonCodes: ["FACE_TOO_LARGE" as const] };
   if (centerOffset > MAX_CENTER_OFFSET_RATIO || face.x <= 0 || face.y <= 0 || face.x + face.width >= width || face.y + face.height >= height) return { ...input, faceCount: "ONE" as const, usability: "UNUSABLE" as const, reasonCodes: ["POOR_ALIGNMENT" as const] };
-  if (face.confidence < YUNET_LIMITS.scoreThreshold + LOW_CONFIDENCE_MARGIN) return { ...input, faceCount: "ONE" as const, usability: "UNCERTAIN" as const, reasonCodes: ["DETECTION_UNCERTAIN" as const] };
+  if (face.confidence < YUNET_CAPTURE_USABILITY_SCORE_THRESHOLD) return { ...input, faceCount: "ONE" as const, usability: "UNCERTAIN" as const, reasonCodes: ["DETECTION_UNCERTAIN" as const] };
   return { ...input, faceCount: "ONE" as const, usability: "USABLE" as const, reasonCodes: [] };
 };
 
@@ -50,7 +49,7 @@ export const createYuNetProfileVerificationAdapter = (dependencies: { evidenceRe
   const detector = dependencies.detector ?? detectYuNetFaces;
   return {
     pipelineManifest: {
-      kind: "MODEL_RUNTIME_DETECTOR_ONLY", pipelineVersion: "STHN_YUNET_DETECTOR_V1", runtimeIdentifier: "onnxruntime-node", runtimeVersion: "1.27.0",
+      kind: "MODEL_RUNTIME_DETECTOR_ONLY", pipelineVersion: "STHN_YUNET_DETECTOR_V2", runtimeIdentifier: "onnxruntime-node", runtimeVersion: "1.27.0",
       preprocessingVersion: YUNET_PREPROCESSING_VERSION,
       detector: { identifier: YUNET_ARTIFACT.identifier, version: YUNET_ARTIFACT.version, artifactSha256: YUNET_ARTIFACT.sha256 },
     },

@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { FaceVerificationChallenge } from "../../models/faceVerificationSession.model";
 import { classifyYuNetDetections } from "../../services/profile/profileVerificationYuNetAdapter";
-import { YUNET_ARTIFACT, YUNET_LIMITS } from "../../services/profile/profileVerificationYuNet.constants";
+import { YUNET_ARTIFACT, YUNET_CAPTURE_USABILITY_SCORE_THRESHOLD, YUNET_DETECTOR_SCORE_THRESHOLD, YUNET_LIMITS } from "../../services/profile/profileVerificationYuNet.constants";
 
 const challenges: FaceVerificationChallenge[] = ["NEUTRAL", "TURN_LEFT", "TURN_RIGHT", "LOOK_UP", "BLINK"];
 const captureSet = (faces: Array<{ x: number; y: number; width: number; height: number; confidence: number }>) => challenges.map((challenge, challengeIndex) => ({
@@ -14,12 +14,19 @@ test("YuNet dynamic artifact identity and bounded detector-only findings remain 
   assert.equal(YUNET_ARTIFACT.filename, "face_detection_yunet_2026may.onnx");
   assert.match(YUNET_ARTIFACT.sha256, /^[a-f0-9]{64}$/);
   assert.equal(YUNET_LIMITS.maxWidth, 2048);
+  assert.equal(YUNET_DETECTOR_SCORE_THRESHOLD, 0.65);
+  assert.equal(YUNET_CAPTURE_USABILITY_SCORE_THRESHOLD, 0.85);
   const findings = classifyYuNetDetections(captureSet([{ x: 260, y: 150, width: 120, height: 120, confidence: 0.99 }]));
   assert.equal(findings.captures.length, 5);
   assert.deepEqual(findings.captures.map((finding) => finding.usability), ["USABLE", "USABLE", "USABLE", "USABLE", "USABLE"]);
   assert.deepEqual(findings.crossCapture, { status: "NOT_RUN", usableCaptureCount: 5, outlierCaptureCount: 0 });
   assert.deepEqual(findings.avatar, { status: "NOT_RUN" });
   assert.deepEqual(findings.antiSpoof, { status: "NOT_RUN" });
+});
+
+test("YuNet uses an explicit capture-usability boundary independent of detector threshold", () => {
+  assert.equal(classifyYuNetDetections(captureSet([{ x: 260, y: 150, width: 120, height: 120, confidence: 0.8499 }])).captures[0].usability, "UNCERTAIN");
+  assert.equal(classifyYuNetDetections(captureSet([{ x: 260, y: 150, width: 120, height: 120, confidence: 0.85 }])).captures[0].usability, "USABLE");
 });
 
 test("YuNet maps zero, multiple, small, large, and badly aligned detections to bounded non-decision findings", () => {
