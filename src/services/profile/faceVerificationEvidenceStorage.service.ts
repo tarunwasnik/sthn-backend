@@ -69,8 +69,8 @@ const readResponseBytes = async (response: FetchResponse, maximumBytes: number):
 
 /** Cloudinary URLs are deliberately scoped to this storage implementation. */
 export const createFaceVerificationEvidenceStorageReader = (dependencies: FaceVerificationEvidenceStorageReadDependencies = {}): FaceVerificationEvidenceStorageReader => async (input) => {
-  const privateDownloadUrl = (dependencies.privateDownloadUrlFactory ?? ((publicId: string, format: string) => cloudinary.utils.private_download_url(publicId, format, {
-    resource_type: "image", type: "authenticated", expires_at: Math.floor(Date.now() / 1000) + 60,
+  const privateDownloadUrl = (dependencies.privateDownloadUrlFactory ?? ((publicId: string, format: string) => cloudinary.url(publicId, {
+    resource_type: "image", type: "authenticated", format, sign_url: true, secure: true,
   })))(input.publicId, input.format);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), input.timeoutMs);

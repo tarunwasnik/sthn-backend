@@ -21,6 +21,8 @@ import { settleBookingsJob } from "./jobs/settleBookings.job";
 import { profileVerificationReconciliationJob } from "./jobs/profileVerificationReconciliation.job";
 import { faceVerificationEvidenceCleanupJob } from "./jobs/faceVerificationEvidenceCleanup.job";
 import { startProfileVerificationWorker, stopProfileVerificationWorker } from "./services/profile/profileVerificationWorker.service";
+import sharp from "sharp";
+import { detectYuNetFaces } from "./services/profile/profileVerificationYuNetRunner";
 
 import { errorHandler } from "./middlewares/errorHandler"; // ✅ ADDED
 
@@ -181,6 +183,9 @@ export async function startServer() {
 
       startJobLoop();
       startProfileVerificationWorker();
+      const runYuNetSyntheticDiagnostic = () => void sharp({ create: { width: 32, height: 32, channels: 3, background: { r: 0, g: 0, b: 0 } } }).png().toBuffer().then((synthetic) => detectYuNetFaces(synthetic, "SYNTHETIC")).catch((error) => console.error("YuNet synthetic diagnostic smoke failed", error));
+      runYuNetSyntheticDiagnostic();
+      setTimeout(runYuNetSyntheticDiagnostic, 70_000);
       console.log("⏱ Background jobs scheduled");
     });
 

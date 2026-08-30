@@ -10,6 +10,7 @@ import { finalizeProfileVerificationInference } from "./profileVerificationInfer
 import { createSFaceProfileVerificationAdapter } from "./profileVerificationSFaceAdapter";
 import { ProfileVerificationInferenceError } from "../../errors/profile/ProfileVerificationInferenceError";
 import { profileVerificationInferenceResultRepository } from "../../repositories/profileVerificationInferenceResult.repository";
+import { withYuNetRunnerAuditContext } from "./profileVerificationYuNetRuntimeAudit.service";
 
 const LEASE_MS = 5 * 60 * 1000;
 const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000];
@@ -116,10 +117,9 @@ export const processNextProfileVerificationJob = async (input: { workerId: strin
   if (!claim) return null;
   if (!claim.actionable) return { ...claim, result: null, completed: true };
   try {
-    const outcome = await finalizeProfileVerificationInference({
-      verificationRequestId: String(claim.job.verificationRequestId),
-      adapter: createSFaceProfileVerificationAdapter(),
-    });
+    const outcome = await withYuNetRunnerAuditContext({ verificationReference: claim.request!.verificationReference, jobReference: claim.job.jobReference, submissionVersion: claim.job.profileSubmissionVersion, attemptCount: claim.job.attemptCount }, () => finalizeProfileVerificationInference({
+      verificationRequestId: String(claim.job.verificationRequestId), adapter: createSFaceProfileVerificationAdapter(),
+    }));
     const completed = await profileVerificationJobRepository.completeIfNotTerminal({ jobId: claim.job._id, now: new Date() });
     return { ...claim, result: outcome.result, replayed: outcome.replayed, completed: Boolean(completed) };
   } catch (error) {

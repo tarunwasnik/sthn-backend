@@ -7,6 +7,7 @@ import { readAuthoritativeProfileVerificationAvatar } from "./profileVerificatio
 import { analyseSFaceShadowIdentity } from "./profileVerificationSFaceShadowAnalysis.service";
 import { classifyYuNetDetections } from "./profileVerificationYuNetAdapter";
 import { detectYuNetFaces } from "./profileVerificationYuNetRunner";
+import { YuNetRunnerRole } from "./profileVerificationYuNetRuntimeAudit.service";
 import { YUNET_ARTIFACT, YUNET_PREPROCESSING_VERSION } from "./profileVerificationYuNet.constants";
 import { ProfileVerificationInferenceAdapter, technicalInferenceFailure } from "./profileVerificationInferenceAdapter";
 import { ProfileVerificationInferenceInputDescriptor } from "./profileVerificationInference.types";
@@ -14,7 +15,7 @@ import { YuNetDetection } from "./profileVerificationYuNet.types";
 
 type EvidenceReader = typeof readProfileVerificationEvidenceBytes;
 type AvatarReader = typeof readAuthoritativeProfileVerificationAvatar;
-type Detector = (bytes: Buffer) => Promise<YuNetDetection>;
+type Detector = (bytes: Buffer, role?: YuNetRunnerRole) => Promise<YuNetDetection>;
 
 const unable = (reasonCode: string, reason: string) => ({
   status: "COMPLETED" as const, conclusion: "UNABLE_TO_DETERMINE" as const,
@@ -42,11 +43,11 @@ export const createSFaceProfileVerificationAdapter = (dependencies: { evidenceRe
       for (const evidence of source.evidence) {
         const expected = input.captures[evidence.challengeIndex];
         if (!expected || expected.challenge !== evidence.challenge) throw technicalInferenceFailure("SFace evidence binding is inconsistent");
-        detected.push({ challengeIndex: evidence.challengeIndex, challenge: evidence.challenge, bytes: evidence.bytes, detection: await detector(evidence.bytes) });
+        detected.push({ challengeIndex: evidence.challengeIndex, challenge: evidence.challenge, bytes: evidence.bytes, detection: await detector(evidence.bytes, `CAPTURE_${evidence.challengeIndex}` as YuNetRunnerRole) });
       }
       const findings = classifyYuNetDetections(detected.map(({ challengeIndex, challenge, detection }) => ({ challengeIndex, challenge, detection })));
       let avatarDetection: YuNetDetection;
-      try { avatarDetection = await detector(await avatarReader(input)); }
+      try { avatarDetection = await detector(await avatarReader(input), "REFERENCE"); }
       catch (error) {
         if (error instanceof ProfileVerificationInferenceError && ["STALE_SUBMISSION", "TERMINAL_REQUEST"].includes(error.code)) throw error;
         return { findings: { ...findings, avatar: { status: "NO_USABLE_FACE" } }, shadowIdentityAnalysis: unable("REFERENCE_AVATAR_UNAVAILABLE", "The authoritative submitted avatar could not be processed.") };
