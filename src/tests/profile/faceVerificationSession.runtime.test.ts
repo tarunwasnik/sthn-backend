@@ -14,6 +14,7 @@ import { faceVerificationSessionRepository } from "../../repositories/faceVerifi
 import { FACE_VERIFICATION_APPROVED_RETENTION_MS, FACE_VERIFICATION_REJECTED_RETENTION_MS, FACE_VERIFICATION_SESSION_TTL_MS, FACE_VERIFICATION_SHORT_CLEANUP_MS } from "../../services/profile/faceVerification.constants";
 import { upsertProfile } from "../../controllers/profile.controller";
 import { assertFaceVerificationImageBytes } from "../../middlewares/upload.middleware";
+import { setBiometricReferenceAvatarValidationDependenciesForTests } from "../../services/profile/profileVerificationReferenceAvatarValidation.service";
 import type { NextFunction, Request, Response } from "express";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
 
@@ -26,6 +27,7 @@ const originalDelete = deletionStorage.deleteFaceVerificationEvidence;
 let uploadCalls = 0;
 storage.storeFaceVerificationEvidence = async (input) => { uploadCalls += 1; return { publicId: input.publicId, bytes: input.buffer.length, format: "jpeg", mimeType: "image/jpeg" }; };
 const file = (index: number) => ({ buffer: Buffer.from([0xff, 0xd8, 0xff, index]), mimetype: "image/jpeg", size: 4, originalname: "capture.jpg" }) as Express.Multer.File;
+const validReferenceDetection = { width: 100, height: 100, decodedBytes: 30000, faces: [{ x: 30, y: 30, width: 40, height: 40, confidence: 0.9, landmarks: { rightEye: { x: 40, y: 42 }, leftEye: { x: 55, y: 42 }, noseTip: { x: 48, y: 50 }, rightMouthCorner: { x: 42, y: 60 }, leftMouthCorner: { x: 54, y: 60 } } }] } as const;
 const invoke = (controller: (req: Request, res: Response, next: NextFunction) => unknown, request: Record<string, unknown>) => new Promise<unknown>((resolve, reject) => {
   const response = { status: () => response, json: (body: unknown) => { resolve(body); return response; } } as unknown as Response;
   controller(request as unknown as Request, response, reject);
@@ -33,8 +35,8 @@ const invoke = (controller: (req: Request, res: Response, next: NextFunction) =>
 const submission = (username: string, avatar: string) => ({ username, realName: "Face Test User", dateOfBirth: "1990-01-01", mobileCountryCode: "+91", mobileNumber: "9876543210", country: "India", city: "Mumbai", languages: ["English"], interests: [], bio: "Face verification test profile.", avatar, cover: "https://example.test/cover.jpg", profilePhotos: ["https://example.test/one.jpg", "https://example.test/two.jpg"] });
 
 before(async () => connectPhase7HDatabase(), { timeout: 120_000 });
-beforeEach(async () => { await clearPhase7HDatabase(); uploadCalls = 0; storage.storeFaceVerificationEvidence = async (input) => { uploadCalls += 1; return { publicId: input.publicId, bytes: input.buffer.length, format: "jpeg", mimeType: "image/jpeg" }; }; });
-after(async () => { storage.storeFaceVerificationEvidence = originalStore; deletionStorage.deleteFaceVerificationEvidence = originalDelete; await disconnectPhase7HDatabase(); }, { timeout: 30_000 });
+beforeEach(async () => { await clearPhase7HDatabase(); uploadCalls = 0; setBiometricReferenceAvatarValidationDependenciesForTests({ reader: async () => Buffer.from("test-avatar"), detector: async () => validReferenceDetection }); storage.storeFaceVerificationEvidence = async (input) => { uploadCalls += 1; return { publicId: input.publicId, bytes: input.buffer.length, format: "jpeg", mimeType: "image/jpeg" }; }; });
+after(async () => { setBiometricReferenceAvatarValidationDependenciesForTests(); storage.storeFaceVerificationEvidence = originalStore; deletionStorage.deleteFaceVerificationEvidence = originalDelete; await disconnectPhase7HDatabase(); }, { timeout: 30_000 });
 
 test("face session provisions only a draft and never creates a submitted verification authority", async () => {
   const user = await User.create({ email: "face-draft@test.local", password: "test-password", status: "pending_profile", governanceState: "ACTIVE" });
@@ -287,4 +289,23 @@ test("duplicate-key recovery retires an incompatible winner instead of returning
   } finally {
     faceVerificationSessionRepository.create = originalCreate;
   }
+});
+
+test("invalid and technical reference validation never creates a session, request, job, or submission version", async () => {
+  const user = await User.create({ email: "face-reference-negative@test.local", password: "test-password", status: "pending_profile", governanceState: "ACTIVE" });
+  const avatar = "https://example.test/avatar-negative.jpg";
+  for (const detector of [
+    async () => ({ ...validReferenceDetection, faces: [] }),
+    async () => ({ ...validReferenceDetection, faces: [validReferenceDetection.faces[0], validReferenceDetection.faces[0]] }),
+  ]) {
+    setBiometricReferenceAvatarValidationDependenciesForTests({ reader: async () => Buffer.from("test-avatar"), detector });
+    await assert.rejects(startFaceVerificationSession({ userId: String(user._id), avatar }), /profile photo cannot be used/);
+    assert.equal(await FaceVerificationSession.countDocuments({ userId: user._id }), 0);
+    assert.equal(await ProfileVerificationRequest.countDocuments({ userId: user._id }), 0);
+    assert.equal(await ProfileVerificationJob.countDocuments({ userId: user._id }), 0);
+    assert.equal((await UserProfile.findOne({ userId: user._id }))?.verificationSubmissionVersion ?? 0, 0);
+  }
+  setBiometricReferenceAvatarValidationDependenciesForTests({ reader: async () => { throw new Error("reader unavailable"); } });
+  await assert.rejects(startFaceVerificationSession({ userId: String(user._id), avatar }), /reader unavailable/);
+  assert.equal(await FaceVerificationSession.countDocuments({ userId: user._id }), 0);
 });

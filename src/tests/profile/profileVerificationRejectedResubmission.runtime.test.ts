@@ -9,10 +9,12 @@ import { FaceVerificationEvidence } from "../../models/faceVerificationEvidence.
 import { ProfileVerificationRequest } from "../../models/profileVerificationRequest.model";
 import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
 import { startFaceVerificationSession } from "../../services/profile/faceVerificationSession.service";
+import { setBiometricReferenceAvatarValidationDependenciesForTests } from "../../services/profile/profileVerificationReferenceAvatarValidation.service";
 import { upsertProfile, updateMyProfile } from "../../controllers/profile.controller";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
 
 process.env.NODE_ENV = "test";
+const validReferenceDetection = { width: 100, height: 100, decodedBytes: 30000, faces: [{ x: 30, y: 30, width: 40, height: 40, confidence: 0.9, landmarks: { rightEye: { x: 40, y: 42 }, leftEye: { x: 55, y: 42 }, noseTip: { x: 48, y: 50 }, rightMouthCorner: { x: 42, y: 60 }, leftMouthCorner: { x: 54, y: 60 } } }] } as const;
 
 const avatar = "https://example.test/avatar-a.jpg";
 const body = { username: "rejected-resubmit", realName: "Rejected User", dateOfBirth: "1990-01-01", mobileCountryCode: "+91", mobileNumber: "9876543210", country: "India", city: "Mumbai", languages: ["English"], interests: [], bio: "Corrected profile.", avatar, cover: "https://example.test/cover.jpg", profilePhotos: ["https://example.test/one.jpg", "https://example.test/two.jpg"] };
@@ -33,8 +35,8 @@ const completeWithEvidence = async (sessionId: Types.ObjectId) => {
 };
 
 before(async () => connectPhase7HDatabase(), { timeout: 120_000 });
-beforeEach(async () => clearPhase7HDatabase());
-after(async () => disconnectPhase7HDatabase(), { timeout: 30_000 });
+beforeEach(async () => { await clearPhase7HDatabase(); setBiometricReferenceAvatarValidationDependenciesForTests({ reader: async () => Buffer.from("test-avatar"), detector: async () => validReferenceDetection }); });
+after(async () => { setBiometricReferenceAvatarValidationDependenciesForTests(); await disconnectPhase7HDatabase(); }, { timeout: 30_000 });
 
 test("rejected resubmission cannot create a request or job without a fresh completed session", async () => {
   const user = await User.create({ email: "rejected-without-session@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });

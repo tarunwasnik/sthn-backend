@@ -8,6 +8,7 @@ import { faceVerificationSessionRepository } from "../../repositories/faceVerifi
 import { faceVerificationEvidenceRepository } from "../../repositories/faceVerificationEvidence.repository";
 import { storeFaceVerificationEvidence } from "./faceVerificationEvidenceStorage.service";
 import { FACE_VERIFICATION_SESSION_TTL_MS, FACE_VERIFICATION_SHORT_CLEANUP_MS } from "./faceVerification.constants";
+import { requireBiometricReferenceAvatar } from "./profileVerificationReferenceAvatarValidation.service";
 
 const challengePool: FaceVerificationChallenge[] = ["NEUTRAL", "TURN_LEFT", "TURN_RIGHT", "LOOK_UP", "LOOK_DOWN", "BLINK"];
 const duplicateKey = (error: unknown) => typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === 11000;
@@ -61,7 +62,11 @@ export const startFaceVerificationSession = async (input: { userId: string; avat
   if (typeof input.avatar !== "string" || !input.avatar.trim() || input.avatar.trim().length > 2048) throw new AppError("A valid avatar reference is required", 400);
   const userId = new Types.ObjectId(input.userId); const profile = await ensureDraftProfile(userId);
   if (profile.profileStatus === "pending_verification") throw new AppError("Profile is already pending verification", 409);
-  const avatarFingerprint = fingerprintAvatarReference(input.avatar.trim());
+  const avatar = input.avatar.trim();
+  // The selected ordinary avatar is bound to the draft/rejected profile before it can become biometric authority.
+  if (profile.avatar !== avatar) { profile.avatar = avatar; await profile.save(); }
+  const avatarFingerprint = fingerprintAvatarReference(avatar);
+  await requireBiometricReferenceAvatar({ profileId: String(profile._id), userId: String(userId), avatarFingerprint });
   const targetVersion = Math.max(1, (profile.verificationSubmissionVersion ?? 0) + 1);
   const expected = { userId, avatarFingerprint, targetVersion };
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -148,6 +153,7 @@ export const requireCompletedFaceSessionForInitialSubmission = async (input: { u
   const expectedVersion = Math.max(1, (profile.verificationSubmissionVersion ?? 0) + 1);
   const session = await faceVerificationSessionRepository.findCurrentCompletedForInitialSubmission({ profileId: profile._id, userId, version: expectedVersion, avatarFingerprint: fingerprintAvatarReference(input.avatar) });
   if (!session) throw new AppError("Complete live face verification for the current avatar before submitting.", 409);
+  await requireBiometricReferenceAvatar({ profileId: String(profile._id), userId: String(userId), avatarFingerprint: fingerprintAvatarReference(input.avatar) });
   return session;
 };
 
@@ -177,6 +183,7 @@ export const requireCompletedFaceSessionForRejectedResubmission = async (input: 
   if (storedCaptureCount !== 5) {
     throw new AppError("Complete fresh live face verification for the current avatar before resubmitting.", 409);
   }
+  await requireBiometricReferenceAvatar({ profileId: String(profile._id), userId: String(userId), avatarFingerprint: fingerprintAvatarReference(input.avatar) });
   return session;
 };
 

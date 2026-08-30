@@ -12,6 +12,7 @@ import { YUNET_ARTIFACT, YUNET_PREPROCESSING_VERSION } from "./profileVerificati
 import { ProfileVerificationInferenceAdapter, technicalInferenceFailure } from "./profileVerificationInferenceAdapter";
 import { ProfileVerificationInferenceInputDescriptor } from "./profileVerificationInference.types";
 import { YuNetDetection } from "./profileVerificationYuNet.types";
+import { validateBiometricReferenceDetection } from "./profileVerificationReferenceAvatarValidation.service";
 
 type EvidenceReader = typeof readProfileVerificationEvidenceBytes;
 type AvatarReader = typeof readAuthoritativeProfileVerificationAvatar;
@@ -52,8 +53,8 @@ export const createSFaceProfileVerificationAdapter = (dependencies: { evidenceRe
         if (error instanceof ProfileVerificationInferenceError && ["STALE_SUBMISSION", "TERMINAL_REQUEST"].includes(error.code)) throw error;
         return { findings: { ...findings, avatar: { status: "NO_USABLE_FACE" } }, shadowIdentityAnalysis: unable("REFERENCE_AVATAR_UNAVAILABLE", "The authoritative submitted avatar could not be processed.") };
       }
-      if (avatarDetection.faces.length === 0) return { findings: { ...findings, avatar: { status: "NO_USABLE_FACE" } }, shadowIdentityAnalysis: unable("REFERENCE_FACE_NOT_FOUND", "The authoritative submitted avatar has no usable face.") };
-      if (avatarDetection.faces.length !== 1) return { findings: { ...findings, avatar: { status: "MULTIPLE_FACES" } }, shadowIdentityAnalysis: unable("MULTIPLE_REFERENCE_FACES", "The authoritative submitted avatar has multiple faces.") };
+      const referenceValidation = validateBiometricReferenceDetection(avatarDetection);
+      if (!referenceValidation.valid) return { findings: { ...findings, avatar: { status: referenceValidation.reason === "MULTIPLE_FACES" ? "MULTIPLE_FACES" : "NO_USABLE_FACE" } }, shadowIdentityAnalysis: unable(referenceValidation.reason === "MULTIPLE_FACES" ? "MULTIPLE_REFERENCE_FACES" : "REFERENCE_FACE_NOT_FOUND", "The authoritative submitted avatar has no usable face.") };
       let reference: number[];
       try {
         const avatarBytes = await avatarReader(input);

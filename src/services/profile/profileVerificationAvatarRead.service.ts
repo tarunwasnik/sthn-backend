@@ -20,10 +20,9 @@ const readBytes = async (response: Response) => {
 };
 
 /** Reads only the current Cloudinary avatar proven to belong to the exact session submission. */
-export const readAuthoritativeProfileVerificationAvatar = async (input: { profileId: string; userId: string; profileSubmissionVersion: number; avatarFingerprint: string }) => {
+export const readBoundProfileVerificationAvatar = async (input: { profileId: string; userId: string; avatarFingerprint: string }) => {
   const profile = await UserProfile.findById(input.profileId).exec();
-  if (!profile || String(profile.userId) !== input.userId || profile.verificationSubmissionVersion !== input.profileSubmissionVersion
-    || !profile.avatar || fingerprintAvatarReference(profile.avatar) !== input.avatarFingerprint) {
+  if (!profile || String(profile.userId) !== input.userId || !profile.avatar || fingerprintAvatarReference(profile.avatar) !== input.avatarFingerprint) {
     throw new ProfileVerificationInferenceError("Avatar submission authority is stale", "STALE_SUBMISSION", 409);
   }
   if (!trustedAvatarUrl(profile.avatar)) throw new ProfileVerificationInferenceError("Avatar media authority is invalid", "EVIDENCE_NOT_AVAILABLE", 409);
@@ -44,4 +43,11 @@ export const readAuthoritativeProfileVerificationAvatar = async (input: { profil
     if (error instanceof ProfileVerificationInferenceError) throw error;
     throw new ProfileVerificationInferenceError("Avatar retrieval failed", "EVIDENCE_RETRIEVAL_FAILED", 503, true);
   } finally { clearTimeout(timer); }
+};
+
+/** Reads the current profile-bound avatar only when it also belongs to the immutable submitted version. */
+export const readAuthoritativeProfileVerificationAvatar = async (input: { profileId: string; userId: string; profileSubmissionVersion: number; avatarFingerprint: string }) => {
+  const profile = await UserProfile.findById(input.profileId).exec();
+  if (!profile || profile.verificationSubmissionVersion !== input.profileSubmissionVersion) throw new ProfileVerificationInferenceError("Avatar submission authority is stale", "STALE_SUBMISSION", 409);
+  return readBoundProfileVerificationAvatar(input);
 };

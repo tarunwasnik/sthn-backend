@@ -20,6 +20,7 @@ import {
 import { FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS } from "../../services/profile/faceVerification.constants";
 import { profileVerificationRequestRepository } from "../../repositories/profileVerificationRequest.repository";
 import { startFaceVerificationSession } from "../../services/profile/faceVerificationSession.service";
+import { setBiometricReferenceAvatarValidationDependenciesForTests } from "../../services/profile/profileVerificationReferenceAvatarValidation.service";
 import {
   clearPhase7HDatabase,
   connectPhase7HDatabase,
@@ -27,6 +28,7 @@ import {
 } from "../financial/phase7h/helpers/database";
 
 process.env.NODE_ENV = "test";
+const validReferenceDetection = { width: 100, height: 100, decodedBytes: 30000, faces: [{ x: 30, y: 30, width: 40, height: 40, confidence: 0.9, landmarks: { rightEye: { x: 40, y: 42 }, leftEye: { x: 55, y: 42 }, noseTip: { x: 48, y: 50 }, rightMouthCorner: { x: 42, y: 60 }, leftMouthCorner: { x: 54, y: 60 } } }] } as const;
 
 const invoke = (
   controller: (req: Request, res: Response, next: NextFunction) => unknown,
@@ -77,8 +79,8 @@ const submitProfile = async (email: string, username: string) => {
 };
 
 before(async () => connectPhase7HDatabase(), { timeout: 120_000 });
-beforeEach(async () => clearPhase7HDatabase());
-after(async () => disconnectPhase7HDatabase(), { timeout: 30_000 });
+beforeEach(async () => { await clearPhase7HDatabase(); setBiometricReferenceAvatarValidationDependenciesForTests({ reader: async () => Buffer.from("test-avatar"), detector: async () => validReferenceDetection }); });
+after(async () => { setBiometricReferenceAvatarValidationDependenciesForTests(); await disconnectPhase7HDatabase(); }, { timeout: 30_000 });
 
 test("first submission creates exactly one active verification request and replays safely", async () => {
   const { profile } = await submitProfile("verification-first@test.local", "verification-first");
