@@ -4,6 +4,7 @@ import pathModule from "node:path";
 import * as ort from "onnxruntime-node";
 import sharp from "sharp";
 
+import { YUNET_RUNTIME_CONFIG } from "../../config/yunetRuntimeConfig";
 import { technicalInferenceFailure } from "./profileVerificationInferenceAdapter";
 import { YUNET_ARTIFACT, YUNET_LIMITS } from "./profileVerificationYuNet.constants";
 import { YuNetDetection, YuNetFace } from "./profileVerificationYuNet.types";
@@ -32,15 +33,15 @@ const nms = (faces: YuNetFace[]) => {
 
 const loadSession = async (role: YuNetRunnerRole) => {
   if (sessionPromise) {
-    const path = process.env.STHN_YUNET_MODEL_PATH;
-    const resolvedPath = path ? pathModule.resolve(path) : undefined;
+    const path = YUNET_RUNTIME_CONFIG.configuredPath;
+    const resolvedPath = YUNET_RUNTIME_CONFIG.resolvedPath;
     const exists = resolvedPath ? await fs.access(resolvedPath).then(() => true).catch(() => false) : false;
     await createYuNetRunnerAudit({ role, value: path, resolvedPath, resolvedPathExists: exists, outcome: "SESSION_LOAD_SUCCEEDED" });
     return sessionPromise;
   }
   sessionPromise = (async () => {
-    const path = process.env.STHN_YUNET_MODEL_PATH;
-    const resolvedPath = path ? pathModule.resolve(path) : undefined;
+    const path = YUNET_RUNTIME_CONFIG.configuredPath;
+    const resolvedPath = YUNET_RUNTIME_CONFIG.resolvedPath;
     const exists = resolvedPath ? await fs.access(resolvedPath).then(() => true).catch(() => false) : false;
     const audit = await createYuNetRunnerAudit({ role, value: path, resolvedPath, resolvedPathExists: exists, outcome: path ? (exists ? "PATH_RESOLVED" : "MODEL_FILE_MISSING") : "ENV_ABSENT" });
     if (!path) throw technicalInferenceFailure("YuNet model artifact is not configured");
