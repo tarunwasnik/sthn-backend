@@ -13,6 +13,7 @@ import { ProfileVerificationInferenceAdapter, technicalInferenceFailure } from "
 import { ProfileVerificationInferenceInputDescriptor } from "./profileVerificationInference.types";
 import { YuNetDetection } from "./profileVerificationYuNet.types";
 import { validateBiometricReferenceDetection } from "./profileVerificationReferenceAvatarValidation.service";
+import { SFACE_IDENTITY_APPROVAL_THRESHOLD } from "../../config/sfaceIdentityApprovalThreshold";
 
 type EvidenceReader = typeof readProfileVerificationEvidenceBytes;
 type AvatarReader = typeof readAuthoritativeProfileVerificationAvatar;
@@ -66,7 +67,7 @@ export const createSFaceProfileVerificationAdapter = (dependencies: { evidenceRe
         try { embeddings.push(normalizeFaceEmbeddingL2(await embedder.infer(await alignFaceEvidence({ bytes: capture.bytes, landmarks: capture.detection.faces[0].landmarks, preprocessing: SFACE_FACE_EMBEDDING_SPECIFICATION.preprocessing })), 128)); }
         catch { /* A single malformed capture is unusable, not an attempt-level identity verdict. */ }
       }
-      return { findings: { ...findings, avatar: { status: "MATCH_UNCERTAIN" } }, shadowIdentityAnalysis: analyseSFaceShadowIdentity({ referenceEmbedding: reference, usableCaptureEmbeddings: embeddings, threshold: null }) };
+      return { findings: { ...findings, avatar: { status: "MATCH_UNCERTAIN" } }, shadowIdentityAnalysis: analyseSFaceShadowIdentity({ referenceEmbedding: reference, usableCaptureEmbeddings: embeddings, threshold: SFACE_IDENTITY_APPROVAL_THRESHOLD ?? null }) };
     },
   };
 };

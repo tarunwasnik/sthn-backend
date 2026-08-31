@@ -54,6 +54,7 @@ export class ProfileVerificationRequestRepository {
     reason?: string;
     decidedBy?: Types.ObjectId;
     decidedAt: Date;
+    aiDecisionSnapshot?: { source: "AI"; model: { identifier: string; version: string }; similarity: number; threshold: number; decidedAt: Date };
     now: Date;
     session?: ClientSession;
   }) {
@@ -69,6 +70,7 @@ export class ProfileVerificationRequestRepository {
           ...(input.reason ? { decisionReason: input.reason } : {}),
           ...(input.decidedBy ? { decidedBy: input.decidedBy } : {}),
           decidedAt: input.decidedAt,
+          ...(input.aiDecisionSnapshot ? { aiDecisionSnapshot: input.aiDecisionSnapshot } : {}),
         },
         ...(input.decision === "APPROVE" ? { $unset: { decisionReason: 1 } } : {}),
       },

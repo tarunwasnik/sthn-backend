@@ -192,12 +192,16 @@ export const decideProfileVerificationRequest = async (input: {
   authority: ProfileVerificationDecisionAuthority;
   decidedBy?: string;
   reason?: string;
+  expectedRequestId?: string;
+  expectedSubmissionVersion?: number;
+  aiDecisionSnapshot?: { source: "AI"; model: { identifier: string; version: string }; similarity: number; threshold: number; decidedAt: Date };
 }): Promise<{ request: ProfileVerificationRequestDocument; replayed: boolean }> => {
   if (!mongoose.Types.ObjectId.isValid(input.profileId)) throw new AppError("Invalid profileId", 400);
   if (input.authority === "ADMIN" && (!input.decidedBy || !mongoose.Types.ObjectId.isValid(input.decidedBy))) {
     throw new AppError("Admin identity is required", 400);
   }
   if (input.authority === "AI" && input.decidedBy) throw new AppError("AI decisions cannot have an admin identity", 400);
+  if (input.authority === "AI" && (input.decision !== "APPROVE" || !input.aiDecisionSnapshot)) throw new AppError("AI approval requires an immutable decision snapshot", 400);
   if (input.decision === "REJECT" && (!input.reason || !input.reason.trim())) {
     throw new AppError("Rejection reason is required", 400);
   }
@@ -220,6 +224,7 @@ export const decideProfileVerificationRequest = async (input: {
         }
         throw new AppError(latest.status === "EXPIRED" ? "Verification attempt expired; fresh submission required" : "Profile verification decision is already final", 409);
       }
+      if ((input.expectedRequestId && String(request._id) !== input.expectedRequestId) || (input.expectedSubmissionVersion !== undefined && request.profileSubmissionVersion !== input.expectedSubmissionVersion) || (input.expectedSubmissionVersion !== undefined && profile.verificationSubmissionVersion !== input.expectedSubmissionVersion)) throw new AppError("Profile verification authority is stale", 409);
 
       const now = new Date();
       const updated = await profileVerificationRequestRepository.transitionToTerminal({
@@ -229,6 +234,7 @@ export const decideProfileVerificationRequest = async (input: {
         reason: input.decision === "REJECT" ? input.reason?.trim() : undefined,
         decidedBy: input.decidedBy ? new mongoose.Types.ObjectId(input.decidedBy) : undefined,
         decidedAt: now,
+        aiDecisionSnapshot: input.aiDecisionSnapshot ? { ...input.aiDecisionSnapshot, decidedAt: now } : undefined,
         now,
         session,
       });

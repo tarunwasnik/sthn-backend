@@ -19,6 +19,7 @@ export type ProfileVerificationAdminReviewReasonCode =
   | "PROCESSING_TIMEOUT"
   | "MODEL_FAILURE"
   | "OTHER";
+export interface ProfileVerificationAiDecisionSnapshot { source: "AI"; model: { identifier: string; version: string }; similarity: number; threshold: number; decidedAt: Date; }
 
 export interface ProfileVerificationRequestDocument extends Document {
   verificationReference: string;
@@ -39,6 +40,7 @@ export interface ProfileVerificationRequestDocument extends Document {
   decisionReason?: string;
   decidedAt?: Date;
   decidedBy?: mongoose.Types.ObjectId;
+  aiDecisionSnapshot?: ProfileVerificationAiDecisionSnapshot;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -63,6 +65,7 @@ const ProfileVerificationRequestSchema = new Schema<ProfileVerificationRequestDo
     decisionReason: { type: String, trim: true, maxlength: 2000 },
     decidedAt: { type: Date },
     decidedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    aiDecisionSnapshot: { type: new Schema({ source: { type: String, required: true, enum: ["AI"] }, model: { identifier: { type: String, required: true, trim: true, maxlength: 120 }, version: { type: String, required: true, trim: true, maxlength: 120 } }, similarity: { type: Number, required: true, min: -1, max: 1 }, threshold: { type: Number, required: true, min: -1, max: 1 }, decidedAt: { type: Date, required: true } }, { _id: false, strict: "throw" }), default: undefined },
   },
   { timestamps: true },
 );

@@ -173,6 +173,6 @@ test("legacy active requests reconcile into one job and unresolved escalated wor
   await reconcileProfileVerificationJobs(new Date());
   assert.equal(await ProfileVerificationJob.countDocuments({ verificationRequestId: request._id }), 1);
   await escalateProfileVerificationRequest({ profileId: String(profile._id), reasonCode: "OTHER", reason: "Manual review is required." });
-  const decision = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "AI" });
+  const decision = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: { source: "AI", model: { identifier: "OPENCV_ZOO_SFACE", version: "face_recognition_sface_2021dec" }, similarity: 0.99, threshold: 0.9, decidedAt: new Date() } });
   assert.equal(decision.request.status, "APPROVED");
 });
