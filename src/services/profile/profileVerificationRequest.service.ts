@@ -108,6 +108,7 @@ export const listProfileVerificationQueue = async (
         jobStatus: job?.status,
         hasCompletedInference: inferenceRequestIds.has(String(request._id)),
       }),
+      job,
     )];
   });
 };

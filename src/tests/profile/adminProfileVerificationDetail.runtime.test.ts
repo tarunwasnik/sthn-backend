@@ -40,9 +40,13 @@ test("admin detail is exact-attempt ordered and excludes biometric storage inter
     threshold: null,
     model: null,
     processedAt: null,
+    usableCaptureCount: null,
     reasonCode: null,
     reason: null,
   });
+  assert.equal(detail.verificationRequest.decisionAuthority, null);
+  assert.equal(detail.verificationRequest.aiDecisionSnapshot, null);
+  assert.equal(detail.job, null);
   assert.deepEqual(detail.captures.map((capture) => capture.challengeIndex), [0, 1, 2, 3, 4]);
   const serialized = JSON.stringify(detail).toLowerCase();
   for (const marker of ["cloudinary", "provider-secret", "cleanupafter", "fingerprint", "base64", "buffer", "embedding", "landmark", "tensor", "geometry"]) assert.equal(serialized.includes(marker), false, marker);

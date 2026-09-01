@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 
 import { ProfileVerificationRequestDocument } from "../../models/profileVerificationRequest.model";
 import { ProfileVerificationLifecycleStage } from "../../services/profile/profileVerificationLifecycle.service";
+import { ProfileVerificationJobDocument } from "../../models/profileVerificationJob.model";
 
 export interface AdminProfileVerificationQueueDto {
   _id: string;
@@ -26,6 +27,7 @@ export interface AdminProfileVerificationQueueDto {
     adminReviewReasonCode: string | null;
     adminReviewReason: string | null;
     lifecycleStage: ProfileVerificationLifecycleStage;
+    job: { status: ProfileVerificationJobDocument["status"]; attemptCount: number; maxRetryCount: number } | null;
   };
 }
 
@@ -48,6 +50,7 @@ export const toAdminProfileVerificationQueueDto = (
   request: ProfileVerificationRequestDocument,
   profile: ProfileVerificationQueueProfileSource,
   lifecycleStage: ProfileVerificationLifecycleStage,
+  job: ProfileVerificationJobDocument | undefined,
 ): AdminProfileVerificationQueueDto => ({
   _id: String(profile._id),
   username: profile.username,
@@ -71,5 +74,6 @@ export const toAdminProfileVerificationQueueDto = (
     adminReviewReasonCode: request.adminReviewReasonCode ?? null,
     adminReviewReason: request.adminReviewReason ?? null,
     lifecycleStage,
+    job: job ? { status: job.status, attemptCount: job.attemptCount, maxRetryCount: job.maxRetryCount } : null,
   },
 });
