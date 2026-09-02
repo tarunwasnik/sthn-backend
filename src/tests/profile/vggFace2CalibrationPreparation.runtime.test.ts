@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { prepareVggFace2TierA, writeVggFace2TierA } from "../../evaluation/vggFace2CalibrationPreparation.service";
+import { prepareVggFace2TierA, prepareVggFace2Y2DNonMatch, writeVggFace2TierA, Y2D_BATCH_SIZE, Y2D_NON_MATCH_TARGET } from "../../evaluation/vggFace2CalibrationPreparation.service";
 
 const createFixture = async (identityCount = 60, imageCount = 6) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sthn-vgg2-"));
@@ -45,5 +45,17 @@ test("VGGFace2 Tier A writer emits only manifest and bounded preparation metadat
     await writeVggFace2TierA(root, manifestPath);
     const metadata = await readFile(path.join(manifestDirectory, "tier-a.preparation.json"), "utf8");
     assert.equal(/identity-|\.jpg|[A-Za-z]:\\/i.test(metadata), false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Y2D preparation deterministically partitions its global score-independent non-match sequence into bounded batches", async () => {
+  const root = await createFixture(20); const manifestDirectory = path.join(root, "manifest"); await mkdir(manifestDirectory);
+  try {
+    const options = { target: 100, batchSize: 20 }; const first = await prepareVggFace2Y2DNonMatch(root, manifestDirectory, [], options); const second = await prepareVggFace2Y2DNonMatch(root, manifestDirectory, [], options);
+    const samples = first.batches.flatMap((batch) => batch.samples);
+    assert.deepEqual(first, second); assert.equal(Y2D_NON_MATCH_TARGET, 5_000); assert.equal(Y2D_BATCH_SIZE, 1_000); assert.equal(first.batches.length, 5); assert.equal(samples.length, 100);
+    assert.equal(first.batches.every((batch) => batch.samples.length === 20), true); assert.equal(new Set(samples.map((sample) => sample.sampleId)).size, 100);
+    const pairs = samples.map((sample) => `${path.dirname(sample.reference)}>${path.dirname(sample.captures[0])}`); assert.equal(new Set(pairs).size, 100); assert.equal(samples.every((sample) => path.dirname(sample.reference) !== path.dirname(sample.captures[0]) && new Set(sample.captures.map((capture) => path.dirname(capture))).size === 1), true);
+    assert.equal(first.metadata.duplicateOrderedPairs, 0); assert.equal(first.metadata.selfPairs, 0); assert.equal(first.metadata.exactDuplicateComparisons, 0); assert.deepEqual(first.metadata.referenceIdentityUsage, { minimum: 5, maximum: 5, mean: 5 }); assert.deepEqual(first.metadata.captureIdentityUsage, { minimum: 5, maximum: 5, mean: 5 });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
