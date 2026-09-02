@@ -31,8 +31,9 @@ const nms = (faces: YuNetFace[]) => {
   return kept;
 };
 
-const loadSession = async (role: YuNetRunnerRole) => {
+const loadSession = async (role: YuNetRunnerRole, auditEnabled = true) => {
   if (sessionPromise) {
+    if (!auditEnabled) return sessionPromise;
     const path = YUNET_RUNTIME_CONFIG.configuredPath;
     const resolvedPath = YUNET_RUNTIME_CONFIG.resolvedPath;
     const exists = resolvedPath ? await fs.access(resolvedPath).then(() => true).catch(() => false) : false;
@@ -43,17 +44,17 @@ const loadSession = async (role: YuNetRunnerRole) => {
     const path = YUNET_RUNTIME_CONFIG.configuredPath;
     const resolvedPath = YUNET_RUNTIME_CONFIG.resolvedPath;
     const exists = resolvedPath ? await fs.access(resolvedPath).then(() => true).catch(() => false) : false;
-    const audit = await createYuNetRunnerAudit({ role, value: path, resolvedPath, resolvedPathExists: exists, outcome: path ? (exists ? "PATH_RESOLVED" : "MODEL_FILE_MISSING") : "ENV_ABSENT" });
+    const audit = auditEnabled ? await createYuNetRunnerAudit({ role, value: path, resolvedPath, resolvedPathExists: exists, outcome: path ? (exists ? "PATH_RESOLVED" : "MODEL_FILE_MISSING") : "ENV_ABSENT" }) : null;
     if (!path) throw technicalInferenceFailure("YuNet model artifact is not configured");
     let bytes: Buffer;
-    try { bytes = await fs.readFile(path); } catch { await updateYuNetRunnerAudit(audit._id, "MODEL_READ_FAILED"); throw technicalInferenceFailure(); }
+    try { bytes = await fs.readFile(path); } catch { if (audit) await updateYuNetRunnerAudit(audit._id, "MODEL_READ_FAILED"); throw technicalInferenceFailure(); }
     if (bytes.length !== YUNET_ARTIFACT.bytes || crypto.createHash("sha256").update(bytes).digest("hex") !== YUNET_ARTIFACT.sha256) throw technicalInferenceFailure("YuNet model artifact integrity validation failed");
     let session: ort.InferenceSession;
     try { session = await ort.InferenceSession.create(bytes, { executionProviders: ["cpu"] }); }
-    catch { await updateYuNetRunnerAudit(audit._id, "SESSION_LOAD_FAILED"); throw technicalInferenceFailure(); }
+    catch { if (audit) await updateYuNetRunnerAudit(audit._id, "SESSION_LOAD_FAILED"); throw technicalInferenceFailure(); }
     const metadata = session.inputMetadata[0];
     if (session.inputNames.length !== 1 || session.inputNames[0] !== "input" || !metadata?.isTensor || metadata.shape.join(",") !== "1,3,height,width") throw technicalInferenceFailure("YuNet model input contract is invalid");
-    await updateYuNetRunnerAudit(audit._id, "SESSION_LOAD_SUCCEEDED"); return session;
+    if (audit) await updateYuNetRunnerAudit(audit._id, "SESSION_LOAD_SUCCEEDED"); return session;
   })();
   try { return await sessionPromise; } catch (error) { sessionPromise = null; throw error; }
 };
@@ -61,7 +62,7 @@ const loadSession = async (role: YuNetRunnerRole) => {
 /** Test-only cache reset; production never changes the configured artifact at runtime. */
 export const resetYuNetRunnerForTests = () => { sessionPromise = null; };
 
-const runYuNetInference = async (encoded: Buffer, role: YuNetRunnerRole) => {
+const runYuNetInference = async (encoded: Buffer, role: YuNetRunnerRole, auditEnabled = true) => {
   const source = sharp(encoded, { limitInputPixels: YUNET_LIMITS.maxPixels, limitInputChannels: YUNET_LIMITS.maxChannels, pages: 1, animated: false, failOn: "warning" });
   const metadata = await source.metadata();
   if (!metadata.width || !metadata.height || metadata.width > YUNET_LIMITS.maxWidth || metadata.height > YUNET_LIMITS.maxHeight || metadata.width * metadata.height > YUNET_LIMITS.maxPixels || (metadata.pages && metadata.pages !== 1)) throw technicalInferenceFailure("Face evidence decode limits exceeded");
@@ -71,13 +72,13 @@ const runYuNetInference = async (encoded: Buffer, role: YuNetRunnerRole) => {
   if (raw.info.channels !== 3) throw technicalInferenceFailure("Face evidence decoded channel contract is invalid");
   const tensor = new Float32Array(raw.info.width * raw.info.height * 3);
   for (let pixel = 0; pixel < raw.info.width * raw.info.height; pixel += 1) { tensor[pixel] = raw.data[pixel * 3 + 2]; tensor[raw.info.width * raw.info.height + pixel] = raw.data[pixel * 3 + 1]; tensor[2 * raw.info.width * raw.info.height + pixel] = raw.data[pixel * 3]; }
-  const output = await (await loadSession(role)).run({ input: new ort.Tensor("float32", tensor, [1, 3, raw.info.height, raw.info.width]) });
+  const output = await (await loadSession(role, auditEnabled)).run({ input: new ort.Tensor("float32", tensor, [1, 3, raw.info.height, raw.info.width]) });
   return { output, raw, metadata };
 };
 
-export const detectYuNetFaces = async (encoded: Buffer, role: YuNetRunnerRole = "UNSPECIFIED"): Promise<YuNetDetection> => {
+export const detectYuNetFaces = async (encoded: Buffer, role: YuNetRunnerRole = "UNSPECIFIED", auditEnabled = true): Promise<YuNetDetection> => {
   try {
-    const { output, raw, metadata } = await runYuNetInference(encoded, role);
+    const { output, raw, metadata } = await runYuNetInference(encoded, role, auditEnabled);
     const faces = decodeYuNetOutput(output, raw.info.width, raw.info.height, metadata.width!, metadata.height!);
     return { width: metadata.width!, height: metadata.height!, decodedBytes: raw.data.length, faces };
   } catch (error) { if (error instanceof Error && error.name === "ProfileVerificationInferenceError") throw error; throw technicalInferenceFailure(); }

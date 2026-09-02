@@ -4,7 +4,7 @@ import { ProfileVerificationShadowIdentityAnalysis } from "./profileVerification
 
 export const SFACE_SHADOW_MINIMUM_USABLE_CAPTURES = 3;
 
-const median = (values: readonly number[]) => {
+export const medianSFaceSimilarity = (values: readonly number[]) => {
   const ordered = [...values].sort((left, right) => left - right);
   const middle = Math.floor(ordered.length / 2);
   return ordered.length % 2 === 0 ? (ordered[middle - 1] + ordered[middle]) / 2 : ordered[middle];
@@ -24,7 +24,7 @@ export const analyseSFaceShadowIdentity = (input: {
   if (similarities.length < SFACE_SHADOW_MINIMUM_USABLE_CAPTURES) {
     return { status: "COMPLETED", conclusion: "UNABLE_TO_DETERMINE", model, processedAt, reasonCode: "INSUFFICIENT_USABLE_CAPTURES", reason: "Fewer than three usable live captures produced embeddings." };
   }
-  const similarity = median(similarities);
+  const similarity = medianSFaceSimilarity(similarities);
   if (input.threshold === null) {
     return { status: "COMPLETED", conclusion: "UNABLE_TO_DETERMINE", similarity, model, processedAt, reasonCode: "THRESHOLD_NOT_CONFIGURED", reason: "No configured threshold is available for this shadow analysis." };
   }
