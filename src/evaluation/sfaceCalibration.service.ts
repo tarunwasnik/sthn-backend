@@ -4,7 +4,7 @@ import { CalibrationManifest, CalibrationSampleResult, ThresholdMetrics } from "
 const label = z.enum(["MATCH", "NON_MATCH"]);
 const localPath = z.string().min(1).max(512).refine((value) => !/^[a-z][a-z0-9+.-]*:\/\//i.test(value), "Calibration inputs must be local paths");
 const sample = z.object({ sampleId: z.string().min(1).max(80).regex(/^[A-Za-z0-9_-]+$/), expectedLabel: label, reference: localPath, captures: z.array(localPath).length(5), scenario: z.string().min(1).max(80).optional() });
-const manifest = z.object({ schemaVersion: z.literal("STHN_SFACE_CALIBRATION_MANIFEST_V1"), samples: z.array(sample).min(1).max(500) });
+const manifest = z.object({ schemaVersion: z.literal("STHN_SFACE_CALIBRATION_MANIFEST_V1"), samples: z.array(sample).min(1).max(1_000) });
 export const parseCalibrationManifest = (value: unknown): CalibrationManifest => {
   const parsed = manifest.parse(value);
   const ids = new Set<string>();

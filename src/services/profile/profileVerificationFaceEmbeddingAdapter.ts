@@ -38,7 +38,7 @@ export const SFACE_FACE_EMBEDDING_SPECIFICATION: FaceEmbeddingModelSpecification
   identifier: "OPENCV_ZOO_SFACE",
   expectedDimensions: 128,
   preprocessing: {
-    identifier: "OPENCV_ZOO_SFACE_RGB_TO_BGR_MEAN_127_5_SCALE_128_112X112_V1",
+    identifier: "OPENCV_ZOO_SFACE_RGB_0_255_NCHW_112X112_V1",
     outputWidth: 112,
     outputHeight: 112,
     targetLandmarks: {
@@ -85,21 +85,27 @@ const loadSFaceSession = async () => {
 /** Test-only cache reset; production keeps a bounded reusable ONNX session. */
 export const resetSFaceRunnerForTests = () => { sfaceSessionPromise = null; };
 
-/** Production SFace adapter. RGB aligned pixels are converted to the verified NCHW BGR model input in memory only. */
+/** Matches OpenCV FaceRecognizerSF::feature: aligned RGB pixels become NCHW float32 RGB, scale 1, zero mean. */
+export const createSFaceInputTensor = (alignedFace: Readonly<AlignedFaceRuntimeInput>) => {
+  if (alignedFace.width !== 112 || alignedFace.height !== 112 || alignedFace.channels !== 3
+    || alignedFace.preprocessingIdentifier !== SFACE_FACE_EMBEDDING_SPECIFICATION.preprocessing.identifier
+    || alignedFace.pixels.length !== 112 * 112 * 3) throw new ProfileVerificationInferenceError("SFace embedding input is invalid", "INVALID_INPUT", 400);
+  const plane = 112 * 112;
+  const tensor = new Float32Array(plane * 3);
+  for (let pixel = 0; pixel < plane; pixel += 1) {
+    tensor[pixel] = alignedFace.pixels[pixel * 3];
+    tensor[plane + pixel] = alignedFace.pixels[pixel * 3 + 1];
+    tensor[plane * 2 + pixel] = alignedFace.pixels[pixel * 3 + 2];
+  }
+  return tensor;
+};
+
+/** Production SFace adapter. RGB aligned pixels use the OpenCV Zoo NCHW, zero-mean, unit-scale input contract in memory only. */
 export const getProductionFaceEmbeddingAdapter = (): ProfileVerificationFaceEmbeddingAdapter => ({
   specification: SFACE_FACE_EMBEDDING_SPECIFICATION,
   async infer(alignedFace: Readonly<AlignedFaceRuntimeInput>) {
-    if (alignedFace.width !== 112 || alignedFace.height !== 112 || alignedFace.channels !== 3
-      || alignedFace.preprocessingIdentifier !== SFACE_FACE_EMBEDDING_SPECIFICATION.preprocessing.identifier
-      || alignedFace.pixels.length !== 112 * 112 * 3) throw new ProfileVerificationInferenceError("SFace embedding input is invalid", "INVALID_INPUT", 400);
     try {
-      const plane = 112 * 112;
-      const tensor = new Float32Array(plane * 3);
-      for (let pixel = 0; pixel < plane; pixel += 1) {
-        tensor[pixel] = (alignedFace.pixels[pixel * 3 + 2] - 127.5) / 128;
-        tensor[plane + pixel] = (alignedFace.pixels[pixel * 3 + 1] - 127.5) / 128;
-        tensor[plane * 2 + pixel] = (alignedFace.pixels[pixel * 3] - 127.5) / 128;
-      }
+      const tensor = createSFaceInputTensor(alignedFace);
       const output = await (await loadSFaceSession()).run({ data: new ort.Tensor("float32", tensor, [1, 3, 112, 112]) });
       const feature = output.fc1?.data;
       return validateEmbeddingVector(Array.from(feature as Float32Array), SFACE_FACE_EMBEDDING_SPECIFICATION.expectedDimensions);

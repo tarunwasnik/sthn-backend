@@ -4,6 +4,7 @@ import sharp from "sharp";
 
 import {
   createDeterministicTestFaceEmbeddingAdapter,
+  createSFaceInputTensor,
   getProductionFaceEmbeddingAdapter,
   SFACE_ARTIFACT,
   SFACE_FACE_EMBEDDING_SPECIFICATION,
@@ -121,6 +122,18 @@ test("the selected SFace artifact loads with its verified tensor contract and re
   assert.equal(first.length, 128);
   assert.ok(first.every(Number.isFinite));
   assert.equal(cosineSimilarity(first, second, 128), 1);
+});
+
+test("SFace input tensor matches OpenCV FaceRecognizerSF RGB, unit-scale, zero-mean NCHW preprocessing", () => {
+  const pixels = Buffer.alloc(112 * 112 * 3);
+  pixels[0] = 11; pixels[1] = 22; pixels[2] = 33;
+  pixels[3] = 44; pixels[4] = 55; pixels[5] = 66;
+  const tensor = createSFaceInputTensor({ pixels, width: 112, height: 112, channels: 3, preprocessingIdentifier: SFACE_FACE_EMBEDDING_SPECIFICATION.preprocessing.identifier });
+  const plane = 112 * 112;
+  assert.deepEqual(Array.from(tensor.slice(0, 2)), [11, 44]);
+  assert.deepEqual(Array.from(tensor.slice(plane, plane + 2)), [22, 55]);
+  assert.deepEqual(Array.from(tensor.slice(plane * 2, plane * 2 + 2)), [33, 66]);
+  assert.equal(tensor.constructor, Float32Array);
 });
 
 test("SFace shadow aggregation uses the median, three usable captures, and never fabricates a threshold conclusion", () => {

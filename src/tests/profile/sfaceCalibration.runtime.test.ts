@@ -10,6 +10,11 @@ test("calibration manifest is bounded, labelled, and rejects duplicate opaque sa
   assert.throws(() => parseCalibrationManifest({ schemaVersion: "STHN_SFACE_CALIBRATION_MANIFEST_V1", samples: [valid.samples[0], valid.samples[0]] }));
   assert.throws(() => parseCalibrationManifest({ schemaVersion: "STHN_SFACE_CALIBRATION_MANIFEST_V1", samples: [{ ...valid.samples[0], reference: "https://example.test/image.jpg" }] }));
 });
+test("calibration manifest accepts the documented 1,000-sample evaluation bound and rejects 1,001", () => {
+  const sample = (index: number) => ({ sampleId: `bound_${index}`, expectedLabel: "MATCH" as const, reference: "reference.png", captures: ["0.png", "1.png", "2.png", "3.png", "4.png"] });
+  for (const size of [500, 800, 1_000]) assert.equal(parseCalibrationManifest({ schemaVersion: "STHN_SFACE_CALIBRATION_MANIFEST_V1", samples: Array.from({ length: size }, (_, index) => sample(index)) }).samples.length, size);
+  assert.throws(() => parseCalibrationManifest({ schemaVersion: "STHN_SFACE_CALIBRATION_MANIFEST_V1", samples: Array.from({ length: 1_001 }, (_, index) => sample(index)) }));
+});
 test("calibration threshold metrics preserve Admin fallback semantics and exclude invalid samples", () => {
   const results = [
     { sampleId: "match", expectedLabel: "MATCH" as const, scenario: null, status: "COMPLETED" as const, usableCaptureCount: 5, captureSimilarities: [0.91], medianSimilarity: 0.91 },
