@@ -167,6 +167,28 @@ test("terminal or stale-version jobs become no-ops and cannot override decisions
   assert.equal((await ProfileVerificationJob.findById(staleJob._id))?.status, "COMPLETED");
 });
 
+test("reconciliation skips an active stale request whose profile was already resolved and completes only its nonterminal job", async () => {
+  const now = new Date("2030-01-01T12:30:00.000Z");
+  const { request, profile } = await makeProfile("resolved-stale", new Date(now.getTime() - 30 * 60 * 1000));
+  const { job } = await ensureProfileVerificationJob(request);
+  await UserProfile.updateOne({ _id: profile._id }, { $set: { profileStatus: "verified" } });
+
+  const first = await reconcileProfileVerificationJobs(now);
+  const second = await reconcileProfileVerificationJobs(new Date(now.getTime() + 60_000));
+  const staleRequest = await ProfileVerificationRequest.findById(request._id);
+  const staleJob = await ProfileVerificationJob.findById(job._id);
+  const resolvedProfile = await UserProfile.findById(profile._id);
+
+  assert.equal(first.timeoutEscalated, 0);
+  assert.equal(first.skipped, 1);
+  assert.equal(second.timeoutEscalated, 0);
+  assert.equal(second.skipped, 1);
+  assert.equal(staleRequest?.status, "PENDING");
+  assert.equal(staleRequest?.isActive, true);
+  assert.equal(staleJob?.status, "COMPLETED");
+  assert.equal(resolvedProfile?.profileStatus, "verified");
+});
+
 test("legacy active requests reconcile into one job and unresolved escalated work remains AI-decidable", async () => {
   const { request, profile } = await makeProfile("legacy");
   await reconcileProfileVerificationJobs(new Date());

@@ -12,6 +12,8 @@ import { ProfileVerificationInferenceError } from "../../errors/profile/ProfileV
 import { profileVerificationInferenceResultRepository } from "../../repositories/profileVerificationInferenceResult.repository";
 import { withYuNetRunnerAuditContext } from "./profileVerificationYuNetRuntimeAudit.service";
 import { applyProfileVerificationAiDecision } from "./profileVerificationAiDecision.service";
+import { UserProfile } from "../../models/userProfile.model";
+import { AppError } from "../../utils/AppError";
 
 const LEASE_MS = 5 * 60 * 1000;
 const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000];
@@ -25,6 +27,11 @@ const boundedError = (value: unknown, maximum: number) => (
 const isTerminalRequest = (request: ProfileVerificationRequestDocument | null) => (
   !request || !request.isActive || request.status === "APPROVED" || request.status === "REJECTED" || request.status === "EXPIRED"
 );
+
+const isReconciliationApplicableProfile = async (profileId: Types.ObjectId, submissionVersion: number) => {
+  const profile = await UserProfile.findById(profileId).select("profileStatus verificationSubmissionVersion").lean();
+  return profile?.profileStatus === "pending_verification" && profile.verificationSubmissionVersion === submissionVersion;
+};
 
 export const ensureProfileVerificationJob = async (
   request: ProfileVerificationRequestDocument,
@@ -145,6 +152,10 @@ export const reconcileProfileVerificationJobs = async (now = new Date()) => {
 
   const activeRequests = await profileVerificationRequestRepository.listActive();
   for (const request of activeRequests) {
+    if (!(await isReconciliationApplicableProfile(request.profileId, request.profileSubmissionVersion))) {
+      report.skipped += 1;
+      continue;
+    }
     const ensured = await ensureProfileVerificationJob(request);
     if (ensured.created) report.jobsCreated += 1;
     const timeoutReached = request.submittedAt.getTime() + PROCESSING_TIMEOUT_MS <= now.getTime();
@@ -156,12 +167,22 @@ export const reconcileProfileVerificationJobs = async (now = new Date()) => {
       && Boolean(await profileVerificationInferenceResultRepository.findAnyByRequestId(request._id));
     if (timeoutReached && retentionValid && !hasCompletedInference && (request.status === "PENDING" || request.status === "PROCESSING")) {
       const { escalateProfileVerificationRequest } = await import("./profileVerificationRequest.service");
-      const escalation = await escalateProfileVerificationRequest({
-        profileId: String(request.profileId),
-        reasonCode: "PROCESSING_TIMEOUT",
-        reason: "Verification processing remained unresolved at the submission deadline.",
-        now,
-      });
+      let escalation;
+      try {
+        escalation = await escalateProfileVerificationRequest({
+          profileId: String(request.profileId),
+          reasonCode: "PROCESSING_TIMEOUT",
+          reason: "Verification processing remained unresolved at the submission deadline.",
+          now,
+        });
+      } catch (error) {
+        // A decision can win after candidate selection. Revalidate only that
+        // resolved/stale collision; all other 409s and unexpected failures surface.
+        if (!(error instanceof AppError) || error.statusCode !== 409
+          || await isReconciliationApplicableProfile(request.profileId, request.profileSubmissionVersion)) throw error;
+        report.skipped += 1;
+        continue;
+      }
       if (!escalation.replayed) report.timeoutEscalated += 1;
     }
   }
@@ -169,7 +190,8 @@ export const reconcileProfileVerificationJobs = async (now = new Date()) => {
   const nonTerminalJobs = await profileVerificationJobRepository.listNonTerminal();
   for (const job of nonTerminalJobs) {
     const request = await profileVerificationRequestRepository.findById(job.verificationRequestId);
-    if (isTerminalRequest(request) || request!.profileSubmissionVersion !== job.profileSubmissionVersion) {
+    if (isTerminalRequest(request) || request!.profileSubmissionVersion !== job.profileSubmissionVersion
+      || !(await isReconciliationApplicableProfile(job.profileId, job.profileSubmissionVersion))) {
       const completed = await profileVerificationJobRepository.completeIfNotTerminal({ jobId: job._id, now });
       if (completed) report.terminalJobsCompleted += 1;
     }

@@ -28,6 +28,8 @@ import {
 } from "../financial/phase7h/helpers/database";
 
 process.env.NODE_ENV = "test";
+
+const aiApprovalSnapshot = () => ({ source: "AI" as const, model: { identifier: "OPENCV_ZOO_SFACE", version: "face_recognition_sface_2021dec" }, similarity: 0.99, threshold: 0.9, decidedAt: new Date() });
 const validReferenceDetection = { width: 100, height: 100, decodedBytes: 30000, faces: [{ x: 30, y: 30, width: 40, height: 40, confidence: 0.9, landmarks: { rightEye: { x: 40, y: 42 }, leftEye: { x: 55, y: 42 }, noseTip: { x: 48, y: 50 }, rightMouthCorner: { x: 42, y: 60 }, leftMouthCorner: { x: 54, y: 60 } } }] } as const;
 
 const invoke = (
@@ -175,18 +177,18 @@ test("admin approval is terminal, replay-safe, and cannot be overwritten by futu
 test("an AI terminal decision cannot be overwritten by a later admin decision", async () => {
   const { profile } = await submitProfile("verification-ai-first@test.local", "verification-ai-first");
   const admin = await User.create({ email: "verification-ai-first-admin@test.local", password: "test-password", role: "admin", status: "active", governanceState: "ACTIVE" });
-  const approved = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "AI" });
+  const approved = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: aiApprovalSnapshot() });
   assert.equal(approved.request.decisionAuthority, "AI");
   await assert.rejects(decideProfileVerificationRequest({ profileId: String(profile._id), decision: "REJECT", authority: "ADMIN", decidedBy: String(admin._id), reason: "stale manual decision" }));
   assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "verified");
 });
 
-test("AI and Admin can decide an unresolved Admin Review request, and terminal requests leave both queues", async () => {
+test("AI approval and Admin decisions resolve an unresolved Admin Review request, and terminal requests leave both queues", async () => {
   const { profile } = await submitProfile("verification-review-ai@test.local", "verification-review-ai");
   await escalateProfileVerificationRequest({ profileId: String(profile._id), reasonCode: "MODEL_FAILURE" });
-  const decided = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "REJECT", authority: "AI", reason: "Verification could not be completed." });
-  assert.equal(decided.request.status, "REJECTED");
-  assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "rejected");
+  const decided = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: aiApprovalSnapshot() });
+  assert.equal(decided.request.status, "APPROVED");
+  assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "verified");
   const [aiQueue, adminReviewQueue] = await Promise.all([
     listProfileVerificationQueue("AI"),
     listProfileVerificationQueue("ADMIN_REVIEW"),
@@ -214,7 +216,7 @@ test("first terminal decision still wins after escalation and same-decision repl
 
   const { profile: aiProfile } = await submitProfile("verification-review-ai-race@test.local", "verification-review-ai-race");
   await escalateProfileVerificationRequest({ profileId: String(aiProfile._id), reasonCode: "FACE_MATCH_UNCERTAIN" });
-  await decideProfileVerificationRequest({ profileId: String(aiProfile._id), decision: "APPROVE", authority: "AI" });
+  await decideProfileVerificationRequest({ profileId: String(aiProfile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: aiApprovalSnapshot() });
   await assert.rejects(decideProfileVerificationRequest({ profileId: String(aiProfile._id), decision: "REJECT", authority: "ADMIN", decidedBy: String(admin._id), reason: "stale manual result" }));
   assert.equal((await UserProfile.findById(aiProfile._id))?.profileStatus, "verified");
 });
