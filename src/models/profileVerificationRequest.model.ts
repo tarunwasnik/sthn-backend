@@ -10,6 +10,20 @@ export type ProfileVerificationRequestStatus =
 
 export type ProfileVerificationDecision = "APPROVE" | "REJECT";
 export type ProfileVerificationDecisionAuthority = "ADMIN" | "AI";
+export type ProfileVerificationPolicyKey = "LEGACY_AVATAR_ONLY" | "GATED_MULTI_MEDIA";
+export interface ProfileVerificationPolicy { key: ProfileVerificationPolicyKey; version: string; }
+export type ProfileVerificationSubmittedMediaRole = "AVATAR" | "COVER" | "PROFILE_PHOTO";
+export interface ProfileVerificationSubmittedMediaItem {
+  role: ProfileVerificationSubmittedMediaRole;
+  profilePhotoIndex?: number;
+  sourceReference: string;
+  fingerprint: string;
+}
+export interface ProfileVerificationSubmittedMediaSnapshot {
+  avatar: ProfileVerificationSubmittedMediaItem;
+  cover: ProfileVerificationSubmittedMediaItem;
+  profilePhotos: ProfileVerificationSubmittedMediaItem[];
+}
 export type ProfileVerificationAdminReviewReasonCode =
   | "FACE_MATCH_UNCERTAIN"
   | "LIVENESS_UNCERTAIN"
@@ -41,9 +55,35 @@ export interface ProfileVerificationRequestDocument extends Document {
   decidedAt?: Date;
   decidedBy?: mongoose.Types.ObjectId;
   aiDecisionSnapshot?: ProfileVerificationAiDecisionSnapshot;
+  /** Immutable selection for new requests; absent historical requests are legacy. */
+  verificationPolicy?: ProfileVerificationPolicy;
+  /** Immutable media authority captured with this exact submission; absent only for legacy requests. */
+  submittedMedia?: ProfileVerificationSubmittedMediaSnapshot;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const submittedMediaItemSchema = new Schema<ProfileVerificationSubmittedMediaItem>({
+  role: { type: String, required: true, immutable: true, enum: ["AVATAR", "COVER", "PROFILE_PHOTO"] },
+  profilePhotoIndex: { type: Number, immutable: true, min: 0, max: 5 },
+  sourceReference: { type: String, required: true, immutable: true, trim: true, minlength: 1, maxlength: 2048 },
+  fingerprint: { type: String, required: true, immutable: true, lowercase: true, match: /^[a-f0-9]{64}$/ },
+}, { _id: false, strict: "throw" });
+
+const submittedMediaSnapshotSchema = new Schema<ProfileVerificationSubmittedMediaSnapshot>({
+  avatar: { type: submittedMediaItemSchema, required: true, immutable: true },
+  cover: { type: submittedMediaItemSchema, required: true, immutable: true },
+  profilePhotos: { type: [submittedMediaItemSchema], required: true, immutable: true, validate: {
+    validator: (value: ProfileVerificationSubmittedMediaItem[]) => Array.isArray(value)
+      && value.length >= 2 && value.length <= 6
+      && value.every((item, index) => item.role === "PROFILE_PHOTO" && item.profilePhotoIndex === index),
+    message: "Submitted profile media must preserve the ordered gallery authority",
+  } },
+}, { _id: false, strict: "throw" });
+const verificationPolicySchema = new Schema<ProfileVerificationPolicy>({
+  key: { type: String, required: true, immutable: true, enum: ["LEGACY_AVATAR_ONLY", "GATED_MULTI_MEDIA"] },
+  version: { type: String, required: true, immutable: true, trim: true, maxlength: 40 },
+}, { _id: false, strict: "throw" });
 
 const ProfileVerificationRequestSchema = new Schema<ProfileVerificationRequestDocument>(
   {
@@ -66,6 +106,8 @@ const ProfileVerificationRequestSchema = new Schema<ProfileVerificationRequestDo
     decidedAt: { type: Date },
     decidedBy: { type: Schema.Types.ObjectId, ref: "User" },
     aiDecisionSnapshot: { type: new Schema({ source: { type: String, required: true, enum: ["AI"] }, model: { identifier: { type: String, required: true, trim: true, maxlength: 120 }, version: { type: String, required: true, trim: true, maxlength: 120 } }, similarity: { type: Number, required: true, min: -1, max: 1 }, threshold: { type: Number, required: true, min: -1, max: 1 }, decidedAt: { type: Date, required: true } }, { _id: false, strict: "throw" }), default: undefined },
+    verificationPolicy: { type: verificationPolicySchema, required: false, default: undefined, immutable: true },
+    submittedMedia: { type: submittedMediaSnapshotSchema, required: false, default: undefined, immutable: true },
   },
   { timestamps: true },
 );

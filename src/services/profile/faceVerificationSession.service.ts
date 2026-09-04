@@ -9,11 +9,13 @@ import { faceVerificationEvidenceRepository } from "../../repositories/faceVerif
 import { storeFaceVerificationEvidence } from "./faceVerificationEvidenceStorage.service";
 import { FACE_VERIFICATION_SESSION_TTL_MS, FACE_VERIFICATION_SHORT_CLEANUP_MS } from "./faceVerification.constants";
 import { requireBiometricReferenceAvatar } from "./profileVerificationReferenceAvatarValidation.service";
+import { fingerprintProfileMediaReference } from "./profileVerificationSubmittedMedia.service";
 
 const challengePool: FaceVerificationChallenge[] = ["NEUTRAL", "TURN_LEFT", "TURN_RIGHT", "LOOK_UP", "LOOK_DOWN", "BLINK"];
 const duplicateKey = (error: unknown) => typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === 11000;
 const cleanAt = () => new Date(Date.now() + FACE_VERIFICATION_SHORT_CLEANUP_MS);
-export const fingerprintAvatarReference = (avatar: string) => crypto.createHash("sha256").update(avatar).digest("hex");
+/** Compatibility alias for the avatar authority used by existing face sessions. */
+export const fingerprintAvatarReference = (avatar: string) => fingerprintProfileMediaReference(avatar);
 
 const challengeSequence = (): FaceVerificationChallenge[] => {
   const remaining = [...challengePool]; const selected: FaceVerificationChallenge[] = [];

@@ -19,6 +19,8 @@ import { faceVerificationEvidenceRepository } from "../../repositories/faceVerif
 import { profileVerificationJobRepository } from "../../repositories/profileVerificationJob.repository";
 import { profileVerificationInferenceResultRepository } from "../../repositories/profileVerificationInferenceResult.repository";
 import { deriveProfileVerificationLifecycleStage } from "./profileVerificationLifecycle.service";
+import { createProfileVerificationSubmittedMediaSnapshot } from "./profileVerificationSubmittedMedia.service";
+import { selectNewProfileVerificationPolicy } from "./profileVerificationPolicy.service";
 
 const adminReviewReasonCodes = new Set<ProfileVerificationAdminReviewReasonCode>([
   "FACE_MATCH_UNCERTAIN", "LIVENESS_UNCERTAIN", "TEXT_MODERATION_UNCERTAIN",
@@ -37,6 +39,7 @@ const requestRetentionDeadline = (request: Pick<ProfileVerificationRequestDocume
 export const ensureActiveProfileVerificationRequest = async (
   profile: UserProfileDocument,
   session?: mongoose.ClientSession,
+  options: { captureSubmittedMedia?: boolean } = {},
 ): Promise<{ request: ProfileVerificationRequestDocument; created: boolean }> => {
   const existing = await profileVerificationRequestRepository.findActiveByProfileId(profile._id, session);
   if (existing) return { request: existing, created: false };
@@ -47,6 +50,7 @@ export const ensureActiveProfileVerificationRequest = async (
     await profile.save(session ? { session } : undefined);
   }
   const submissionVersion = profile.verificationSubmissionVersion;
+  const verificationPolicy = selectNewProfileVerificationPolicy();
   try {
     const request = await profileVerificationRequestRepository.create({
       verificationReference: verificationReference(),
@@ -55,6 +59,8 @@ export const ensureActiveProfileVerificationRequest = async (
       attemptNumber,
       profileSubmissionVersion: submissionVersion,
       submittedAt: profile.verificationSubmittedAt ?? new Date(),
+      ...(options.captureSubmittedMedia === false ? {} : { submittedMedia: createProfileVerificationSubmittedMediaSnapshot(profile, verificationPolicy) }),
+      verificationPolicy,
     }, session);
     return { request, created: true };
   } catch (error) {
@@ -70,7 +76,8 @@ export const ensureLegacyPendingProfileVerificationRequest = async (
   session?: mongoose.ClientSession,
 ) => {
   if (profile.profileStatus !== "pending_verification") return null;
-  return ensureActiveProfileVerificationRequest(profile, session);
+  // Historical pending profiles have no trustworthy immutable media state. Do not fabricate one.
+  return ensureActiveProfileVerificationRequest(profile, session, { captureSubmittedMedia: false });
 };
 
 export const listProfileVerificationQueue = async (

@@ -14,6 +14,7 @@ import { withYuNetRunnerAuditContext } from "./profileVerificationYuNetRuntimeAu
 import { applyProfileVerificationAiDecision } from "./profileVerificationAiDecision.service";
 import { UserProfile } from "../../models/userProfile.model";
 import { AppError } from "../../utils/AppError";
+import { ProfileVerificationInferenceAdapter } from "./profileVerificationInferenceAdapter";
 
 const LEASE_MS = 5 * 60 * 1000;
 const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000];
@@ -119,14 +120,14 @@ export const recordProfileVerificationJobFailure = async (input: {
 };
 
 /** Executes the already-claimed PROFILE_VERIFICATION_PROCESSING job; no parallel SFace job exists. */
-export const processNextProfileVerificationJob = async (input: { workerId: string; now?: Date }) => {
+export const processNextProfileVerificationJob = async (input: { workerId: string; now?: Date; adapterFactory?: () => ProfileVerificationInferenceAdapter }) => {
   const now = input.now ?? new Date();
   const claim = await claimProfileVerificationJob({ workerId: input.workerId, now });
   if (!claim) return null;
   if (!claim.actionable) return { ...claim, result: null, completed: true };
   try {
     const outcome = await withYuNetRunnerAuditContext({ verificationReference: claim.request!.verificationReference, jobReference: claim.job.jobReference, submissionVersion: claim.job.profileSubmissionVersion, attemptCount: claim.job.attemptCount }, () => finalizeProfileVerificationInference({
-      verificationRequestId: String(claim.job.verificationRequestId), adapter: createSFaceProfileVerificationAdapter(),
+      verificationRequestId: String(claim.job.verificationRequestId), adapter: input.adapterFactory?.() ?? createSFaceProfileVerificationAdapter(),
     }));
     if (outcome.result) await applyProfileVerificationAiDecision({ request: claim.request!, result: outcome.result });
     const completed = await profileVerificationJobRepository.completeIfNotTerminal({ jobId: claim.job._id, now: new Date() });

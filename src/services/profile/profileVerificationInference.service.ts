@@ -28,7 +28,9 @@ import {
   ProfileVerificationInferencePipelineManifest,
   ProfileVerificationInferenceOutput,
   ProfileVerificationShadowIdentityAnalysis,
+  ProfileVerificationGatedPolicyAnalysis,
 } from "./profileVerificationInference.types";
+import { resolveProfileVerificationPolicy } from "./profileVerificationPolicy.service";
 
 const sha256 = (value: string) => crypto.createHash("sha256").update(value).digest("hex");
 const asCanonicalJson = (value: unknown) => JSON.stringify(value);
@@ -138,6 +140,65 @@ const validateShadowIdentityAnalysis = (analysis: ProfileVerificationShadowIdent
   };
 };
 
+const validScore = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= -1 && value <= 1;
+const validCount = (value: unknown, maximum: number) => Number.isInteger(value) && Number(value) >= 0 && Number(value) <= maximum;
+const validateProfileMediaShadowAnalysis = (analysis: ProfileVerificationInferenceOutput["profileMediaShadowAnalysis"] | undefined) => {
+  if (!analysis) return undefined;
+  const summary = analysis.summary; const live = analysis.live;
+  const validStats = (value: { comparisonCount: number; minimumSimilarity: number; maximumSimilarity: number; meanSimilarity: number; medianSimilarity: number }) => validCount(value.comparisonCount, 5) && validScore(value.minimumSimilarity) && validScore(value.maximumSimilarity) && validScore(value.meanSimilarity) && validScore(value.medianSimilarity);
+  if (analysis.status !== "COMPLETED" || !(analysis.processedAt instanceof Date)
+    || !isNonEmptyString(analysis.model?.identifier, 120) || !isNonEmptyString(analysis.model?.version, 120)
+    || !summary || ![summary.submittedMediaCount, summary.processedMediaCount, summary.mediaWithNoFaceCount, summary.mediaWithUsableFacesCount, summary.multiFaceMediaCount, summary.failedMediaCount].every((value) => validCount(value, 8))
+    || !live || !validCount(live.usableCaptureCount, 5) || !validCount(live.pairwiseComparisonCount, 10)
+    || ![live.minimumSimilarity, live.maximumSimilarity, live.meanSimilarity, live.medianSimilarity].every((value) => value === undefined || validScore(value))
+    || !Array.isArray(analysis.media) || analysis.media.length > 8
+    || !analysis.media.every((media) => ["AVATAR", "COVER", "PROFILE_PHOTO"].includes(media.role)
+      && (media.role === "PROFILE_PHOTO" ? validCount(media.profilePhotoIndex, 5) : media.profilePhotoIndex === undefined)
+      && ["NO_FACE", "NO_USABLE_FACE", "FACE_CANDIDATES_AVAILABLE", "MEDIA_READ_FAILED"].includes(media.status)
+      && validCount(media.detectedFaceCount, 50) && validCount(media.usableFaceCount, 50) && validCount(media.candidateCount, 50)
+      && (!media.bestCandidate || validCount(media.bestCandidate.candidateIndex, 49) && validStats(media.bestCandidate)
+        && (media.secondBestMedianSimilarity === undefined || validScore(media.secondBestMedianSimilarity))
+        && (media.bestVsSecondMargin === undefined || validScore(media.bestVsSecondMargin))))
+  ) throw new ProfileVerificationInferenceError("Profile-media shadow analysis is invalid", "FINDINGS_INVALID", 400);
+  return analysis;
+};
+
+const validateGatedPolicyAnalysis = (analysis: ProfileVerificationGatedPolicyAnalysis | undefined, policy: ProfileVerificationInferenceInputDescriptor["verificationPolicy"]) => {
+  if (!analysis) return undefined;
+  if (policy.key !== "GATED_MULTI_MEDIA" || policy.version !== "V1"
+    || analysis.policy.key !== policy.key || analysis.policy.version !== policy.version
+    || !["PASS", "LIVE_CAPTURE_TECHNICAL_FAILURE", "LIVE_ANCHOR_INCOHERENT"].includes(analysis.gate1?.outcome)
+    || !validCount(analysis.gate1.usableCaptureCount, 5) || !validScore(analysis.gate1.threshold)
+    || analysis.gate1.threshold !== 0.28 || analysis.gate1.policyVersion !== "V1"
+    || (analysis.gate1.weakestPeerMedian !== undefined && !validScore(analysis.gate1.weakestPeerMedian))) {
+    throw new ProfileVerificationInferenceError("Gated policy analysis is invalid", "FINDINGS_INVALID", 400);
+  }
+  if (analysis.gate1.outcome !== "PASS" && (analysis.gate2 || analysis.gate3)) {
+    throw new ProfileVerificationInferenceError("Gated policy prerequisite order is invalid", "FINDINGS_INVALID", 400);
+  }
+  if (analysis.gate1.outcome === "PASS" && !analysis.gate2) {
+    throw new ProfileVerificationInferenceError("Gated policy prerequisite order is invalid", "FINDINGS_INVALID", 400);
+  }
+  if (analysis.gate3 && analysis.gate2?.outcome !== "READY_FOR_GATE3") {
+    throw new ProfileVerificationInferenceError("Gated policy prerequisite order is invalid", "FINDINGS_INVALID", 400);
+  }
+  if (analysis.gate2?.outcome === "READY_FOR_GATE3" && !analysis.gate3) {
+    throw new ProfileVerificationInferenceError("Gated policy prerequisite order is invalid", "FINDINGS_INVALID", 400);
+  }
+  if (analysis.gate2 && (!["READY_FOR_GATE3", "AVATAR_INVALID", "MEDIA_SNAPSHOT_UNAVAILABLE", "LIVE_EVIDENCE_UNAVAILABLE"].includes(analysis.gate2.outcome)
+    || !Object.values(analysis.gate2.optionalMediaSummary).every((value) => validCount(value, 7)))) {
+    throw new ProfileVerificationInferenceError("Gated policy analysis is invalid", "FINDINGS_INVALID", 400);
+  }
+  if (analysis.gate3 && (!["LIKELY_MATCH", "LIKELY_MISMATCH", "UNABLE_TO_DETERMINE"].includes(analysis.gate3.conclusion)
+    || !["PERSON_A_SUPPORTED", "PERSON_A_NOT_ESTABLISHED", "TECHNICAL_UNAVAILABLE"].includes(analysis.gate3.avatarMembership)
+    || analysis.gate3.membershipThreshold !== .36 || analysis.gate3.multiFaceMinMargin !== .04
+    || ![analysis.gate3.optionalPersonASupportCount, analysis.gate3.optionalAmbiguousMediaCount, analysis.gate3.optionalTechnicalFailureCount].every((value) => validCount(value, 7))
+    || analysis.gate3.avatarMedianSimilarity !== undefined && !validScore(analysis.gate3.avatarMedianSimilarity))) {
+    throw new ProfileVerificationInferenceError("Gated policy analysis is invalid", "FINDINGS_INVALID", 400);
+  }
+  return analysis;
+};
+
 const inferenceReference = () => `PROFILE_INFERENCE_${ulid()}`;
 
 const freezeDescriptor = (descriptor: ProfileVerificationInferenceInputDescriptor): Readonly<ProfileVerificationInferenceInputDescriptor> => Object.freeze({
@@ -205,6 +266,7 @@ export const finalizeProfileVerificationInference = async (input: {
     throw new ProfileVerificationInferenceError("Face evidence is incomplete or inconsistent", "EVIDENCE_INCOMPLETE", 409);
   }
   const manifest = normalizePipelineManifest(input.adapter.pipelineManifest);
+  const verificationPolicy = resolveProfileVerificationPolicy(request);
   const evidenceSetFingerprint = deriveFaceEvidenceSetFingerprint({
     verificationRequestId: request._id,
     sessionId: session._id,
@@ -218,6 +280,7 @@ export const finalizeProfileVerificationInference = async (input: {
     faceVerificationSessionId: String(session._id),
     evidenceSetFingerprint,
     pipelineManifestFingerprint,
+    verificationPolicy,
   }));
   const existing = await repository.findByRunFingerprint(inferenceRunFingerprint);
   if (existing) return { result: existing, replayed: true, noOp: null };
@@ -226,11 +289,15 @@ export const finalizeProfileVerificationInference = async (input: {
     verificationRequestId: String(request._id), profileId: String(request.profileId), userId: String(request.userId),
     profileSubmissionVersion: request.profileSubmissionVersion, faceVerificationSessionId: String(session._id), avatarFingerprint: session.avatarFingerprint, evidenceSetFingerprint,
     pipelineManifest: manifest, captures: captures.map(({ challengeIndex, challenge, evidenceReference }) => ({ challengeIndex, challenge, evidenceReference })),
+    verificationPolicy,
+    ...(request.submittedMedia ? { submittedMedia: request.submittedMedia } : {}),
   };
   const adapterOutput = await input.adapter.infer(freezeDescriptor(descriptor));
   const output = ("findings" in adapterOutput ? adapterOutput : { findings: adapterOutput }) as ProfileVerificationInferenceOutput;
   const findings = validateFindings(output.findings, descriptor);
   const shadowIdentityAnalysis = validateShadowIdentityAnalysis(output.shadowIdentityAnalysis);
+  const profileMediaShadowAnalysis = validateProfileMediaShadowAnalysis(output.profileMediaShadowAnalysis);
+  const gatedPolicyAnalysis = validateGatedPolicyAnalysis(output.gatedPolicyAnalysis, descriptor.verificationPolicy);
   const current = await profileVerificationRequestRepository.findById(request._id);
   if (!current || !current.isActive || current.status === "EXPIRED" || current.profileSubmissionVersion !== request.profileSubmissionVersion
     || new Date(current.submittedAt.getTime() + FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS).getTime() <= Date.now()) {
@@ -241,7 +308,7 @@ export const finalizeProfileVerificationInference = async (input: {
       inferenceReference: inferenceReference(), inferenceRunFingerprint, verificationRequestId: request._id,
       profileId: request.profileId, userId: request.userId, profileSubmissionVersion: request.profileSubmissionVersion,
       faceVerificationSessionId: session._id, evidenceSetFingerprint, pipelineManifestFingerprint,
-      pipeline: manifest, findings, ...(shadowIdentityAnalysis ? { shadowIdentityAnalysis } : {}), retentionDeadline,
+      pipeline: manifest, findings, ...(shadowIdentityAnalysis ? { shadowIdentityAnalysis } : {}), ...(profileMediaShadowAnalysis ? { profileMediaShadowAnalysis } : {}), ...(gatedPolicyAnalysis ? { gatedPolicyAnalysis } : {}), retentionDeadline,
     });
     return { result, replayed: false, noOp: null };
   } catch (error) {

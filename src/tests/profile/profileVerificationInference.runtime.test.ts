@@ -117,6 +117,12 @@ test("shadow identity analysis is optional, but validates its bounded contract w
       model: { identifier: "TEST_SHADOW_MODEL", version: "1" },
       processedAt: new Date(),
     },
+    profileMediaShadowAnalysis: {
+      status: "COMPLETED", processedAt: new Date(), model: { identifier: "OPENCV_ZOO_SFACE", version: "face_recognition_sface_2021dec" },
+      summary: { submittedMediaCount: 4, processedMediaCount: 4, mediaWithNoFaceCount: 1, mediaWithUsableFacesCount: 2, multiFaceMediaCount: 1, failedMediaCount: 0 },
+      live: { usableCaptureCount: 5, pairwiseComparisonCount: 10, minimumSimilarity: 0.8, maximumSimilarity: 1, meanSimilarity: 0.9, medianSimilarity: 0.9 },
+      media: [{ role: "AVATAR", status: "FACE_CANDIDATES_AVAILABLE", detectedFaceCount: 1, usableFaceCount: 1, candidateCount: 1, bestCandidate: { candidateIndex: 0, comparisonCount: 5, minimumSimilarity: 0.8, maximumSimilarity: 1, meanSimilarity: 0.9, medianSimilarity: 0.9 } }],
+    },
   });
   await validShadowResult.validate();
 

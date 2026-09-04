@@ -10,6 +10,8 @@ import { extractPublicId } from "../utils/extractPublicId";
 import { calculateAge } from "../utils/calculateAge";
 import { migrateLegacyProfileMobileContact } from "../services/profile/legacyMobileContactMigration.service";
 import { ensureActiveProfileVerificationRequest } from "../services/profile/profileVerificationRequest.service";
+import { selectNewProfileVerificationPolicy } from "../services/profile/profileVerificationPolicy.service";
+import { requireProfilePhotoCountForVerificationPolicy } from "../services/profile/profileVerificationSubmittedMedia.service";
 import { ensureProfileVerificationJob } from "../services/profile/profileVerificationJob.service";
 import { bindCompletedFaceSessionToVerificationRequest, invalidateFaceSessionsForAvatar, requireCompletedFaceSessionForInitialSubmission, requireCompletedFaceSessionForRejectedResubmission } from "../services/profile/faceVerificationSession.service";
 import { profileVerificationRequestRepository } from "../repositories/profileVerificationRequest.repository";
@@ -97,6 +99,7 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
   /* ================= VALIDATION ================= */
 
   const validatedProfilePhotos = validateProfilePhotos(profilePhotos);
+  requireProfilePhotoCountForVerificationPolicy(validatedProfilePhotos, selectNewProfileVerificationPolicy());
 
   const validatedAvatar = requireText(avatar, "avatar", 2048);
 
@@ -374,6 +377,8 @@ export const updateMyProfile = catchAsync(
     if (profile.profileStatus === "rejected") {
       const resubmissionAvatar = avatar === undefined ? profile.avatar : requireText(avatar, "avatar", 2048);
       await requireCompletedFaceSessionForRejectedResubmission({ userId, avatar: resubmissionAvatar });
+      const nextProfilePhotos = profilePhotos === undefined ? profile.profilePhotos : validateProfilePhotos(profilePhotos);
+      requireProfilePhotoCountForVerificationPolicy(nextProfilePhotos, selectNewProfileVerificationPolicy());
     }
 
     /* 🔥 CLOUDINARY CLEANUP */

@@ -42,7 +42,7 @@ export class ProfileVerificationRequestRepository {
       .exec();
   }
 
-  async create(input: Pick<ProfileVerificationRequestDocument, "verificationReference" | "profileId" | "userId" | "attemptNumber" | "profileSubmissionVersion" | "submittedAt">, session?: ClientSession) {
+  async create(input: Pick<ProfileVerificationRequestDocument, "verificationReference" | "profileId" | "userId" | "attemptNumber" | "profileSubmissionVersion" | "submittedAt" | "submittedMedia" | "verificationPolicy">, session?: ClientSession) {
     const [request] = await ProfileVerificationRequest.create([{ ...input, status: "PENDING", isActive: true }], session ? { session } : undefined);
     return request;
   }

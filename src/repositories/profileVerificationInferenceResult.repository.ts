@@ -14,6 +14,8 @@ export type CreateProfileVerificationInferenceResultInput = Pick<
   | "pipeline"
   | "findings"
   | "shadowIdentityAnalysis"
+  | "profileMediaShadowAnalysis"
+  | "gatedPolicyAnalysis"
   | "retentionDeadline"
 >;
 
