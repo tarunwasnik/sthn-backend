@@ -17,5 +17,6 @@ export const errorHandler = (
   res.status(statusCode).json({
     success: false,
     message: err.message || "Server error",
+    ...(typeof err.code === "string" ? { code: err.code } : {}),
   });
 };

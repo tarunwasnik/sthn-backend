@@ -4,6 +4,7 @@ import { detectYuNetFaces } from "./profileVerificationYuNetRunner";
 import { YuNetDetection } from "./profileVerificationYuNet.types";
 
 export type BiometricReferenceAvatarValidation = { valid: true } | { valid: false; reason: "NO_FACE" | "MULTIPLE_FACES" | "INVALID_GEOMETRY" | "INVALID_LANDMARKS" };
+export type ReferenceAvatarPreflightReasonCode = "REFERENCE_AVATAR_NO_FACE" | "REFERENCE_AVATAR_MULTIPLE_FACES" | "REFERENCE_AVATAR_INVALID_GEOMETRY" | "REFERENCE_AVATAR_INVALID_LANDMARKS";
 type Reader = typeof readBoundProfileVerificationAvatar;
 type Detector = (bytes: Buffer) => Promise<YuNetDetection>;
 let testDependencies: { reader?: Reader; detector?: Detector } | undefined;
@@ -27,6 +28,15 @@ export const validateBiometricReferenceDetection = (detection: YuNetDetection): 
   return validLandmarks(face) ? { valid: true } : { valid: false, reason: "INVALID_LANDMARKS" };
 };
 
+const preflightReasonCodes: Record<Exclude<BiometricReferenceAvatarValidation, { valid: true }>['reason'], ReferenceAvatarPreflightReasonCode> = {
+  NO_FACE: "REFERENCE_AVATAR_NO_FACE",
+  MULTIPLE_FACES: "REFERENCE_AVATAR_MULTIPLE_FACES",
+  INVALID_GEOMETRY: "REFERENCE_AVATAR_INVALID_GEOMETRY",
+  INVALID_LANDMARKS: "REFERENCE_AVATAR_INVALID_LANDMARKS",
+};
+
+export const referenceAvatarPreflightReasonCode = (reason: Exclude<BiometricReferenceAvatarValidation, { valid: true }>['reason']): ReferenceAvatarPreflightReasonCode => preflightReasonCodes[reason];
+
 /** Runtime-only reference gate: it retains no image, score, geometry, or detector output. */
 export const validateBiometricReferenceAvatar = async (input: { profileId: string; userId: string; avatarFingerprint: string }, dependencies: { reader?: Reader; detector?: Detector } = {}): Promise<BiometricReferenceAvatarValidation> => {
   const selected = { ...testDependencies, ...dependencies };
@@ -37,5 +47,11 @@ export const validateBiometricReferenceAvatar = async (input: { profileId: strin
 export const requireBiometricReferenceAvatar = async (input: { profileId: string; userId: string; avatarFingerprint: string }) => {
   const result = await validateBiometricReferenceAvatar(input);
   if (result.valid) return;
-  throw new AppError(result.reason === "MULTIPLE_FACES" ? "This profile photo cannot be used for face verification. Choose a clear photo containing only you." : "This profile photo cannot be used for face verification. Choose a clear photo showing only your face.", 409);
+  throw new AppError(
+    result.reason === "MULTIPLE_FACES"
+      ? "This profile photo cannot be used for face verification. Choose a clear photo containing only you."
+      : "This profile photo cannot be used for face verification. Choose a clear photo showing only your face.",
+    409,
+    referenceAvatarPreflightReasonCode(result.reason),
+  );
 };

@@ -299,19 +299,31 @@ export const getMyProfile = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user!.id;
   await migrateLegacyProfileMobileContact(userId);
 
-  let profile = await UserProfile.findOne({ userId });
+  const profile = await UserProfile.findOne({ userId });
 
   if (!profile) {
-    profile = await UserProfile.create({
-      userId,
+    const account = await User.findById(userId).select("mobileCountryCode mobileNumber").lean();
+    res.json({
       username: "",
-      bio: "",
+      realName: null,
+      dateOfBirth: null,
+      country: null,
+      city: null,
+      languages: [],
       interests: [],
+      bio: "",
       avatar: "",
       cover: "",
       profilePhotos: [],
       profileStatus: "incomplete",
+      rejectionReason: "",
+      verificationSubmissionVersion: 0,
+      age: null,
+      mobileCountryCode: account?.mobileCountryCode ?? null,
+      mobileNumber: account?.mobileNumber ?? null,
+      verification: { stage: "NOT_SUBMITTED", submittedAt: null },
     });
+    return;
   }
 
   const age = profile.dateOfBirth

@@ -23,12 +23,52 @@ const challengeSequence = (): FaceVerificationChallenge[] => {
   return selected;
 };
 
-const ensureDraftProfile = async (userId: Types.ObjectId): Promise<UserProfileDocument> => {
+type EnsuredDraftProfile = { profile: UserProfileDocument; created: boolean };
+
+const ensureDraftProfile = async (userId: Types.ObjectId): Promise<EnsuredDraftProfile> => {
   let profile = await UserProfile.findOne({ userId });
-  if (profile) return profile;
+  if (profile) return { profile, created: false };
   // This is a draft only. It is deliberately incomplete and never creates a request/job.
-  profile = await UserProfile.create({ userId, username: `draft-${ulid().toLowerCase()}`, bio: "", interests: [], avatar: "", cover: "", profilePhotos: [], profileStatus: "incomplete", verificationSubmissionVersion: 0 });
-  return profile;
+  try {
+    profile = await UserProfile.create({ userId, username: `draft-${ulid().toLowerCase()}`, bio: "", interests: [], avatar: "", cover: "", profilePhotos: [], profileStatus: "incomplete", verificationSubmissionVersion: 0 });
+    return { profile, created: true };
+  } catch (error) {
+    if (!duplicateKey(error)) throw error;
+    profile = await UserProfile.findOne({ userId });
+    if (!profile) throw error;
+    return { profile, created: false };
+  }
+};
+
+const removeUntouchedSessionStartDraft = async (profile: UserProfileDocument, userId: Types.ObjectId, avatar: string) => {
+  await UserProfile.deleteOne({
+    _id: profile._id,
+    userId,
+    username: profile.username,
+    realName: null,
+    dateOfBirth: { $exists: false },
+    country: null,
+    city: null,
+    languages: [],
+    interests: [],
+    bio: "",
+    avatar,
+    cover: "",
+    profilePhotos: [],
+    profileStatus: "incomplete",
+    rejectionReason: "",
+    verificationSubmissionVersion: 0,
+  }).exec();
+};
+
+const restoreExistingAvatarAfterFailedPreflight = async (input: { profile: UserProfileDocument; userId: Types.ObjectId; attemptedAvatar: string; originalAvatar: string; originalStatus: UserProfileDocument["profileStatus"]; originalSubmissionVersion: number }) => {
+  await UserProfile.updateOne({
+    _id: input.profile._id,
+    userId: input.userId,
+    avatar: input.attemptedAvatar,
+    profileStatus: input.originalStatus,
+    verificationSubmissionVersion: input.originalSubmissionVersion,
+  }, { $set: { avatar: input.originalAvatar } }).exec();
 };
 
 const expireIfNeeded = async (session: FaceVerificationSessionDocument) => {
@@ -62,13 +102,23 @@ const retireCurrentSession = async (session: FaceVerificationSessionDocument, in
 export const startFaceVerificationSession = async (input: { userId: string; avatar: unknown }) => {
   if (!Types.ObjectId.isValid(input.userId)) throw new AppError("Invalid authenticated user", 401);
   if (typeof input.avatar !== "string" || !input.avatar.trim() || input.avatar.trim().length > 2048) throw new AppError("A valid avatar reference is required", 400);
-  const userId = new Types.ObjectId(input.userId); const profile = await ensureDraftProfile(userId);
+  const userId = new Types.ObjectId(input.userId); const ensured = await ensureDraftProfile(userId); const profile = ensured.profile;
   if (profile.profileStatus === "pending_verification") throw new AppError("Profile is already pending verification", 409);
   const avatar = input.avatar.trim();
+  const originalAvatar = profile.avatar;
+  const originalStatus = profile.profileStatus;
+  const originalSubmissionVersion = profile.verificationSubmissionVersion ?? 0;
+  const avatarChanged = profile.avatar !== avatar;
   // The selected ordinary avatar is bound to the draft/rejected profile before it can become biometric authority.
-  if (profile.avatar !== avatar) { profile.avatar = avatar; await profile.save(); }
+  if (avatarChanged) { profile.avatar = avatar; await profile.save(); }
   const avatarFingerprint = fingerprintAvatarReference(avatar);
-  await requireBiometricReferenceAvatar({ profileId: String(profile._id), userId: String(userId), avatarFingerprint });
+  try {
+    await requireBiometricReferenceAvatar({ profileId: String(profile._id), userId: String(userId), avatarFingerprint });
+  } catch (error) {
+    if (ensured.created) await removeUntouchedSessionStartDraft(profile, userId, avatar);
+    else if (avatarChanged) await restoreExistingAvatarAfterFailedPreflight({ profile, userId, attemptedAvatar: avatar, originalAvatar, originalStatus, originalSubmissionVersion });
+    throw error;
+  }
   const targetVersion = Math.max(1, (profile.verificationSubmissionVersion ?? 0) + 1);
   const expected = { userId, avatarFingerprint, targetVersion };
   for (let attempt = 0; attempt < 3; attempt += 1) {

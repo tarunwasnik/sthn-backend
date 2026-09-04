@@ -12,7 +12,7 @@ import { reconcileFaceVerificationEvidenceRetention, scheduleFaceEvidenceRetenti
 import { faceVerificationEvidenceRepository } from "../../repositories/faceVerificationEvidence.repository";
 import { faceVerificationSessionRepository } from "../../repositories/faceVerificationSession.repository";
 import { FACE_VERIFICATION_APPROVED_RETENTION_MS, FACE_VERIFICATION_REJECTED_RETENTION_MS, FACE_VERIFICATION_SESSION_TTL_MS, FACE_VERIFICATION_SHORT_CLEANUP_MS } from "../../services/profile/faceVerification.constants";
-import { upsertProfile } from "../../controllers/profile.controller";
+import { getMyProfile, upsertProfile } from "../../controllers/profile.controller";
 import { assertFaceVerificationImageBytes } from "../../middlewares/upload.middleware";
 import { setBiometricReferenceAvatarValidationDependenciesForTests } from "../../services/profile/profileVerificationReferenceAvatarValidation.service";
 import type { NextFunction, Request, Response } from "express";
@@ -299,13 +299,48 @@ test("invalid and technical reference validation never creates a session, reques
     async () => ({ ...validReferenceDetection, faces: [validReferenceDetection.faces[0], validReferenceDetection.faces[0]] }),
   ]) {
     setBiometricReferenceAvatarValidationDependenciesForTests({ reader: async () => Buffer.from("test-avatar"), detector });
-    await assert.rejects(startFaceVerificationSession({ userId: String(user._id), avatar }), /profile photo cannot be used/);
+    await assert.rejects(startFaceVerificationSession({ userId: String(user._id), avatar }), (error: unknown) => (error as { code?: string }).code === "REFERENCE_AVATAR_NO_FACE" || (error as { code?: string }).code === "REFERENCE_AVATAR_MULTIPLE_FACES");
     assert.equal(await FaceVerificationSession.countDocuments({ userId: user._id }), 0);
     assert.equal(await ProfileVerificationRequest.countDocuments({ userId: user._id }), 0);
     assert.equal(await ProfileVerificationJob.countDocuments({ userId: user._id }), 0);
-    assert.equal((await UserProfile.findOne({ userId: user._id }))?.verificationSubmissionVersion ?? 0, 0);
+    assert.equal(await UserProfile.findOne({ userId: user._id }), null);
   }
   setBiometricReferenceAvatarValidationDependenciesForTests({ reader: async () => { throw new Error("reader unavailable"); } });
   await assert.rejects(startFaceVerificationSession({ userId: String(user._id), avatar }), /reader unavailable/);
   assert.equal(await FaceVerificationSession.countDocuments({ userId: user._id }), 0);
+  assert.equal(await UserProfile.findOne({ userId: user._id }), null);
+});
+
+test("failed preflight removes a newly-created skeletal draft and leaves subsequent profile reads avatar-free", async () => {
+  const user = await User.create({ email: "face-reference-no-draft@test.local", password: "test-password", status: "pending_profile", governanceState: "ACTIVE" });
+  setBiometricReferenceAvatarValidationDependenciesForTests({ reader: async () => Buffer.from("test-avatar"), detector: async () => ({ ...validReferenceDetection, faces: [] }) });
+  await assert.rejects(startFaceVerificationSession({ userId: String(user._id), avatar: "https://example.test/avatar-invalid.jpg" }), (error: unknown) => (error as { code?: string }).code === "REFERENCE_AVATAR_NO_FACE");
+  assert.equal(await UserProfile.findOne({ userId: user._id }), null);
+  const response = await invoke(getMyProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" } }) as { username: string; avatar: string; profileStatus: string };
+  assert.deepEqual(response, { ...response, username: "", avatar: "", profileStatus: "incomplete" });
+  assert.equal(await FaceVerificationSession.countDocuments({ userId: user._id }), 0);
+});
+
+test("failed preflight restores existing incomplete and rejected profile media without resetting recovery data", async () => {
+  const base = { realName: "Existing User", dateOfBirth: new Date("1990-01-01"), country: "India", city: "Mumbai", languages: ["English"], interests: ["Music"], bio: "Retained bio", avatar: "https://example.test/avatar-existing.jpg", cover: "https://example.test/cover-existing.jpg", profilePhotos: ["https://example.test/one.jpg", "https://example.test/two.jpg"], verificationSubmissionVersion: 4 };
+  setBiometricReferenceAvatarValidationDependenciesForTests({ reader: async () => Buffer.from("test-avatar"), detector: async () => ({ ...validReferenceDetection, faces: [{ ...validReferenceDetection.faces[0], landmarks: undefined }] }) });
+  for (const status of ["incomplete", "rejected"] as const) {
+    const user = await User.create({ email: `face-reference-preserve-${status}@test.local`, password: "test-password", status: "active", governanceState: "ACTIVE" });
+    const profile = await UserProfile.create({ userId: user._id, username: `retained-${status}`, profileStatus: status, rejectionReason: status === "rejected" ? "Prior review reason" : "", ...base });
+    await assert.rejects(startFaceVerificationSession({ userId: String(user._id), avatar: "https://example.test/avatar-attempted.jpg" }), (error: unknown) => (error as { code?: string }).code === "REFERENCE_AVATAR_INVALID_LANDMARKS");
+    const reloaded = await UserProfile.findById(profile._id).lean();
+    assert.ok(reloaded);
+    assert.equal(reloaded.username, `retained-${status}`);
+    assert.equal(reloaded.realName, base.realName);
+    assert.equal(reloaded.avatar, base.avatar);
+    assert.equal(reloaded.cover, base.cover);
+    assert.deepEqual(reloaded.profilePhotos, base.profilePhotos);
+    assert.deepEqual(reloaded.languages, base.languages);
+    assert.deepEqual(reloaded.interests, base.interests);
+    assert.equal(reloaded.bio, base.bio);
+    assert.equal(reloaded.verificationSubmissionVersion, base.verificationSubmissionVersion);
+    assert.equal(reloaded.profileStatus, status);
+    assert.equal(await UserProfile.countDocuments({ userId: user._id }), 1);
+    assert.equal(await FaceVerificationSession.countDocuments({ userId: user._id }), 0);
+  }
 });
