@@ -12,7 +12,15 @@ test("missing historical request policy resolves only to legacy", () => {
 test("gated policy requires exactly six while legacy remains compatible with 2–6", () => {
   assert.doesNotThrow(() => requireProfilePhotoCountForVerificationPolicy(["a", "b"], LEGACY_PROFILE_VERIFICATION_POLICY));
   assert.doesNotThrow(() => requireProfilePhotoCountForVerificationPolicy(["a", "b", "c", "d", "e", "f"], GATED_PROFILE_VERIFICATION_POLICY));
-  assert.throws(() => requireProfilePhotoCountForVerificationPolicy(["a", "b", "c", "d", "e"], GATED_PROFILE_VERIFICATION_POLICY));
+  assert.throws(
+    () => requireProfilePhotoCountForVerificationPolicy(["a", "b", "c", "d", "e"], GATED_PROFILE_VERIFICATION_POLICY),
+    (error: unknown) => {
+      const validation = error as { statusCode?: number; code?: string; message?: string };
+      return validation.statusCode === 400
+        && validation.code === "PROFILE_PHOTO_COUNT_INVALID"
+        && validation.message === "Exactly 6 profile photos are required for verification";
+    },
+  );
 });
 
 test("new-request policy parsing defaults only when absent and rejects malformed values", () => {

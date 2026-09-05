@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import { ProfileVerificationInferenceError } from "../../errors/profile/ProfileVerificationInferenceError";
+import { AppError } from "../../utils/AppError";
 import {
   ProfileVerificationRequestDocument,
   ProfileVerificationPolicy,
@@ -14,12 +15,18 @@ type SubmittedProfileMediaSource = {
   profilePhotos: string[];
 };
 
+export const GATED_PROFILE_PHOTO_COUNT = 6;
+
 export const requireProfilePhotoCountForVerificationPolicy = (
   profilePhotos: readonly string[],
   policy: ProfileVerificationPolicy,
 ) => {
-  if (policy.key === "GATED_MULTI_MEDIA" && policy.version === "V1" && profilePhotos.length !== 6) {
-    throw new ProfileVerificationInferenceError("Submitted profile media authority is invalid", "STALE_SUBMISSION", 409);
+  if (policy.key === "GATED_MULTI_MEDIA" && policy.version === "V1" && profilePhotos.length !== GATED_PROFILE_PHOTO_COUNT) {
+    throw new AppError(
+      `Exactly ${GATED_PROFILE_PHOTO_COUNT} profile photos are required for verification`,
+      400,
+      "PROFILE_PHOTO_COUNT_INVALID",
+    );
   }
 };
 

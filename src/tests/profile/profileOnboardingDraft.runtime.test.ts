@@ -7,8 +7,8 @@ import { UserProfile } from "../../models/userProfile.model";
 import { ProfileVerificationRequest } from "../../models/profileVerificationRequest.model";
 import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
 import { FaceVerificationSession } from "../../models/faceVerificationSession.model";
-import { getMyProfile, saveMyOnboardingDraft } from "../../controllers/profile.controller";
-import { startFaceVerificationSession } from "../../services/profile/faceVerificationSession.service";
+import { getMyProfile, saveMyOnboardingDraft, upsertProfile } from "../../controllers/profile.controller";
+import { fingerprintAvatarReference, startFaceVerificationSession } from "../../services/profile/faceVerificationSession.service";
 import { setBiometricReferenceAvatarValidationDependenciesForTests } from "../../services/profile/profileVerificationReferenceAvatarValidation.service";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
 
@@ -90,4 +90,66 @@ test("draft saving validates username uniqueness and cannot alter rejected recov
   assert.equal(rejected?.profileStatus, "rejected");
   assert.equal(rejected?.verificationSubmissionVersion, 2);
   assert.equal(rejected?.avatar, "https://example.test/rejected-avatar.jpg");
+});
+
+test("gated final submission rejects a two-photo draft without partial authority and freezes the current six-photo draft", async () => {
+  const previousPolicy = process.env.STHN_PROFILE_VERIFICATION_POLICY;
+  process.env.STHN_PROFILE_VERIFICATION_POLICY = "GATED_MULTI_MEDIA_V1";
+  try {
+    const user = await User.create({ email: "onboarding-gated@test.local", password: "test-password", status: "pending_profile", governanceState: "ACTIVE" });
+    const twoPhotoDraft = { ...body("gated-draft"), profilePhotos: body().profilePhotos.slice(0, 2) };
+    await invoke(saveMyOnboardingDraft, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: twoPhotoDraft });
+
+    await assert.rejects(
+      invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: twoPhotoDraft }),
+      (error: unknown) => (error as { statusCode?: number; code?: string }).statusCode === 400
+        && (error as { code?: string }).code === "PROFILE_PHOTO_COUNT_INVALID",
+    );
+    let profile = await UserProfile.findOne({ userId: user._id });
+    assert.ok(profile);
+    assert.equal(profile.profileStatus, "incomplete");
+    assert.equal(profile.verificationSubmissionVersion, 0);
+    assert.equal(await ProfileVerificationRequest.countDocuments({ userId: user._id }), 0);
+    assert.equal(await ProfileVerificationJob.countDocuments({}), 0);
+
+    const sixPhotoDraft = body("gated-draft");
+    await invoke(saveMyOnboardingDraft, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: sixPhotoDraft });
+    profile = await UserProfile.findOne({ userId: user._id });
+    assert.ok(profile);
+    await FaceVerificationSession.create({
+      sessionReference: "ONBOARDING_GATED_COMPLETE",
+      userId: user._id,
+      profileId: profile._id,
+      profileSubmissionVersion: 1,
+      avatarFingerprint: fingerprintAvatarReference(sixPhotoDraft.avatar),
+      status: "CAPTURE_COMPLETE",
+      isCurrent: true,
+      challenges: ["NEUTRAL", "TURN_LEFT", "TURN_RIGHT", "LOOK_UP", "BLINK"],
+      requiredCaptureCount: 5,
+      acceptedCaptureCount: 5,
+      startedAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+      captureCompletedAt: new Date(),
+    });
+    setBiometricReferenceAvatarValidationDependenciesForTests({
+      reader: async () => Buffer.from("draft-avatar"),
+      detector: async () => ({ width: 100, height: 100, decodedBytes: 30_000, faces: [{ x: 30, y: 30, width: 40, height: 40, confidence: 0.9, landmarks: { rightEye: { x: 40, y: 42 }, leftEye: { x: 55, y: 42 }, noseTip: { x: 48, y: 50 }, rightMouthCorner: { x: 42, y: 60 }, leftMouthCorner: { x: 54, y: 60 } } }] }),
+    });
+
+    await invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: sixPhotoDraft });
+    profile = await UserProfile.findOne({ userId: user._id });
+    const request = await ProfileVerificationRequest.findOne({ userId: user._id });
+    const session = await FaceVerificationSession.findOne({ userId: user._id });
+    assert.equal(profile?.profileStatus, "pending_verification");
+    assert.equal(profile?.verificationSubmissionVersion, 1);
+    assert.equal(request?.profileSubmissionVersion, 1);
+    assert.equal(request?.verificationPolicy?.key, "GATED_MULTI_MEDIA");
+    assert.equal(request?.submittedMedia?.profilePhotos.length, 6);
+    assert.deepEqual(request?.submittedMedia?.profilePhotos.map((photo) => photo.sourceReference), sixPhotoDraft.profilePhotos);
+    assert.equal(String(session?.verificationRequestId), String(request?._id));
+    assert.equal(await ProfileVerificationJob.countDocuments({ verificationRequestId: request?._id }), 1);
+  } finally {
+    if (previousPolicy === undefined) delete process.env.STHN_PROFILE_VERIFICATION_POLICY;
+    else process.env.STHN_PROFILE_VERIFICATION_POLICY = previousPolicy;
+  }
 });
