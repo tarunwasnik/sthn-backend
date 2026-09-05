@@ -76,10 +76,23 @@ const runYuNetInference = async (encoded: Buffer, role: YuNetRunnerRole, auditEn
   return { output, raw, metadata };
 };
 
-export const detectYuNetFaces = async (encoded: Buffer, role: YuNetRunnerRole = "UNSPECIFIED", auditEnabled = true): Promise<YuNetDetection> => {
+export type YuNetDecisionScoreSummary = { maxRawConfidence: number | null; rawFiniteCandidateCount: number; candidatesAtThreshold: number };
+
+export const detectYuNetFaces = async (encoded: Buffer, role: YuNetRunnerRole = "UNSPECIFIED", auditEnabled = true, observeScores?: (summary: YuNetDecisionScoreSummary) => void): Promise<YuNetDetection> => {
   try {
     const { output, raw, metadata } = await runYuNetInference(encoded, role, auditEnabled);
     const faces = decodeYuNetOutput(output, raw.info.width, raw.info.height, metadata.width!, metadata.height!);
+    if (observeScores) {
+      const summary: YuNetDecisionScoreSummary = { maxRawConfidence: null, rawFiniteCandidateCount: 0, candidatesAtThreshold: 0 };
+      forEachYuNetCandidate(output, raw.info.width, raw.info.height, ({ score }) => {
+        if (!Number.isFinite(score)) return;
+        summary.rawFiniteCandidateCount += 1;
+        summary.maxRawConfidence = Math.max(summary.maxRawConfidence ?? score, score);
+        if (score >= YUNET_LIMITS.scoreThreshold) summary.candidatesAtThreshold += 1;
+      });
+      // Observability must never change a successful detector decision.
+      try { observeScores(summary); } catch { /* Preserve detection behavior. */ }
+    }
     return { width: metadata.width!, height: metadata.height!, decodedBytes: raw.data.length, faces };
   } catch (error) { if (error instanceof Error && error.name === "ProfileVerificationInferenceError") throw error; throw technicalInferenceFailure(); }
 };

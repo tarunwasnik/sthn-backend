@@ -67,6 +67,69 @@ const validateProfilePhotos = (value: unknown): string[] => {
   return value;
 };
 
+const normalizeOnboardingDraft = (body: Record<string, unknown>) => ({
+  username: requireText(body.username, "username", 40).toLowerCase(),
+  realName: requireText(body.realName, "real name", 120),
+  dateOfBirth: parseDateOfBirth(body.dateOfBirth),
+  mobileCountryCode: normalizeMobileCountryCode(body.mobileCountryCode),
+  mobileNumber: normalizeMobileNumber(body.mobileNumber),
+  country: requireText(body.country, "country", 100),
+  city: requireText(body.city, "city", 100),
+  languages: normalizeStringArray(body.languages, "languages", 12),
+  interests: normalizeStringArray(body.interests ?? [], "interests", 20),
+  bio: requireText(body.bio, "bio", 2000),
+  avatar: requireText(body.avatar, "avatar", 2048),
+  cover: requireText(body.cover, "cover", 2048),
+  profilePhotos: validateProfilePhotos(body.profilePhotos),
+});
+
+/**
+ * Persists a complete ordinary-media onboarding draft before pre-capture
+ * verification. It intentionally creates no verification authority.
+ */
+export const saveMyOnboardingDraft = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+  await migrateLegacyProfileMobileContact(userId);
+  const draft = normalizeOnboardingDraft(req.body);
+  let profile = await UserProfile.findOne({ userId });
+  if (profile && profile.profileStatus !== "incomplete") {
+    throw new AppError("Profile is not eligible for onboarding draft save", 409);
+  }
+  const existingUsername = await UserProfile.findOne({
+    username: draft.username,
+    ...(profile ? { _id: { $ne: profile._id } } : {}),
+  });
+  if (existingUsername) throw new AppError("Username already taken", 409);
+
+  const profileFields = {
+    userId,
+    username: draft.username,
+    realName: draft.realName,
+    dateOfBirth: draft.dateOfBirth,
+    country: draft.country,
+    city: draft.city,
+    languages: draft.languages,
+    interests: draft.interests,
+    bio: draft.bio,
+    avatar: draft.avatar,
+    cover: draft.cover,
+    profilePhotos: draft.profilePhotos,
+    profileStatus: "incomplete" as const,
+  };
+  if (profile) {
+    Object.assign(profile, profileFields);
+    await profile.save();
+  } else {
+    profile = await UserProfile.create({ ...profileFields, verificationSubmissionVersion: 0 });
+  }
+  const user = await User.findById(userId);
+  if (!user) throw new AppError("User not found", 404);
+  user.mobileCountryCode = draft.mobileCountryCode;
+  user.mobileNumber = draft.mobileNumber;
+  await user.save();
+  res.status(200).json({ message: "Onboarding draft saved", profileStatus: profile.profileStatus, profile });
+});
+
 /* ================= CREATE / UPDATE PROFILE ================= */
 
 export const upsertProfile = catchAsync(async (req: Request, res: Response) => {

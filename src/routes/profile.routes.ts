@@ -6,6 +6,7 @@ import { protect } from "../middlewares/auth.middleware";
 import {
   upsertProfile,
   getMyProfile,
+  saveMyOnboardingDraft,
   updateMyProfile,
 } from "../controllers/profile.controller";
 
@@ -14,6 +15,7 @@ const router = Router();
 /* ================= GET PROFILE ================= */
 
 router.get("/me", protect, getMyProfile);
+router.put("/me/draft", protect, saveMyOnboardingDraft);
 
 /* ================= CREATE PROFILE ================= */
 /**
