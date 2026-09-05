@@ -10,7 +10,7 @@ import { YUNET_ARTIFACT, YUNET_LIMITS } from "./profileVerificationYuNet.constan
 import { YuNetDetection, YuNetFace } from "./profileVerificationYuNet.types";
 import { createYuNetRunnerAudit, updateYuNetRunnerAudit, YuNetRunnerRole } from "./profileVerificationYuNetRuntimeAudit.service";
 
-type Output = Record<string, { data: unknown }>;
+type Output = Record<string, { data: unknown; dispose?: () => void }>;
 type YuNetCandidate = { score: number; stride: number; index: number; row: number; column: number; bbox: Float32Array; kps: Float32Array };
 export type YuNetPreFilterScoreSummary = {
   finiteScoreCount: number;
@@ -19,6 +19,10 @@ export type YuNetPreFilterScoreSummary = {
   thresholdCounts: Record<"0.30" | "0.40" | "0.50" | "0.55" | "0.60" | "0.65" | "0.70" | "0.80" | "0.90", number>;
 };
 let sessionPromise: Promise<ort.InferenceSession> | null = null;
+
+const disposeOutput = (output: Output) => {
+  for (const tensor of Object.values(output)) tensor.dispose?.();
+};
 
 const iou = (a: YuNetFace, b: YuNetFace) => {
   const w = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
@@ -50,7 +54,15 @@ const loadSession = async (role: YuNetRunnerRole, auditEnabled = true) => {
     try { bytes = await fs.readFile(path); } catch { if (audit) await updateYuNetRunnerAudit(audit._id, "MODEL_READ_FAILED"); throw technicalInferenceFailure(); }
     if (bytes.length !== YUNET_ARTIFACT.bytes || crypto.createHash("sha256").update(bytes).digest("hex") !== YUNET_ARTIFACT.sha256) throw technicalInferenceFailure("YuNet model artifact integrity validation failed");
     let session: ort.InferenceSession;
-    try { session = await ort.InferenceSession.create(bytes, { executionProviders: ["cpu"] }); }
+    try {
+      session = await ort.InferenceSession.create(bytes, {
+        executionProviders: ["cpu"],
+        // YuNet accepts dynamic image dimensions. Do not retain its largest
+        // per-image allocation in the process-wide CPU arena or memory pattern.
+        enableCpuMemArena: false,
+        enableMemPattern: false,
+      });
+    }
     catch { if (audit) await updateYuNetRunnerAudit(audit._id, "SESSION_LOAD_FAILED"); throw technicalInferenceFailure(); }
     const metadata = session.inputMetadata[0];
     if (session.inputNames.length !== 1 || session.inputNames[0] !== "input" || !metadata?.isTensor || metadata.shape.join(",") !== "1,3,height,width") throw technicalInferenceFailure("YuNet model input contract is invalid");
@@ -72,8 +84,13 @@ const runYuNetInference = async (encoded: Buffer, role: YuNetRunnerRole, auditEn
   if (raw.info.channels !== 3) throw technicalInferenceFailure("Face evidence decoded channel contract is invalid");
   const tensor = new Float32Array(raw.info.width * raw.info.height * 3);
   for (let pixel = 0; pixel < raw.info.width * raw.info.height; pixel += 1) { tensor[pixel] = raw.data[pixel * 3 + 2]; tensor[raw.info.width * raw.info.height + pixel] = raw.data[pixel * 3 + 1]; tensor[2 * raw.info.width * raw.info.height + pixel] = raw.data[pixel * 3]; }
-  const output = await (await loadSession(role, auditEnabled)).run({ input: new ort.Tensor("float32", tensor, [1, 3, raw.info.height, raw.info.width]) });
-  return { output, raw, metadata };
+  const input = new ort.Tensor("float32", tensor, [1, 3, raw.info.height, raw.info.width]);
+  try {
+    const output = await (await loadSession(role, auditEnabled)).run({ input });
+    return { output, raw, metadata };
+  } finally {
+    input.dispose();
+  }
 };
 
 export type YuNetDecisionScoreSummary = { maxRawConfidence: number | null; rawFiniteCandidateCount: number; candidatesAtThreshold: number };
@@ -81,19 +98,23 @@ export type YuNetDecisionScoreSummary = { maxRawConfidence: number | null; rawFi
 export const detectYuNetFaces = async (encoded: Buffer, role: YuNetRunnerRole = "UNSPECIFIED", auditEnabled = true, observeScores?: (summary: YuNetDecisionScoreSummary) => void): Promise<YuNetDetection> => {
   try {
     const { output, raw, metadata } = await runYuNetInference(encoded, role, auditEnabled);
-    const faces = decodeYuNetOutput(output, raw.info.width, raw.info.height, metadata.width!, metadata.height!);
-    if (observeScores) {
-      const summary: YuNetDecisionScoreSummary = { maxRawConfidence: null, rawFiniteCandidateCount: 0, candidatesAtThreshold: 0 };
-      forEachYuNetCandidate(output, raw.info.width, raw.info.height, ({ score }) => {
-        if (!Number.isFinite(score)) return;
-        summary.rawFiniteCandidateCount += 1;
-        summary.maxRawConfidence = Math.max(summary.maxRawConfidence ?? score, score);
-        if (score >= YUNET_LIMITS.scoreThreshold) summary.candidatesAtThreshold += 1;
-      });
-      // Observability must never change a successful detector decision.
-      try { observeScores(summary); } catch { /* Preserve detection behavior. */ }
+    try {
+      const faces = decodeYuNetOutput(output, raw.info.width, raw.info.height, metadata.width!, metadata.height!);
+      if (observeScores) {
+        const summary: YuNetDecisionScoreSummary = { maxRawConfidence: null, rawFiniteCandidateCount: 0, candidatesAtThreshold: 0 };
+        forEachYuNetCandidate(output, raw.info.width, raw.info.height, ({ score }) => {
+          if (!Number.isFinite(score)) return;
+          summary.rawFiniteCandidateCount += 1;
+          summary.maxRawConfidence = Math.max(summary.maxRawConfidence ?? score, score);
+          if (score >= YUNET_LIMITS.scoreThreshold) summary.candidatesAtThreshold += 1;
+        });
+        // Observability must never change a successful detector decision.
+        try { observeScores(summary); } catch { /* Preserve detection behavior. */ }
+      }
+      return { width: metadata.width!, height: metadata.height!, decodedBytes: raw.data.length, faces };
+    } finally {
+      disposeOutput(output);
     }
-    return { width: metadata.width!, height: metadata.height!, decodedBytes: raw.data.length, faces };
   } catch (error) { if (error instanceof Error && error.name === "ProfileVerificationInferenceError") throw error; throw technicalInferenceFailure(); }
 };
 
@@ -163,6 +184,10 @@ export const summarizeYuNetPreFilterScores = (output: Output, paddedWidth: numbe
 export const inspectYuNetPreFilterScores = async (encoded: Buffer, role: YuNetRunnerRole = "UNSPECIFIED") => {
   try {
     const { output, raw } = await runYuNetInference(encoded, role);
-    return summarizeYuNetPreFilterScores(output, raw.info.width, raw.info.height);
+    try {
+      return summarizeYuNetPreFilterScores(output, raw.info.width, raw.info.height);
+    } finally {
+      disposeOutput(output);
+    }
   } catch (error) { if (error instanceof Error && error.name === "ProfileVerificationInferenceError") throw error; throw technicalInferenceFailure(); }
 };

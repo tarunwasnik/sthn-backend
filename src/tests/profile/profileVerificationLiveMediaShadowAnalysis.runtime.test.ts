@@ -55,3 +55,43 @@ test("unreadable and no-face media are excluded evidence rather than identity mi
   assert.ok(result.media.filter((item) => item.status === "NO_FACE").length >= 1);
   assert.equal(result.media.some((item) => "mismatch" in item), false);
 });
+
+test("gated media processing remains sequential while evaluating all eight media items and every detected face", async () => {
+  const sixPhotoSnapshot = createProfileVerificationSubmittedMediaSnapshot({
+    avatar: "https://example.test/sequential-avatar.jpg",
+    cover: "https://example.test/sequential-cover.jpg",
+    profilePhotos: Array.from({ length: 6 }, (_, index) => `https://example.test/sequential-${index}.jpg`),
+  });
+  const bytes = await image({ r: 12, g: 34, b: 56 });
+  let activeReads = 0; let maxActiveReads = 0;
+  let activeDetections = 0; let maxActiveDetections = 0;
+  let activeEmbeddings = 0; let maxActiveEmbeddings = 0;
+  let reads = 0; let detections = 0; let embeddings = 0;
+  const yieldTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
+  const result = await analyseLiveCaptureProfileMediaShadow({
+    snapshot: sixPhotoSnapshot,
+    usableLiveEmbeddings: [vector(1), vector(1), vector(1), vector(1), vector(1)],
+    readMedia: async () => {
+      reads += 1; activeReads += 1; maxActiveReads = Math.max(maxActiveReads, activeReads);
+      await yieldTurn(); activeReads -= 1; return bytes;
+    },
+    detector: async () => {
+      detections += 1; activeDetections += 1; maxActiveDetections = Math.max(maxActiveDetections, activeDetections);
+      await yieldTurn(); activeDetections -= 1;
+      return { width: 24, height: 24, decodedBytes: bytes.length, faces: detections === 2 ? [face(), face(1)] : [face()] };
+    },
+    embedder: async () => {
+      embeddings += 1; activeEmbeddings += 1; maxActiveEmbeddings = Math.max(maxActiveEmbeddings, activeEmbeddings);
+      await yieldTurn(); activeEmbeddings -= 1; return vector(1);
+    },
+  });
+  assert.deepEqual({ reads, detections, embeddings }, { reads: 8, detections: 8, embeddings: 9 });
+  assert.deepEqual({ maxActiveReads, maxActiveDetections, maxActiveEmbeddings }, { maxActiveReads: 1, maxActiveDetections: 1, maxActiveEmbeddings: 1 });
+  assert.equal(result.live.usableCaptureCount, 5);
+  assert.equal(result.live.pairwiseComparisonCount, 10);
+  assert.equal(result.summary.submittedMediaCount, 8);
+  assert.equal(result.summary.processedMediaCount, 8);
+  assert.equal(result.summary.mediaWithUsableFacesCount, 8);
+  assert.equal(result.summary.multiFaceMediaCount, 1);
+  assert.equal(result.media.reduce((sum, item) => sum + item.candidateCount, 0), 9);
+});
