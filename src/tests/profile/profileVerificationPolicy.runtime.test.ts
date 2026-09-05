@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { GATED_PROFILE_VERIFICATION_POLICY, LEGACY_PROFILE_VERIFICATION_POLICY, isGatedProfileVerificationPolicy, parseNewProfileVerificationPolicy, resolveProfileVerificationPolicy } from "../../services/profile/profileVerificationPolicy.service";
+import { GATED_PROFILE_VERIFICATION_POLICY, GATED_PROFILE_VERIFICATION_POLICY_V2, LEGACY_PROFILE_VERIFICATION_POLICY, hasGatedAutomatedDecisionAuthority, isGatedProfileVerificationPolicy, parseNewProfileVerificationPolicy, resolveProfileVerificationPolicy } from "../../services/profile/profileVerificationPolicy.service";
 import { requireProfilePhotoCountForVerificationPolicy } from "../../services/profile/profileVerificationSubmittedMedia.service";
 
 test("missing historical request policy resolves only to legacy", () => {
@@ -12,6 +12,7 @@ test("missing historical request policy resolves only to legacy", () => {
 test("gated policy requires exactly six while legacy remains compatible with 2â€“6", () => {
   assert.doesNotThrow(() => requireProfilePhotoCountForVerificationPolicy(["a", "b"], LEGACY_PROFILE_VERIFICATION_POLICY));
   assert.doesNotThrow(() => requireProfilePhotoCountForVerificationPolicy(["a", "b", "c", "d", "e", "f"], GATED_PROFILE_VERIFICATION_POLICY));
+  assert.doesNotThrow(() => requireProfilePhotoCountForVerificationPolicy(["a", "b", "c", "d", "e", "f"], GATED_PROFILE_VERIFICATION_POLICY_V2));
   assert.throws(
     () => requireProfilePhotoCountForVerificationPolicy(["a", "b", "c", "d", "e"], GATED_PROFILE_VERIFICATION_POLICY),
     (error: unknown) => {
@@ -21,11 +22,17 @@ test("gated policy requires exactly six while legacy remains compatible with 2â€
         && validation.message === "Exactly 6 profile photos are required for verification";
     },
   );
+  assert.throws(() => requireProfilePhotoCountForVerificationPolicy(["a", "b", "c", "d", "e"], GATED_PROFILE_VERIFICATION_POLICY_V2), /Exactly 6 profile photos/);
 });
 
 test("new-request policy parsing defaults only when absent and rejects malformed values", () => {
   assert.deepEqual(parseNewProfileVerificationPolicy(undefined), LEGACY_PROFILE_VERIFICATION_POLICY);
   assert.deepEqual(parseNewProfileVerificationPolicy("GATED_MULTI_MEDIA_V1"), GATED_PROFILE_VERIFICATION_POLICY);
+  assert.deepEqual(parseNewProfileVerificationPolicy("GATED_MULTI_MEDIA_V2"), GATED_PROFILE_VERIFICATION_POLICY_V2);
+  assert.equal(isGatedProfileVerificationPolicy(GATED_PROFILE_VERIFICATION_POLICY_V2), true);
+  assert.equal(hasGatedAutomatedDecisionAuthority(GATED_PROFILE_VERIFICATION_POLICY), false);
+  assert.equal(hasGatedAutomatedDecisionAuthority(GATED_PROFILE_VERIFICATION_POLICY_V2), true);
   assert.deepEqual(parseNewProfileVerificationPolicy("LEGACY_AVATAR_ONLY_V1"), LEGACY_PROFILE_VERIFICATION_POLICY);
   assert.throws(() => parseNewProfileVerificationPolicy("unexpected"));
+  assert.throws(() => parseNewProfileVerificationPolicy("GATED_MULTI_MEDIA_V2_BETA"), /must be LEGACY_AVATAR_ONLY_V1, GATED_MULTI_MEDIA_V1, or GATED_MULTI_MEDIA_V2/);
 });

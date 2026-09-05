@@ -7,6 +7,8 @@
     "dev": "nodemon --exec ts-node src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "worker:profile-verification": "node -r ts-node/register src/profileVerificationWorker.ts",
+    "start:profile-verification-worker": "node dist/profileVerificationWorker.js",
     "evaluate:sface-calibration": "node -r ts-node/register src/scripts/evaluateSFaceCalibration.ts",
     "evaluate:y4-profile-media": "node -r ts-node/register -r dotenv/config src/scripts/evaluateY4ProfileMediaCalibration.ts",
     "inspect:y4-profile-media": "node -r ts-node/register -r dotenv/config src/scripts/inspectY4ProfileMediaCalibration.ts",

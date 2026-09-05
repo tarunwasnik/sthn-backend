@@ -24,6 +24,7 @@ import { stopProfileVerificationWorker } from "./services/profile/profileVerific
 import { startProfileVerificationWorkerIfEnabled } from "./services/profile/profileVerificationWorkerBootstrap.service";
 import sharp from "sharp";
 import { detectYuNetFaces } from "./services/profile/profileVerificationYuNetRunner";
+import { reportProfileVerificationMemory } from "./services/profile/profileVerificationMemoryDiagnostic.service";
 
 import { errorHandler } from "./middlewares/errorHandler"; // ✅ ADDED
 
@@ -190,7 +191,11 @@ export async function startServer() {
       console.log("⏱ Background jobs scheduled");
     });
 
-    process.on("SIGINT", async () => {
+    let shutdownStarted = false;
+    const shutdown = async (signal: "SIGINT" | "SIGTERM") => {
+      reportProfileVerificationMemory(signal === "SIGINT" ? "PROCESS_SIGINT" : "PROCESS_SIGTERM");
+      if (shutdownStarted) return;
+      shutdownStarted = true;
       console.log("🛑 Shutting down server...");
       await stopJobLoop();
       await stopProfileVerificationWorker();
@@ -198,7 +203,11 @@ export async function startServer() {
       httpServer.close(() => {
         process.exit(0);
       });
-    });
+    };
+    process.on("SIGINT", () => void shutdown("SIGINT"));
+    process.on("SIGTERM", () => void shutdown("SIGTERM"));
+    process.on("beforeExit", () => reportProfileVerificationMemory("PROCESS_BEFORE_EXIT"));
+    process.on("exit", () => reportProfileVerificationMemory("PROCESS_EXIT"));
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
     process.exit(1);

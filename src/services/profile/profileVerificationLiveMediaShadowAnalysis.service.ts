@@ -21,6 +21,7 @@ export const analyseLiveCaptureProfileMediaShadow = async (input: {
   detector?: Detector;
   embedder?: Embedder;
   processedAt?: Date;
+  onMediaItemComplete?: (mediaIndex: number, role: ProfileVerificationSubmittedMediaItem["role"]) => void;
 }): Promise<ProfileVerificationProfileMediaShadowAnalysis> => {
   const processedAt = input.processedAt ?? new Date();
   const live = input.usableLiveEmbeddings.map((embedding) => normalizeFaceEmbeddingL2(embedding, SFACE_FACE_EMBEDDING_SPECIFICATION.expectedDimensions));
@@ -33,7 +34,8 @@ export const analyseLiveCaptureProfileMediaShadow = async (input: {
   const detector = input.detector ?? ((bytes) => detectYuNetFaces(bytes, "UNSPECIFIED"));
   const embedder = input.embedder ?? ((aligned) => getProductionFaceEmbeddingAdapter().infer(aligned));
   const media: ProfileVerificationProfileMediaShadowAnalysis["media"] = [];
-  for (const item of items) {
+  for (let mediaIndex = 0; mediaIndex < items.length; mediaIndex += 1) {
+    const item = items[mediaIndex];
     try {
       const bytes = await input.readMedia(item);
       const detection = await detector(bytes);
@@ -51,6 +53,7 @@ export const analyseLiveCaptureProfileMediaShadow = async (input: {
       const best = candidates[0]; const second = candidates[1];
       media.push({ role: item.role, ...(item.profilePhotoIndex === undefined ? {} : { profilePhotoIndex: item.profilePhotoIndex }), status: "FACE_CANDIDATES_AVAILABLE", detectedFaceCount: detection.faces.length, usableFaceCount: candidates.length, candidateCount: candidates.length, bestCandidate: best, ...(second ? { secondBestMedianSimilarity: second.medianSimilarity, bestVsSecondMargin: best.medianSimilarity - second.medianSimilarity } : {}) });
     } catch { media.push({ role: item.role, ...(item.profilePhotoIndex === undefined ? {} : { profilePhotoIndex: item.profilePhotoIndex }), status: "MEDIA_READ_FAILED", detectedFaceCount: 0, usableFaceCount: 0, candidateCount: 0 }); }
+    finally { try { input.onMediaItemComplete?.(mediaIndex, item.role); } catch { /* Observation cannot affect analysis. */ } }
   }
   return { ...base, summary: { submittedMediaCount: items.length, processedMediaCount: media.length, mediaWithNoFaceCount: media.filter((item) => item.status === "NO_FACE").length, mediaWithUsableFacesCount: media.filter((item) => item.status === "FACE_CANDIDATES_AVAILABLE").length, multiFaceMediaCount: media.filter((item) => item.detectedFaceCount > 1).length, failedMediaCount: media.filter((item) => item.status === "MEDIA_READ_FAILED").length }, media };
 };

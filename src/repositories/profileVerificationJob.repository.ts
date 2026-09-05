@@ -28,6 +28,7 @@ export class ProfileVerificationJobRepository {
       {
         status: { $in: ["PENDING", "RETRY_WAIT"] },
         nextAttemptAt: { $lte: now },
+        $expr: { $lt: ["$attemptCount", "$maxRetryCount"] },
       },
       {
         $set: { status: "RUNNING", workerId, claimedAt: now, leaseExpiresAt, lastStartedAt: now },
@@ -37,13 +38,30 @@ export class ProfileVerificationJobRepository {
     ).exec();
   }
 
-  recoverExpiredLeases(now: Date) {
+  recoverExpiredLeasesBelowAttemptLimit(now: Date) {
     return ProfileVerificationJob.updateMany(
-      { status: "RUNNING", leaseExpiresAt: { $lte: now } },
+      { status: "RUNNING", leaseExpiresAt: { $lte: now }, $expr: { $lt: ["$attemptCount", "$maxRetryCount"] } },
       {
         $set: { status: "RETRY_WAIT", nextAttemptAt: now },
         $unset: { workerId: 1, claimedAt: 1, leaseExpiresAt: 1 },
       },
+    ).exec();
+  }
+
+  /** Atomically terminalizes one abandoned claim whose existing attempt budget is exhausted. */
+  failOneExpiredLeaseAtAttemptLimit(now: Date) {
+    return ProfileVerificationJob.findOneAndUpdate(
+      { status: "RUNNING", leaseExpiresAt: { $lte: now }, $expr: { $gte: ["$attemptCount", "$maxRetryCount"] } },
+      {
+        $set: {
+          status: "FAILED",
+          failedAt: now,
+          lastErrorCode: "WORKER_LEASE_EXPIRED",
+          lastErrorMessage: "Verification worker stopped before completion after bounded attempts.",
+        },
+        $unset: { workerId: 1, claimedAt: 1, leaseExpiresAt: 1 },
+      },
+      { new: true, sort: { leaseExpiresAt: 1, _id: 1 }, runValidators: true },
     ).exec();
   }
 

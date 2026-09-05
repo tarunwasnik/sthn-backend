@@ -11,6 +11,7 @@ import { acceptFaceVerificationCapture, fingerprintAvatarReference, startFaceVer
 import { faceVerificationSessionRepository } from "../../repositories/faceVerificationSession.repository";
 import { FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS } from "../../services/profile/faceVerification.constants";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
+import { installReferenceAvatarTestFixture, resetReferenceAvatarTestFixture } from "./helpers/referenceAvatarTestFixture";
 
 process.env.NODE_ENV = "test";
 
@@ -44,10 +45,12 @@ const completeSession = async (userId: string, sessionReference: string) => {
 before(async () => connectPhase7HDatabase(), { timeout: 120_000 });
 beforeEach(async () => {
   await clearPhase7HDatabase();
+  installReferenceAvatarTestFixture();
   storage.storeFaceVerificationEvidence = async (input) => ({ publicId: input.publicId, bytes: input.buffer.length, format: "jpeg", mimeType: "image/jpeg" });
 });
 after(async () => {
   storage.storeFaceVerificationEvidence = originalStore;
+  resetReferenceAvatarTestFixture();
   await disconnectPhase7HDatabase();
 }, { timeout: 30_000 });
 

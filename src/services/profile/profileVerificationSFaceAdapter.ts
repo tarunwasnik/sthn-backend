@@ -20,6 +20,7 @@ import { evaluateProfileVerificationGate1LiveAnchor } from "./profileVerificatio
 import { evaluateProfileVerificationGate2MediaAdmission } from "./profileVerificationGate2MediaAdmission.service";
 import { evaluateProfileVerificationGate3IdentityPolicy } from "./profileVerificationGate3IdentityPolicy.service";
 import { isGatedProfileVerificationPolicy } from "./profileVerificationPolicy.service";
+import { reportProfileVerificationMemory } from "./profileVerificationMemoryDiagnostic.service";
 
 type EvidenceReader = typeof readProfileVerificationEvidenceBytes;
 type AvatarReader = typeof readAuthoritativeProfileVerificationAvatar;
@@ -46,6 +47,7 @@ export const createSFaceProfileVerificationAdapter = (dependencies: { evidenceRe
       embedding: { identifier: SFACE_ARTIFACT.identifier, version: SFACE_ARTIFACT.version, artifactSha256: SFACE_ARTIFACT.sha256 },
     },
     async infer(input: Readonly<ProfileVerificationInferenceInputDescriptor>) {
+      reportProfileVerificationMemory("LIVE_ANALYSIS_START");
       const source = await evidenceReader({ verificationRequestId: input.verificationRequestId });
       if (source.noOp) throw new ProfileVerificationInferenceError("Verification submission is no longer actionable", source.noOp, 409);
       if (!source.evidence || source.evidence.length !== 5) throw technicalInferenceFailure("SFace evidence is unavailable");
@@ -62,16 +64,22 @@ export const createSFaceProfileVerificationAdapter = (dependencies: { evidenceRe
         try { liveEmbeddings.push(normalizeFaceEmbeddingL2(await embedder.infer(await alignFaceEvidence({ bytes: capture.bytes, landmarks: capture.detection.faces[0].landmarks, preprocessing: SFACE_FACE_EMBEDDING_SPECIFICATION.preprocessing })), 128)); }
         catch { /* Excluded live capture; no synthetic or guessed fallback exists. */ }
       }
+      reportProfileVerificationMemory("LIVE_ANALYSIS_COMPLETE");
+      reportProfileVerificationMemory("PROFILE_MEDIA_ANALYSIS_START");
       const profileMediaShadowAnalysis = await analyseLiveCaptureProfileMediaShadow({
         snapshot: input.submittedMedia, usableLiveEmbeddings: liveEmbeddings, readMedia: submittedMediaReader,
         detector: async (bytes) => detector(bytes, "UNSPECIFIED"),
+        onMediaItemComplete: (mediaIndex, mediaRole) => reportProfileVerificationMemory("PROFILE_MEDIA_ITEM_COMPLETE", { mediaIndex, mediaRole }),
       });
+      reportProfileVerificationMemory("PROFILE_MEDIA_ANALYSIS_COMPLETE");
       if (isGatedProfileVerificationPolicy(input.verificationPolicy)) {
         const gate1 = evaluateProfileVerificationGate1LiveAnchor(liveEmbeddings);
+        reportProfileVerificationMemory("GATE1_COMPLETE");
         if (gate1.outcome !== "PASS") {
           return { findings: { ...findings, avatar: { status: "NO_USABLE_FACE" } }, profileMediaShadowAnalysis, gatedPolicyAnalysis: { policy: input.verificationPolicy, gate1 } };
         }
         const gate2 = evaluateProfileVerificationGate2MediaAdmission(profileMediaShadowAnalysis);
+        reportProfileVerificationMemory("GATE2_COMPLETE");
         const compactGate2 = {
           outcome: gate2.status,
           ...(gate2.avatar ? { avatarAdmission: gate2.avatar.admission } : {}),
@@ -86,6 +94,7 @@ export const createSFaceProfileVerificationAdapter = (dependencies: { evidenceRe
           return { findings: { ...findings, avatar: { status: "NO_USABLE_FACE" } }, profileMediaShadowAnalysis, gatedPolicyAnalysis: { policy: input.verificationPolicy, gate1, gate2: compactGate2 } };
         }
         const gate3 = evaluateProfileVerificationGate3IdentityPolicy({ gate1Accepted: true, analysis: profileMediaShadowAnalysis, gate2 });
+        reportProfileVerificationMemory("GATE3_COMPLETE");
         const compactGate3 = {
           conclusion: gate3.conclusion,
           ...(gate3.reasonCode ? { reasonCode: gate3.reasonCode } : {}),

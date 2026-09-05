@@ -58,6 +58,7 @@ export const SFACE_ARTIFACT = Object.freeze({
 });
 
 let sfaceSessionPromise: Promise<ort.InferenceSession> | null = null;
+let sfaceSessionCreationCount = 0;
 
 const technicalFailure = (message: string) => new ProfileVerificationInferenceError(message, "TECHNICAL_FAILURE", 503, true);
 
@@ -70,7 +71,12 @@ const loadSFaceSession = async () => {
     if (bytes.length !== SFACE_ARTIFACT.bytes || crypto.createHash("sha256").update(bytes).digest("hex") !== SFACE_ARTIFACT.sha256) {
       throw technicalFailure("SFace model artifact integrity validation failed");
     }
-    const session = await ort.InferenceSession.create(bytes, { executionProviders: ["cpu"] });
+    const session = await ort.InferenceSession.create(bytes, {
+      executionProviders: ["cpu"],
+      enableCpuMemArena: false,
+      enableMemPattern: false,
+    });
+    sfaceSessionCreationCount += 1;
     const input = session.inputMetadata[0];
     const output = session.outputMetadata[0];
     if (session.inputNames.length !== 1 || session.inputNames[0] !== "data" || !input?.isTensor || input.type !== "float32" || input.shape.join(",") !== "1,3,112,112"
@@ -83,7 +89,8 @@ const loadSFaceSession = async () => {
 };
 
 /** Test-only cache reset; production keeps a bounded reusable ONNX session. */
-export const resetSFaceRunnerForTests = () => { sfaceSessionPromise = null; };
+export const resetSFaceRunnerForTests = () => { sfaceSessionPromise = null; sfaceSessionCreationCount = 0; };
+export const getSFaceSessionCreationCountForTests = () => sfaceSessionCreationCount;
 
 /** Matches OpenCV FaceRecognizerSF::feature: aligned RGB pixels become NCHW float32 RGB, scale 1, zero mean. */
 export const createSFaceInputTensor = (alignedFace: Readonly<AlignedFaceRuntimeInput>) => {
@@ -100,18 +107,47 @@ export const createSFaceInputTensor = (alignedFace: Readonly<AlignedFaceRuntimeI
   return tensor;
 };
 
-/** Production SFace adapter. RGB aligned pixels use the OpenCV Zoo NCHW, zero-mean, unit-scale input contract in memory only. */
-export const getProductionFaceEmbeddingAdapter = (): ProfileVerificationFaceEmbeddingAdapter => ({
+type SFaceRuntimeSession = Pick<ort.InferenceSession, "run">;
+type SFaceInputTensorFactory = (values: Float32Array) => ort.Tensor;
+
+interface SFaceRuntimeDependencies {
+  loadSession: () => Promise<SFaceRuntimeSession>;
+  createInputTensor: SFaceInputTensorFactory;
+}
+
+const defaultSFaceRuntimeDependencies: SFaceRuntimeDependencies = {
+  loadSession: loadSFaceSession,
+  createInputTensor: (values) => new ort.Tensor("float32", values, [1, 3, 112, 112]),
+};
+
+const disposeSFaceTensor = (tensor: ort.Tensor | undefined) => {
+  try { tensor?.dispose(); }
+  catch { /* Cleanup must not replace the bounded inference result or error. */ }
+};
+
+/** Test seam for resource-lifetime verification; production uses the cached, integrity-checked session above. */
+export const createProductionFaceEmbeddingAdapter = (
+  dependencies: SFaceRuntimeDependencies = defaultSFaceRuntimeDependencies,
+): ProfileVerificationFaceEmbeddingAdapter => ({
   specification: SFACE_FACE_EMBEDDING_SPECIFICATION,
   async infer(alignedFace: Readonly<AlignedFaceRuntimeInput>) {
+    let inputTensor: ort.Tensor | undefined;
+    let output: Awaited<ReturnType<SFaceRuntimeSession["run"]>> | undefined;
     try {
       const tensor = createSFaceInputTensor(alignedFace);
-      const output = await (await loadSFaceSession()).run({ data: new ort.Tensor("float32", tensor, [1, 3, 112, 112]) });
+      inputTensor = dependencies.createInputTensor(tensor);
+      output = await (await dependencies.loadSession()).run({ data: inputTensor });
       const feature = output.fc1?.data;
       return validateEmbeddingVector(Array.from(feature as Float32Array), SFACE_FACE_EMBEDDING_SPECIFICATION.expectedDimensions);
     } catch (error) {
       if (error instanceof ProfileVerificationInferenceError) throw error;
       throw technicalFailure("SFace embedding inference could not be completed");
+    } finally {
+      if (output) for (const tensor of Object.values(output)) disposeSFaceTensor(tensor);
+      disposeSFaceTensor(inputTensor);
     }
   },
 });
+
+/** Production SFace adapter. RGB aligned pixels use the OpenCV Zoo NCHW, zero-mean, unit-scale input contract in memory only. */
+export const getProductionFaceEmbeddingAdapter = () => createProductionFaceEmbeddingAdapter();

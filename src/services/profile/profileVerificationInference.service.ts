@@ -165,7 +165,7 @@ const validateProfileMediaShadowAnalysis = (analysis: ProfileVerificationInferen
 
 const validateGatedPolicyAnalysis = (analysis: ProfileVerificationGatedPolicyAnalysis | undefined, policy: ProfileVerificationInferenceInputDescriptor["verificationPolicy"]) => {
   if (!analysis) return undefined;
-  if (policy.key !== "GATED_MULTI_MEDIA" || policy.version !== "V1"
+  if (policy.key !== "GATED_MULTI_MEDIA" || !["V1", "V2"].includes(policy.version)
     || analysis.policy.key !== policy.key || analysis.policy.version !== policy.version
     || !["PASS", "LIVE_CAPTURE_TECHNICAL_FAILURE", "LIVE_ANCHOR_INCOHERENT"].includes(analysis.gate1?.outcome)
     || !validCount(analysis.gate1.usableCaptureCount, 5) || !validScore(analysis.gate1.threshold)

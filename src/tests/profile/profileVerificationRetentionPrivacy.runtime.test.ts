@@ -147,7 +147,7 @@ test("Admin verification queues use bounded DTOs and expose no linked storage or
   const profiles = (result.body as { profiles: Array<Record<string, unknown>> }).profiles;
   assert.equal(profiles.length, 1);
   assert.deepEqual(Object.keys(profiles[0].verificationRequest as Record<string, unknown>).sort(), [
-    "adminReviewReason", "adminReviewReasonCode", "adminReviewRequiredAt", "attemptNumber", "profileSubmissionVersion", "status", "submittedAt", "verificationReference",
+    "adminReviewReason", "adminReviewReasonCode", "adminReviewRequiredAt", "attemptNumber", "job", "lifecycleStage", "profileSubmissionVersion", "status", "submittedAt", "verificationReference",
   ]);
   assertNoPrivateMarker(result.body);
 });

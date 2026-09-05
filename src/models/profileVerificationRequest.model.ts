@@ -10,6 +10,11 @@ export type ProfileVerificationRequestStatus =
 
 export type ProfileVerificationDecision = "APPROVE" | "REJECT";
 export type ProfileVerificationDecisionAuthority = "ADMIN" | "AI";
+export type ProfileVerificationDecisionReasonCode =
+  | "LIVE_CAPTURE_TECHNICAL_FAILURE"
+  | "LIVE_ANCHOR_INCOHERENT"
+  | "MANDATORY_AVATAR_INVALID"
+  | "IDENTITY_MISMATCH";
 export type ProfileVerificationPolicyKey = "LEGACY_AVATAR_ONLY" | "GATED_MULTI_MEDIA";
 export interface ProfileVerificationPolicy { key: ProfileVerificationPolicyKey; version: string; }
 export type ProfileVerificationSubmittedMediaRole = "AVATAR" | "COVER" | "PROFILE_PHOTO";
@@ -51,6 +56,7 @@ export interface ProfileVerificationRequestDocument extends Document {
   adminReviewReason?: string;
   decision?: ProfileVerificationDecision;
   decisionAuthority?: ProfileVerificationDecisionAuthority;
+  decisionReasonCode?: ProfileVerificationDecisionReasonCode;
   decisionReason?: string;
   decidedAt?: Date;
   decidedBy?: mongoose.Types.ObjectId;
@@ -82,7 +88,7 @@ const submittedMediaSnapshotSchema = new Schema<ProfileVerificationSubmittedMedi
 }, { _id: false, strict: "throw" });
 const verificationPolicySchema = new Schema<ProfileVerificationPolicy>({
   key: { type: String, required: true, immutable: true, enum: ["LEGACY_AVATAR_ONLY", "GATED_MULTI_MEDIA"] },
-  version: { type: String, required: true, immutable: true, trim: true, maxlength: 40 },
+  version: { type: String, required: true, immutable: true, trim: true, enum: ["V1", "V2"] },
 }, { _id: false, strict: "throw" });
 
 const ProfileVerificationRequestSchema = new Schema<ProfileVerificationRequestDocument>(
@@ -102,6 +108,7 @@ const ProfileVerificationRequestSchema = new Schema<ProfileVerificationRequestDo
     adminReviewReason: { type: String, trim: true, maxlength: 500 },
     decision: { type: String, enum: ["APPROVE", "REJECT"] },
     decisionAuthority: { type: String, enum: ["ADMIN", "AI"] },
+    decisionReasonCode: { type: String, enum: ["LIVE_CAPTURE_TECHNICAL_FAILURE", "LIVE_ANCHOR_INCOHERENT", "MANDATORY_AVATAR_INVALID", "IDENTITY_MISMATCH"] },
     decisionReason: { type: String, trim: true, maxlength: 2000 },
     decidedAt: { type: Date },
     decidedBy: { type: Schema.Types.ObjectId, ref: "User" },

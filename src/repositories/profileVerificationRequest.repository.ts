@@ -3,6 +3,7 @@ import { ClientSession, Types } from "mongoose";
 import {
   ProfileVerificationDecision,
   ProfileVerificationDecisionAuthority,
+  ProfileVerificationDecisionReasonCode,
   ProfileVerificationRequest,
   ProfileVerificationRequestDocument,
   ProfileVerificationRequestStatus,
@@ -52,6 +53,7 @@ export class ProfileVerificationRequestRepository {
     decision: ProfileVerificationDecision;
     authority: ProfileVerificationDecisionAuthority;
     reason?: string;
+    reasonCode?: ProfileVerificationDecisionReasonCode;
     decidedBy?: Types.ObjectId;
     decidedAt: Date;
     aiDecisionSnapshot?: { source: "AI"; model: { identifier: string; version: string }; similarity: number; threshold: number; decidedAt: Date };
@@ -67,12 +69,13 @@ export class ProfileVerificationRequestRepository {
           isActive: false,
           decision: input.decision,
           decisionAuthority: input.authority,
+          ...(input.reasonCode ? { decisionReasonCode: input.reasonCode } : {}),
           ...(input.reason ? { decisionReason: input.reason } : {}),
           ...(input.decidedBy ? { decidedBy: input.decidedBy } : {}),
           decidedAt: input.decidedAt,
           ...(input.aiDecisionSnapshot ? { aiDecisionSnapshot: input.aiDecisionSnapshot } : {}),
         },
-        ...(input.decision === "APPROVE" ? { $unset: { decisionReason: 1 } } : {}),
+        ...(input.decision === "APPROVE" ? { $unset: { decisionReason: 1, decisionReasonCode: 1 } } : {}),
       },
       { new: true, runValidators: true, session: input.session },
     ).exec();

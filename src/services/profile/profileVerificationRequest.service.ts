@@ -5,6 +5,7 @@ import {
   ProfileVerificationAdminReviewReasonCode,
   ProfileVerificationDecision,
   ProfileVerificationDecisionAuthority,
+  ProfileVerificationDecisionReasonCode,
   ProfileVerificationRequestDocument,
 } from "../../models/profileVerificationRequest.model";
 import { UserProfile, UserProfileDocument } from "../../models/userProfile.model";
@@ -25,6 +26,9 @@ import { selectNewProfileVerificationPolicy } from "./profileVerificationPolicy.
 const adminReviewReasonCodes = new Set<ProfileVerificationAdminReviewReasonCode>([
   "FACE_MATCH_UNCERTAIN", "LIVENESS_UNCERTAIN", "TEXT_MODERATION_UNCERTAIN",
   "IMAGE_MODERATION_UNCERTAIN", "CONFLICTING_CHECKS", "PROCESSING_TIMEOUT", "MODEL_FAILURE", "OTHER",
+]);
+const correctiveDecisionReasonCodes = new Set<ProfileVerificationDecisionReasonCode>([
+  "LIVE_CAPTURE_TECHNICAL_FAILURE", "LIVE_ANCHOR_INCOHERENT", "MANDATORY_AVATAR_INVALID", "IDENTITY_MISMATCH",
 ]);
 
 export type ProfileVerificationQueueKind = "AI" | "ADMIN_REVIEW";
@@ -124,6 +128,8 @@ export const escalateProfileVerificationRequest = async (input: {
   profileId: string;
   reasonCode: ProfileVerificationAdminReviewReasonCode;
   reason?: string;
+  expectedRequestId?: string;
+  expectedSubmissionVersion?: number;
   now?: Date;
 }): Promise<{ request: ProfileVerificationRequestDocument; replayed: boolean }> => {
   if (!mongoose.Types.ObjectId.isValid(input.profileId)) throw new AppError("Invalid profileId", 400);
@@ -143,6 +149,10 @@ export const escalateProfileVerificationRequest = async (input: {
       const active = await ensureLegacyPendingProfileVerificationRequest(profile, session);
       const request = active?.request ?? await profileVerificationRequestRepository.findActiveByProfileId(profile._id, session);
       if (!request) throw new AppError("Profile verification request not found", 409);
+      if ((input.expectedRequestId && String(request._id) !== input.expectedRequestId)
+        || (input.expectedSubmissionVersion !== undefined && (request.profileSubmissionVersion !== input.expectedSubmissionVersion || profile.verificationSubmissionVersion !== input.expectedSubmissionVersion))) {
+        throw new AppError("Profile verification authority is stale", 409);
+      }
 
       if (request.status === "ADMIN_REVIEW_REQUIRED") {
         if (request.adminReviewReasonCode === input.reasonCode && (request.adminReviewReason ?? undefined) === input.reason?.trim()) {
@@ -200,6 +210,7 @@ export const decideProfileVerificationRequest = async (input: {
   authority: ProfileVerificationDecisionAuthority;
   decidedBy?: string;
   reason?: string;
+  reasonCode?: ProfileVerificationDecisionReasonCode;
   expectedRequestId?: string;
   expectedSubmissionVersion?: number;
   aiDecisionSnapshot?: { source: "AI"; model: { identifier: string; version: string }; similarity: number; threshold: number; decidedAt: Date };
@@ -209,7 +220,9 @@ export const decideProfileVerificationRequest = async (input: {
     throw new AppError("Admin identity is required", 400);
   }
   if (input.authority === "AI" && input.decidedBy) throw new AppError("AI decisions cannot have an admin identity", 400);
-  if (input.authority === "AI" && (input.decision !== "APPROVE" || !input.aiDecisionSnapshot)) throw new AppError("AI approval requires an immutable decision snapshot", 400);
+  if (input.authority === "AI" && input.decision === "APPROVE" && !input.aiDecisionSnapshot) throw new AppError("AI approval requires an immutable decision snapshot", 400);
+  if (input.authority === "AI" && input.decision === "REJECT" && (!input.reasonCode || !correctiveDecisionReasonCodes.has(input.reasonCode))) throw new AppError("AI rejection requires a corrective decision reason code", 400);
+  if (input.authority === "ADMIN" && input.reasonCode) throw new AppError("Corrective AI reason codes cannot be set by Admin decisions", 400);
   if (input.decision === "REJECT" && (!input.reason || !input.reason.trim())) {
     throw new AppError("Rejection reason is required", 400);
   }
@@ -240,6 +253,7 @@ export const decideProfileVerificationRequest = async (input: {
         decision: input.decision,
         authority: input.authority,
         reason: input.decision === "REJECT" ? input.reason?.trim() : undefined,
+        reasonCode: input.decision === "REJECT" ? input.reasonCode : undefined,
         decidedBy: input.decidedBy ? new mongoose.Types.ObjectId(input.decidedBy) : undefined,
         decidedAt: now,
         aiDecisionSnapshot: input.aiDecisionSnapshot ? { ...input.aiDecisionSnapshot, decidedAt: now } : undefined,
@@ -274,6 +288,7 @@ export const decideProfileVerificationRequest = async (input: {
           decisionAuthority: updated.decisionAuthority!,
           profileStatus: profile.profileStatus,
           ...(input.decision === "REJECT" ? { reason: profile.rejectionReason } : {}),
+          ...(input.decision === "REJECT" && input.reasonCode ? { reasonCode: input.reasonCode } : {}),
         },
         session,
       });

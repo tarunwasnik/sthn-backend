@@ -21,7 +21,7 @@ export const requireProfilePhotoCountForVerificationPolicy = (
   profilePhotos: readonly string[],
   policy: ProfileVerificationPolicy,
 ) => {
-  if (policy.key === "GATED_MULTI_MEDIA" && policy.version === "V1" && profilePhotos.length !== GATED_PROFILE_PHOTO_COUNT) {
+  if (policy.key === "GATED_MULTI_MEDIA" && (policy.version === "V1" || policy.version === "V2") && profilePhotos.length !== GATED_PROFILE_PHOTO_COUNT) {
     throw new AppError(
       `Exactly ${GATED_PROFILE_PHOTO_COUNT} profile photos are required for verification`,
       400,

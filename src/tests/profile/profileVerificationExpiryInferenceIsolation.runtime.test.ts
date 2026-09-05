@@ -15,6 +15,7 @@ import { expireProfileVerificationRequests } from "../../services/profile/profil
 import { reconcileFaceVerificationEvidenceRetention } from "../../services/profile/faceVerificationEvidenceCleanup.service";
 import { FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS } from "../../services/profile/faceVerification.constants";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
+import { installReferenceAvatarTestFixture, resetReferenceAvatarTestFixture } from "./helpers/referenceAvatarTestFixture";
 
 process.env.NODE_ENV = "test";
 
@@ -58,10 +59,11 @@ class SyntheticAdapter implements ProfileVerificationInferenceAdapter {
 before(async () => { await connectPhase7HDatabase(); await ProfileVerificationInferenceResult.init(); }, { timeout: 120_000 });
 beforeEach(async () => {
   await clearPhase7HDatabase();
+  installReferenceAvatarTestFixture();
   storage.storeFaceVerificationEvidence = async (input) => ({ publicId: input.publicId, bytes: input.buffer.length, format: "jpeg", mimeType: "image/jpeg" });
   storage.deleteFaceVerificationEvidence = async () => "DELETED";
 });
-after(async () => { storage.storeFaceVerificationEvidence = originalStore; storage.deleteFaceVerificationEvidence = originalDelete; await disconnectPhase7HDatabase(); }, { timeout: 30_000 });
+after(async () => { storage.storeFaceVerificationEvidence = originalStore; storage.deleteFaceVerificationEvidence = originalDelete; resetReferenceAvatarTestFixture(); await disconnectPhase7HDatabase(); }, { timeout: 30_000 });
 
 test("V1 inference result cannot collide with, replay into, or survive V2 authority", async () => {
   const user = await User.create({ email: "inference-isolation@test.local", password: "test-password", status: "pending_profile", governanceState: "ACTIVE" });

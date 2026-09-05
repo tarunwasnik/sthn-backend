@@ -87,6 +87,37 @@ test("expired leases recover and background claims do not depend on an HTTP requ
   assert.equal(reClaimed?.actionable, true);
 });
 
+test("an expired lease at the attempt limit fails once, escalates to Admin, and cannot be reclaimed", async () => {
+  const started = new Date("2030-01-01T00:00:00.000Z");
+  const { request, profile } = await makeProfile("expired-exhausted", started);
+  const { job } = await ensureProfileVerificationJob(request);
+  await ProfileVerificationJob.updateOne({ _id: job._id }, {
+    $set: { status: "RUNNING", workerId: "dead-worker", claimedAt: started, leaseExpiresAt: new Date(started.getTime() + 1_000), attemptCount: 3 },
+  });
+
+  const now = new Date(started.getTime() + 2_000);
+  const report = await reconcileProfileVerificationJobs(now);
+  const failed = await ProfileVerificationJob.findById(job._id);
+  assert.equal(report.expiredLeasesRecovered, 0);
+  assert.equal(report.expiredLeasesFailed, 1);
+  assert.equal(failed?.status, "FAILED");
+  assert.equal(failed?.lastErrorCode, "WORKER_LEASE_EXPIRED");
+  assert.equal((await ProfileVerificationRequest.findById(request._id))?.status, "ADMIN_REVIEW_REQUIRED");
+  assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification");
+  assert.equal(await claimProfileVerificationJob({ workerId: "worker-b", now }), null);
+  const replay = await reconcileProfileVerificationJobs(new Date(now.getTime() + 1_000));
+  assert.equal(replay.expiredLeasesFailed, 0);
+});
+
+test("claimNext atomically refuses a malformed exhausted retry job", async () => {
+  const now = new Date("2030-01-01T00:00:00.000Z");
+  const { request } = await makeProfile("claim-exhausted", now);
+  const { job } = await ensureProfileVerificationJob(request);
+  await ProfileVerificationJob.updateOne({ _id: job._id }, { $set: { status: "RETRY_WAIT", attemptCount: 3, maxRetryCount: 3, nextAttemptAt: now } });
+  assert.equal(await claimProfileVerificationJob({ workerId: "worker-a", now }), null);
+  assert.equal((await ProfileVerificationJob.findById(job._id))?.status, "RETRY_WAIT");
+});
+
 test("deadline reconciliation escalates exactly at 30 minutes without cancelling active work", async () => {
   const now = new Date("2030-01-01T12:30:00.000Z");
   const submittedAt = new Date(now.getTime() - (29 * 60 * 1000));

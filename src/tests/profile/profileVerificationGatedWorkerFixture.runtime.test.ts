@@ -16,6 +16,7 @@ import { ensureActiveProfileVerificationRequest } from "../../services/profile/p
 import { ensureProfileVerificationJob, processNextProfileVerificationJob } from "../../services/profile/profileVerificationJob.service";
 import { createSFaceProfileVerificationAdapter } from "../../services/profile/profileVerificationSFaceAdapter";
 import { getAdminProfileVerificationDetail } from "../../services/profile/profileVerificationAdminRead.service";
+import { SFACE_ARTIFACT } from "../../services/profile/profileVerificationFaceEmbeddingAdapter";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
 
 process.env.NODE_ENV = "test";
@@ -93,6 +94,21 @@ test("canonical worker completes bounded Gate-1 technical failure and Gate-2 inv
       assert.ok(outcome?.result); assert.equal(stored?.status, "ADMIN_REVIEW_REQUIRED"); assert.equal(stored?.decision, undefined); assert.equal(job?.status, "COMPLETED"); assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification");
       assert.equal(result?.gatedPolicyAnalysis?.gate1.outcome, analysis.gate1.outcome); assert.equal(result?.gatedPolicyAnalysis?.gate2?.outcome, analysis.gate2?.outcome); assert.equal(result?.gatedPolicyAnalysis?.gate3, undefined);
     }
+  } finally { if (previous === undefined) delete process.env.STHN_PROFILE_VERIFICATION_POLICY; else process.env.STHN_PROFILE_VERIFICATION_POLICY = previous; if (threshold === undefined) delete process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD; else process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD = threshold; }
+});
+
+test("canonical worker persists and applies a V2 gated match without consulting legacy authority", async () => {
+  const previous = process.env.STHN_PROFILE_VERIFICATION_POLICY; const threshold = process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD;
+  process.env.STHN_PROFILE_VERIFICATION_POLICY = "GATED_MULTI_MEDIA_V2"; process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD = "0.99";
+  try {
+    const { request, profile } = await createGatedWorkerFixture("v2-authority");
+    const analysis = { policy: { key: "GATED_MULTI_MEDIA", version: "V2" }, gate1: { outcome: "PASS", usableCaptureCount: 5, weakestPeerMedian: .6128890532, threshold: .28, policyVersion: "V1" }, gate2: { outcome: "READY_FOR_GATE3", avatarAdmission: "VALID_SINGLE_FACE", optionalMediaSummary: { noFaceValidCount: 0, usableFaceEvidenceCount: 7, unusableEvidenceCount: 0, mediaReadFailedCount: 0 } }, gate3: { conclusion: "LIKELY_MATCH", avatarMembership: "PERSON_A_SUPPORTED", avatarMedianSimilarity: .4289849647, membershipThreshold: .36, multiFaceMinMargin: .04, optionalPersonASupportCount: 0, optionalAmbiguousMediaCount: 0, optionalTechnicalFailureCount: 0 } };
+    const base = boundedGatedAdapter(analysis);
+    const outcome = await processNextProfileVerificationJob({ workerId: "y4t-v2", adapterFactory: () => ({ ...base, infer: async () => ({ ...(await base.infer()), profileMediaShadowAnalysis: { status: "COMPLETED", processedAt: new Date(), model: { identifier: SFACE_ARTIFACT.identifier, version: SFACE_ARTIFACT.version }, summary: { submittedMediaCount: 8, processedMediaCount: 8, mediaWithNoFaceCount: 0, mediaWithUsableFacesCount: 8, multiFaceMediaCount: 0, failedMediaCount: 0 }, live: { usableCaptureCount: 5, pairwiseComparisonCount: 10, minimumSimilarity: .6, maximumSimilarity: .7, meanSimilarity: .65, medianSimilarity: .65 }, media: [] } }) }) as never });
+    const stored = await ProfileVerificationRequest.findById(request._id).orFail();
+    assert.ok(outcome?.result); assert.equal(outcome?.completed, true); assert.equal(stored.verificationPolicy?.version, "V2");
+    assert.equal(stored.status, "APPROVED"); assert.equal(stored.decisionAuthority, "AI"); assert.equal(stored.aiDecisionSnapshot?.threshold, .36);
+    assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "verified");
   } finally { if (previous === undefined) delete process.env.STHN_PROFILE_VERIFICATION_POLICY; else process.env.STHN_PROFILE_VERIFICATION_POLICY = previous; if (threshold === undefined) delete process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD; else process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD = threshold; }
 });
 

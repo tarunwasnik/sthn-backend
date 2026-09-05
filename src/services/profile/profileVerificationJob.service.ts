@@ -15,6 +15,7 @@ import { applyProfileVerificationAiDecision } from "./profileVerificationAiDecis
 import { UserProfile } from "../../models/userProfile.model";
 import { AppError } from "../../utils/AppError";
 import { ProfileVerificationInferenceAdapter } from "./profileVerificationInferenceAdapter";
+import { reportProfileVerificationMemory } from "./profileVerificationMemoryDiagnostic.service";
 
 const LEASE_MS = 5 * 60 * 1000;
 const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000];
@@ -32,6 +33,14 @@ const isTerminalRequest = (request: ProfileVerificationRequestDocument | null) =
 const isReconciliationApplicableProfile = async (profileId: Types.ObjectId, submissionVersion: number) => {
   const profile = await UserProfile.findById(profileId).select("profileStatus verificationSubmissionVersion").lean();
   return profile?.profileStatus === "pending_verification" && profile.verificationSubmissionVersion === submissionVersion;
+};
+
+const escalateFailedProfileVerificationJob = async (job: ProfileVerificationJobDocument, reason: string, now: Date) => {
+  const request = await profileVerificationRequestRepository.findById(job.verificationRequestId);
+  if (request && request.isActive && (request.status === "PENDING" || request.status === "PROCESSING")) {
+    const { escalateProfileVerificationRequest } = await import("./profileVerificationRequest.service");
+    await escalateProfileVerificationRequest({ profileId: String(request.profileId), reasonCode: "MODEL_FAILURE", reason, now });
+  }
 };
 
 export const ensureProfileVerificationJob = async (
@@ -101,11 +110,7 @@ export const recordProfileVerificationJobFailure = async (input: {
   if (job.attemptCount >= job.maxRetryCount) {
     const failed = await profileVerificationJobRepository.fail({ jobId: job._id, workerId: input.workerId, now, errorCode, errorMessage });
     if (!failed) return null;
-    const request = await profileVerificationRequestRepository.findById(failed.verificationRequestId);
-    if (request && request.isActive && (request.status === "PENDING" || request.status === "PROCESSING")) {
-      const { escalateProfileVerificationRequest } = await import("./profileVerificationRequest.service");
-      await escalateProfileVerificationRequest({ profileId: String(request.profileId), reasonCode: "MODEL_FAILURE", reason: "Verification processing could not be completed after bounded retries." });
-    }
+    await escalateFailedProfileVerificationJob(failed, "Verification processing could not be completed after bounded retries.", now);
     return failed;
   }
 
@@ -125,12 +130,18 @@ export const processNextProfileVerificationJob = async (input: { workerId: strin
   const claim = await claimProfileVerificationJob({ workerId: input.workerId, now });
   if (!claim) return null;
   if (!claim.actionable) return { ...claim, result: null, completed: true };
+  reportProfileVerificationMemory("WORKER_CLAIMED");
   try {
     const outcome = await withYuNetRunnerAuditContext({ verificationReference: claim.request!.verificationReference, jobReference: claim.job.jobReference, submissionVersion: claim.job.profileSubmissionVersion, attemptCount: claim.job.attemptCount }, () => finalizeProfileVerificationInference({
       verificationRequestId: String(claim.job.verificationRequestId), adapter: input.adapterFactory?.() ?? createSFaceProfileVerificationAdapter(),
     }));
-    if (outcome.result) await applyProfileVerificationAiDecision({ request: claim.request!, result: outcome.result });
+    reportProfileVerificationMemory("INFERENCE_FINALIZED");
+    if (outcome.result) {
+      const decision = await applyProfileVerificationAiDecision({ request: claim.request!, result: outcome.result });
+      reportProfileVerificationMemory("DECISION_APPLIED", { decisionType: decision.request.status as "APPROVED" | "REJECTED" | "ADMIN_REVIEW_REQUIRED" });
+    }
     const completed = await profileVerificationJobRepository.completeIfNotTerminal({ jobId: claim.job._id, now: new Date() });
+    reportProfileVerificationMemory("WORKER_COMPLETED");
     return { ...claim, result: outcome.result, replayed: outcome.replayed, completed: Boolean(completed) };
   } catch (error) {
     const inferenceError = error instanceof ProfileVerificationInferenceError ? error : null;
@@ -145,10 +156,16 @@ export const processNextProfileVerificationJob = async (input: { workerId: strin
 };
 
 export const reconcileProfileVerificationJobs = async (now = new Date()) => {
-  const report = { jobsCreated: 0, expiredLeasesRecovered: 0, terminalJobsCompleted: 0, timeoutEscalated: 0, skipped: 0 };
+  const report = { jobsCreated: 0, expiredLeasesRecovered: 0, expiredLeasesFailed: 0, terminalJobsCompleted: 0, timeoutEscalated: 0, skipped: 0 };
   const { expireProfileVerificationRequests } = await import("./profileVerificationRequest.service");
   await expireProfileVerificationRequests(now);
-  const recovered = await profileVerificationJobRepository.recoverExpiredLeases(now);
+  for (;;) {
+    const failed = await profileVerificationJobRepository.failOneExpiredLeaseAtAttemptLimit(now);
+    if (!failed) break;
+    report.expiredLeasesFailed += 1;
+    await escalateFailedProfileVerificationJob(failed, "Verification processing stopped before completion after bounded attempts.", now);
+  }
+  const recovered = await profileVerificationJobRepository.recoverExpiredLeasesBelowAttemptLimit(now);
   report.expiredLeasesRecovered = recovered.modifiedCount;
 
   const activeRequests = await profileVerificationRequestRepository.listActive();

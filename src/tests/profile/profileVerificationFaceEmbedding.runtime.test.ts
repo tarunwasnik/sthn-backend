@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import sharp from "sharp";
+import * as ort from "onnxruntime-node";
 
 import {
   createDeterministicTestFaceEmbeddingAdapter,
+  createProductionFaceEmbeddingAdapter,
   createSFaceInputTensor,
   getProductionFaceEmbeddingAdapter,
+  getSFaceSessionCreationCountForTests,
+  resetSFaceRunnerForTests,
   SFACE_ARTIFACT,
   SFACE_FACE_EMBEDDING_SPECIFICATION,
   TEST_ONLY_FACE_EMBEDDING_SPECIFICATION,
@@ -20,6 +24,19 @@ import {
 } from "../../services/profile/profileVerificationFaceEmbedding.service";
 import { decodeYuNetOutput } from "../../services/profile/profileVerificationYuNetRunner";
 import { analyseSFaceShadowIdentity } from "../../services/profile/profileVerificationSFaceShadowAnalysis.service";
+
+const sfaceInput = () => ({
+  pixels: Buffer.alloc(112 * 112 * 3), width: 112, height: 112, channels: 3 as const,
+  preprocessingIdentifier: SFACE_FACE_EMBEDDING_SPECIFICATION.preprocessing.identifier,
+});
+
+const disposableTensor = (data: Float32Array) => {
+  let disposeCount = 0;
+  return {
+    tensor: { data, dispose: () => { disposeCount += 1; } } as unknown as ort.Tensor,
+    disposeCount: () => disposeCount,
+  };
+};
 
 const landmarks = {
   rightEye: { x: 2, y: 2 },
@@ -112,6 +129,7 @@ test("the deterministic adapter is test-only and does not stand in for productio
 });
 
 test("the selected SFace artifact loads with its verified tensor contract and returns a finite normalized embedding", async () => {
+  resetSFaceRunnerForTests();
   const adapter = getProductionFaceEmbeddingAdapter();
   const pixels = Buffer.alloc(112 * 112 * 3);
   for (let index = 0; index < pixels.length; index += 1) pixels[index] = index % 251;
@@ -122,6 +140,52 @@ test("the selected SFace artifact loads with its verified tensor contract and re
   assert.equal(first.length, 128);
   assert.ok(first.every(Number.isFinite));
   assert.equal(cosineSimilarity(first, second, 128), 1);
+  assert.equal(getSFaceSessionCreationCountForTests(), 1);
+});
+
+test("SFace disposes its input and every output after copying an equivalent embedding", async () => {
+  const input = disposableTensor(new Float32Array());
+  const primary = disposableTensor(Float32Array.from({ length: 128 }, (_, index) => index / 128));
+  const auxiliary = disposableTensor(new Float32Array([7]));
+  let sessionLoadCount = 0;
+  const adapter = createProductionFaceEmbeddingAdapter({
+    createInputTensor: () => input.tensor,
+    loadSession: async () => {
+      sessionLoadCount += 1;
+      return { run: async () => ({ fc1: primary.tensor, auxiliary: auxiliary.tensor }) } as unknown as Pick<ort.InferenceSession, "run">;
+    },
+  });
+
+  const embedding = await adapter.infer(sfaceInput());
+  assert.deepEqual(embedding, Array.from(primary.tensor.data as Float32Array));
+  assert.equal(input.disposeCount(), 1);
+  assert.equal(primary.disposeCount(), 1);
+  assert.equal(auxiliary.disposeCount(), 1);
+  assert.equal(sessionLoadCount, 1);
+});
+
+test("SFace disposes its input when session.run fails", async () => {
+  const input = disposableTensor(new Float32Array());
+  const adapter = createProductionFaceEmbeddingAdapter({
+    createInputTensor: () => input.tensor,
+    loadSession: async () => ({ run: async () => { throw new Error("synthetic run failure"); } }) as unknown as Pick<ort.InferenceSession, "run">,
+  });
+  await assert.rejects(adapter.infer(sfaceInput()), /SFace embedding inference could not be completed/);
+  assert.equal(input.disposeCount(), 1);
+});
+
+test("SFace disposes its input and all outputs when output validation fails", async () => {
+  const input = disposableTensor(new Float32Array());
+  const malformed = disposableTensor(new Float32Array([Number.NaN]));
+  const auxiliary = disposableTensor(new Float32Array([9]));
+  const adapter = createProductionFaceEmbeddingAdapter({
+    createInputTensor: () => input.tensor,
+    loadSession: async () => ({ run: async () => ({ fc1: malformed.tensor, auxiliary: auxiliary.tensor }) }) as unknown as Pick<ort.InferenceSession, "run">,
+  });
+  await assert.rejects(adapter.infer(sfaceInput()));
+  assert.equal(input.disposeCount(), 1);
+  assert.equal(malformed.disposeCount(), 1);
+  assert.equal(auxiliary.disposeCount(), 1);
 });
 
 test("SFace input tensor matches OpenCV FaceRecognizerSF RGB, unit-scale, zero-mean NCHW preprocessing", () => {

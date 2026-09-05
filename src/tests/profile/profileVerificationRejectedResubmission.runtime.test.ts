@@ -10,6 +10,7 @@ import { ProfileVerificationRequest } from "../../models/profileVerificationRequ
 import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
 import { startFaceVerificationSession } from "../../services/profile/faceVerificationSession.service";
 import { setBiometricReferenceAvatarValidationDependenciesForTests } from "../../services/profile/profileVerificationReferenceAvatarValidation.service";
+import { decideProfileVerificationRequest, ensureActiveProfileVerificationRequest } from "../../services/profile/profileVerificationRequest.service";
 import { upsertProfile, updateMyProfile } from "../../controllers/profile.controller";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
 
@@ -73,4 +74,32 @@ test("a session completed for avatar A cannot authorize rejected resubmission wi
   const current = await UserProfile.findById(profile._id).orFail();
   assert.equal(current.profileStatus, "rejected"); assert.equal(current.verificationSubmissionVersion, 1);
   assert.equal(await ProfileVerificationRequest.countDocuments({ profileId: profile._id }), 0);
+});
+
+test("a corrective V2 AI rejection enters the same fresh-session isolated resubmission lifecycle", async () => {
+  const sixPhotoBody = { ...body, username: "v2-ai-rejected-resubmit", profilePhotos: Array.from({ length: 6 }, (_, index) => `https://example.test/v2-${index}.jpg`) };
+  const user = await User.create({ email: "v2-ai-rejected-resubmit@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });
+  const profile = await UserProfile.create({ ...sixPhotoBody, userId: user._id, profileStatus: "pending_verification", rejectionReason: "", verificationSubmissionVersion: 1, verificationSubmittedAt: new Date() });
+  const previousPolicy = process.env.STHN_PROFILE_VERIFICATION_POLICY;
+  process.env.STHN_PROFILE_VERIFICATION_POLICY = "GATED_MULTI_MEDIA_V2";
+  try {
+    const oldRequest = (await ensureActiveProfileVerificationRequest(profile)).request;
+    await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "REJECT", authority: "AI", reasonCode: "IDENTITY_MISMATCH", reason: "The avatar did not match the completed live captures. Update it and try again.", expectedRequestId: String(oldRequest._id), expectedSubmissionVersion: 1 });
+    const rejected = await UserProfile.findById(profile._id).orFail();
+    assert.equal(rejected.profileStatus, "rejected"); assert.equal((await User.findById(user._id))?.governanceState, "ACTIVE");
+
+    const freshSession = await startFaceVerificationSession({ userId: String(user._id), avatar });
+    assert.equal(freshSession.profileSubmissionVersion, 2);
+    await completeWithEvidence(freshSession._id);
+    await invoke(upsertProfile, { id: String(user._id), role: "user", status: "active" }, sixPhotoBody);
+
+    const newRequest = await ProfileVerificationRequest.findOne({ profileId: profile._id, isActive: true }).orFail();
+    const storedOldRequest = await ProfileVerificationRequest.findById(oldRequest._id).orFail();
+    const reboundSession = await FaceVerificationSession.findById(freshSession._id).orFail();
+    assert.equal(storedOldRequest.status, "REJECTED"); assert.equal(storedOldRequest.isActive, false);
+    assert.equal(newRequest.profileSubmissionVersion, 2); assert.equal(newRequest.verificationPolicy?.version, "V2"); assert.notEqual(String(newRequest._id), String(oldRequest._id));
+    assert.equal(String(reboundSession.verificationRequestId), String(newRequest._id));
+    assert.equal(await FaceVerificationEvidence.countDocuments({ sessionId: freshSession._id, verificationRequestId: newRequest._id, status: "STORED" }), 5);
+    assert.equal(await FaceVerificationEvidence.countDocuments({ sessionId: freshSession._id, verificationRequestId: oldRequest._id }), 0);
+  } finally { if (previousPolicy === undefined) delete process.env.STHN_PROFILE_VERIFICATION_POLICY; else process.env.STHN_PROFILE_VERIFICATION_POLICY = previousPolicy; }
 });

@@ -21,6 +21,7 @@ import {
 } from "../enums/profileVerificationInference.enums";
 import { FaceVerificationChallenge } from "./faceVerificationSession.model";
 import { ProfileVerificationPolicy } from "./profileVerificationRequest.model";
+import type { ProfileVerificationProfileMediaShadowAnalysis } from "../services/profile/profileVerificationInference.types";
 
 export interface ProfileVerificationInferencePipelineComponentDocument {
   identifier: string;
@@ -60,7 +61,7 @@ export interface ProfileVerificationInferenceResultDocument extends Document {
     antiSpoof: { status: ProfileVerificationAntiSpoofFinding };
   };
   shadowIdentityAnalysis?: { status: ProfileVerificationShadowIdentityStatus; conclusion?: ProfileVerificationShadowIdentityConclusion; similarity?: number; threshold?: number; model?: { identifier: string; version: string }; processedAt?: Date; reasonCode?: string; reason?: string };
-  profileMediaShadowAnalysis?: unknown;
+  profileMediaShadowAnalysis?: ProfileVerificationProfileMediaShadowAnalysis;
   gatedPolicyAnalysis?: {
     policy: ProfileVerificationPolicy;
     gate1: { outcome: "PASS" | "LIVE_CAPTURE_TECHNICAL_FAILURE" | "LIVE_ANCHOR_INCOHERENT"; usableCaptureCount: number; weakestPeerMedian?: number; threshold: number; policyVersion: string };
