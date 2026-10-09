@@ -1,0 +1,25 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import test from "node:test";
+
+type Decision = "PASS" | "BLOCK";
+type Row = { candidateId: string; humanDecision: Decision; originalOwen: { decision: Decision }; e5o: { decision: Decision }; originalCorrect: boolean; e5oCorrect: boolean };
+const outputRoot = path.resolve(process.cwd(), "evaluation-output", "image-moderation");
+const f4Path = path.join(outputRoot, "i4-f4-frozen-unseen-test-v1", "f4-frozen-unseen-evaluation.json");
+const f5Path = path.join(outputRoot, "i4-f5-generalization-analysis", "f5-analysis.json");
+const count = (rows: Row[], predicate: (row: Row) => boolean) => rows.filter(predicate).length;
+
+test("F5 read-only analysis deterministically reconciles every recorded F4 transition", async () => {
+  const [f4Bytes, f5Bytes] = await Promise.all([readFile(f4Path), readFile(f5Path)]);
+  const f4 = JSON.parse(f4Bytes.toString("utf8")) as { resultFingerprint: string; rows: Row[] };
+  const f5 = JSON.parse(f5Bytes.toString("utf8")) as { reportFingerprint: string; source: { f4ResultFingerprint: string; f4ArtifactSha256: string }; transitions: Record<string, { count: number }> };
+  const sha = createHash("sha256").update(f4Bytes).digest("hex"); const reportPayload = { ...f5 } as { reportFingerprint?: string }; delete reportPayload.reportFingerprint;
+  assert.equal(f4.resultFingerprint, "497e5737a84c3b023b976e214ce85201847bc98dc66c70664df43623264a3937"); assert.equal(sha, "09e37002e201c3406a892b449b00c5ef2a1e09a415ad80f2f7165eba3d981af4"); assert.equal(f5.source.f4ResultFingerprint, f4.resultFingerprint); assert.equal(f5.source.f4ArtifactSha256, sha); assert.equal(createHash("sha256").update(JSON.stringify(reportPayload)).digest("hex"), f5.reportFingerprint); assert.equal(f5.reportFingerprint, "46b3202381e48b1d4a139b047f2b9f2de70aed4d4e6d17453b2f3925657d9174");
+  const rows = f4.rows, bothCorrect = count(rows, (row) => row.originalCorrect && row.e5oCorrect), bothWrong = count(rows, (row) => !row.originalCorrect && !row.e5oCorrect), owenCorrectE5oWrong = count(rows, (row) => row.originalCorrect && !row.e5oCorrect), owenWrongE5oCorrect = count(rows, (row) => !row.originalCorrect && row.e5oCorrect);
+  assert.deepEqual([bothCorrect, bothWrong, owenCorrectE5oWrong, owenWrongE5oCorrect], [261, 32, 21, 11]); assert.equal(bothCorrect + bothWrong + owenCorrectE5oWrong + owenWrongE5oCorrect, 325);
+  const owenFalseBlock = count(rows, (row) => row.humanDecision === "PASS" && row.originalOwen.decision === "BLOCK"), owenFalsePass = count(rows, (row) => row.humanDecision === "BLOCK" && row.originalOwen.decision === "PASS"), e5oFalseBlock = count(rows, (row) => row.humanDecision === "PASS" && row.e5o.decision === "BLOCK"), e5oFalsePass = count(rows, (row) => row.humanDecision === "BLOCK" && row.e5o.decision === "PASS"), bothFalseBlock = count(rows, (row) => row.humanDecision === "PASS" && row.originalOwen.decision === "BLOCK" && row.e5o.decision === "BLOCK"), bothFalsePass = count(rows, (row) => row.humanDecision === "BLOCK" && row.originalOwen.decision === "PASS" && row.e5o.decision === "PASS"), newE5oFalseBlock = count(rows, (row) => row.humanDecision === "PASS" && row.originalOwen.decision === "PASS" && row.e5o.decision === "BLOCK"), newE5oFalsePass = count(rows, (row) => row.humanDecision === "BLOCK" && row.originalOwen.decision === "BLOCK" && row.e5o.decision === "PASS"), correctedFalseBlock = count(rows, (row) => row.humanDecision === "PASS" && row.originalOwen.decision === "BLOCK" && row.e5o.decision === "PASS"), correctedFalsePass = count(rows, (row) => row.humanDecision === "BLOCK" && row.originalOwen.decision === "PASS" && row.e5o.decision === "BLOCK");
+  assert.deepEqual([owenFalseBlock, owenFalsePass, e5oFalseBlock, e5oFalsePass, bothFalseBlock, bothFalsePass, newE5oFalseBlock, newE5oFalsePass, correctedFalseBlock, correctedFalsePass], [22, 21, 28, 25, 13, 19, 15, 6, 9, 2]); assert.deepEqual([bothFalseBlock + correctedFalseBlock, bothFalsePass + correctedFalsePass, bothFalseBlock + newE5oFalseBlock, bothFalsePass + newE5oFalsePass], [22, 21, 28, 25]); assert.deepEqual([f5.transitions.NEW_E5O_FP.count, f5.transitions.NEW_E5O_FN.count, f5.transitions.OWEN_FP_CORRECTED_BY_E5O.count, f5.transitions.OWEN_FN_CORRECTED_BY_E5O.count, f5.transitions.BOTH_FP.count, f5.transitions.BOTH_FN.count], [15, 6, 9, 2, 13, 19]);
+});
+test("F5 artifacts and viewer contract are bounded and strictly read-only", async () => { const [report, viewer] = await Promise.all([readFile(f5Path, "utf8"), readFile(path.resolve(process.cwd(), "src", "scripts", "reviewF4Errors.ts"), "utf8")]); assert.equal(/base64|embedding|feature vector|raw tensor|imageBytes/i.test(report), false); assert.match(viewer, /request\.method !== "GET"/); assert.match(viewer, /f4-frozen-unseen-evaluation\.json/); assert.match(viewer, /loadUnseenManifest/); assert.doesNotMatch(viewer, /evaluateFrozenUnseenTestV1|onnxruntime|python/i); assert.doesNotMatch(viewer, /"(?:POST|PUT|PATCH|DELETE)"/); });

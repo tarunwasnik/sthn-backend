@@ -1,5 +1,5 @@
 import { ulid } from "ulid";
-import { Types } from "mongoose";
+import { ClientSession, Types } from "mongoose";
 
 import { ProfileVerificationRequestDocument } from "../../models/profileVerificationRequest.model";
 import { ProfileVerificationJobDocument } from "../../models/profileVerificationJob.model";
@@ -45,8 +45,9 @@ const escalateFailedProfileVerificationJob = async (job: ProfileVerificationJobD
 
 export const ensureProfileVerificationJob = async (
   request: ProfileVerificationRequestDocument,
+  session?: ClientSession,
 ): Promise<{ job: ProfileVerificationJobDocument; created: boolean }> => {
-  const existing = await profileVerificationJobRepository.findByRequestId(request._id);
+  const existing = await profileVerificationJobRepository.findByRequestId(request._id, session);
   if (existing) return { job: existing, created: false };
   try {
     const job = await profileVerificationJobRepository.create({
@@ -56,11 +57,11 @@ export const ensureProfileVerificationJob = async (
       userId: request.userId,
       profileSubmissionVersion: request.profileSubmissionVersion,
       nextAttemptAt: new Date(),
-    });
+    }, session);
     return { job, created: true };
   } catch (error) {
     if (!(typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === 11000)) throw error;
-    const concurrent = await profileVerificationJobRepository.findByRequestId(request._id);
+    const concurrent = await profileVerificationJobRepository.findByRequestId(request._id, session);
     if (!concurrent) throw error;
     return { job: concurrent, created: false };
   }

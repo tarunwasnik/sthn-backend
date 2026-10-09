@@ -1,0 +1,8 @@
+import path from "node:path";
+import { publishMhsV2PiiPair, readMhsV2PiiAuthorities, screenMhsV2ExpansionCandidates } from "../research/textModerationDataset/mhsV2ExpansionPiiScreening";
+
+const root = process.cwd(), mhs = path.resolve(root, "dataset-research/text-moderation/MEASURING_HATE_SPEECH");
+const authorities = readMhsV2PiiAuthorities({ policy: path.resolve(root, "dataset-research/text-moderation/policy/sthn-text-moderation-pii-policy-v1.json"), candidate: path.join(mhs, "expansion/candidates/mhs-v2-expansion-candidates-v1.json"), acquisition: path.join(mhs, "expansion/candidates/mhs-v2-expansion-candidate-acquisition-v1.json"), proposal: path.join(mhs, "expansion/mhs-train-expansion-tranche-proposal-v1.json"), v1Candidate: path.join(mhs, "candidates/mhs-review-pilot-v1-candidate-v1.json"), splitManifest: path.join(mhs, "splits/mhs-split-manifest-v1.json"), internalTestFreeze: path.join(mhs, "splits/mhs-internal-test-freeze-v1.json") });
+const artifacts = screenMhsV2ExpansionCandidates(authorities.candidate, authorities.acquisition, authorities.policy);
+const published = publishMhsV2PiiPair(artifacts.screening, artifacts.disposition, authorities.candidate, path.join(mhs, "expansion/pii"));
+console.log(JSON.stringify({ ...published, statistics: artifacts.screening.statistics, piiStatusCounts: artifacts.disposition.piiStatusCounts, reviewDispositionCounts: artifacts.disposition.reviewDispositionCounts, eligibleByProposalStratum: artifacts.disposition.eligibleByProposalStratum, unresolvedByProposalStratum: artifacts.disposition.unresolvedByProposalStratum, capacityAssessment: artifacts.disposition.capacityAssessment, finalAuthorizationDecision: artifacts.disposition.finalAuthorizationDecision }, null, 2));

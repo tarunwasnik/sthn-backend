@@ -1,0 +1,4 @@
+import { importManualBenchmark, manualBenchmarkRoot } from "../evaluation/imageModeration/dataset/manualBenchmarkInventory.service";
+import { analyzeManualBenchmark } from "../evaluation/imageModeration/dataset/manualBenchmarkReport.service";
+import { loadLocalReviewManifest } from "../evaluation/imageModeration/dataset/sexualContentReview.service";
+(async () => { const inventory = await importManualBenchmark(); const report = analyzeManualBenchmark({ schemaVersion: "STHN_IMAGE_SEXUAL_ACQUISITION_V1", candidates: inventory.candidates }, await loadLocalReviewManifest(manualBenchmarkRoot())); console.log(JSON.stringify({ inventory: { ...inventory, candidates: undefined }, review: report.review }, null, 2)); })().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

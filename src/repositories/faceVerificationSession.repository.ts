@@ -1,4 +1,4 @@
-import { Types } from "mongoose";
+import { ClientSession, Types } from "mongoose";
 import { FaceVerificationSession, FaceVerificationSessionDocument } from "../models/faceVerificationSession.model";
 
 export class FaceVerificationSessionRepository {
@@ -33,8 +33,8 @@ export class FaceVerificationSessionRepository {
       { new: true },
     ).exec();
   }
-  invalidateCompletedForAvatar(profileId: Types.ObjectId, avatarFingerprint: string, cleanupAfter: Date) {
-    return FaceVerificationSession.findOneAndUpdate({ profileId, isCurrent: true, status: "CAPTURE_COMPLETE", avatarFingerprint: { $ne: avatarFingerprint } }, { $set: { status: "INVALIDATED", isCurrent: false, invalidatedAt: new Date(), invalidationCode: "AVATAR_CHANGED", cleanupAfter } }, { new: true }).exec();
+  invalidateCompletedForAvatar(profileId: Types.ObjectId, avatarFingerprint: string, cleanupAfter: Date, session?: ClientSession) {
+    return FaceVerificationSession.findOneAndUpdate({ profileId, isCurrent: true, status: "CAPTURE_COMPLETE", avatarFingerprint: { $ne: avatarFingerprint } }, { $set: { status: "INVALIDATED", isCurrent: false, invalidatedAt: new Date(), invalidationCode: "AVATAR_CHANGED", cleanupAfter } }, { new: true, session }).exec();
   }
   invalidateForRequestRetentionExpiry(input: { requestId: Types.ObjectId; now: Date; cleanupAfter: Date }) {
     return FaceVerificationSession.findOneAndUpdate(
@@ -43,8 +43,8 @@ export class FaceVerificationSessionRepository {
       { new: true },
     ).exec();
   }
-  bindCompletedToRequest(input: { profileId: Types.ObjectId; requestId: Types.ObjectId; version: number; avatarFingerprint: string }) {
-    return FaceVerificationSession.findOneAndUpdate({ profileId: input.profileId, isCurrent: true, status: "CAPTURE_COMPLETE", profileSubmissionVersion: input.version, avatarFingerprint: input.avatarFingerprint, verificationRequestId: { $exists: false } }, { $set: { verificationRequestId: input.requestId } }, { new: true }).exec();
+  bindCompletedToRequest(input: { profileId: Types.ObjectId; requestId: Types.ObjectId; version: number; avatarFingerprint: string; session?: ClientSession }) {
+    return FaceVerificationSession.findOneAndUpdate({ profileId: input.profileId, isCurrent: true, status: "CAPTURE_COMPLETE", profileSubmissionVersion: input.version, avatarFingerprint: input.avatarFingerprint, verificationRequestId: { $exists: false } }, { $set: { verificationRequestId: input.requestId } }, { new: true, session: input.session }).exec();
   }
   findCurrentCompletedForInitialSubmission(input: { profileId: Types.ObjectId; userId: Types.ObjectId; version: number; avatarFingerprint: string }) {
     return FaceVerificationSession.findOne({ profileId: input.profileId, userId: input.userId, isCurrent: true, status: "CAPTURE_COMPLETE", profileSubmissionVersion: input.version, avatarFingerprint: input.avatarFingerprint }).exec();

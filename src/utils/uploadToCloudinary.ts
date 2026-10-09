@@ -57,3 +57,13 @@ export const uploadToCloudinary = (
     stream.end(buffer);
   });
 };
+
+export const uploadTemporaryImageToCloudinary = (buffer: Buffer, publicId: string): Promise<CloudinaryUploadResult> => new Promise((resolve, reject) => {
+  const stream = cloudinary.uploader.upload_stream({ folder: "image_ai_temporary", public_id: publicId, resource_type: "image", type: "upload", overwrite: false, unique_filename: false, tags: ["sthn-image-ai-temporary"] }, (error, result) => {
+    if (error || !result) return reject(error ?? new Error("Temporary image upload failed"));
+    resolve({ secure_url: result.secure_url, public_id: result.public_id, resource_type: result.resource_type, bytes: result.bytes, format: result.format, original_filename: result.original_filename });
+  });
+  stream.end(buffer);
+});
+
+export const deleteTemporaryImageFromCloudinary = (publicId: string) => cloudinary.uploader.destroy(publicId, { resource_type: "image", type: "upload", invalidate: true });

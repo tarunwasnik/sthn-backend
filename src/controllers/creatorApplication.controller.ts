@@ -8,6 +8,8 @@ import { Booking } from "../models/booking.model";
 import User from "../models/User";
 import { ROLES } from "../constants/roles";
 import { AppError } from "../utils/AppError";
+import { fingerprintTextModerationPayload, normalizeCreatorApplicationModerationPayload } from "../services/textModeration/textModerationNormalization.service";
+import { requireTextModerationAdmission } from "../services/textModeration/textModerationAdmission.service";
 
 export const applyForCreator = async (req: Request, res: Response) => {
   const authUser = req.user;
@@ -111,7 +113,15 @@ export const applyForCreator = async (req: Request, res: Response) => {
     throw new AppError("Missing required creator application fields", 400);
   }
 
-  const normalizedServices = Array.isArray(services) ? services : [];
+  const moderatedText = normalizeCreatorApplicationModerationPayload({ publicBio, services });
+  requireTextModerationAdmission({
+    token: req.body.textModerationAdmission,
+    domain: moderatedText.domain,
+    userId: authUser.id,
+    fingerprint: fingerprintTextModerationPayload(moderatedText),
+  });
+
+  const normalizedServices = moderatedText.services;
 
   const normalizedLanguages = Array.isArray(languages) ? languages : [];
 
@@ -139,7 +149,7 @@ export const applyForCreator = async (req: Request, res: Response) => {
             currency: currency.toUpperCase(),
 
             services: normalizedServices,
-            publicBio,
+            publicBio: moderatedText.publicBio,
 
             languages: normalizedLanguages,
 
@@ -166,7 +176,7 @@ export const applyForCreator = async (req: Request, res: Response) => {
       existingApplication.currency = currency.toUpperCase();
 
       existingApplication.services = normalizedServices;
-      existingApplication.publicBio = publicBio;
+      existingApplication.publicBio = moderatedText.publicBio;
 
       existingApplication.languages = normalizedLanguages;
 

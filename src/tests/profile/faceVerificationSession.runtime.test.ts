@@ -17,6 +17,7 @@ import { assertFaceVerificationImageBytes } from "../../middlewares/upload.middl
 import { setBiometricReferenceAvatarValidationDependenciesForTests } from "../../services/profile/profileVerificationReferenceAvatarValidation.service";
 import type { NextFunction, Request, Response } from "express";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
+import { withUserProfileTextAdmission } from "../textModeration/helpers/textModerationTestAdmission";
 
 process.env.NODE_ENV = "test";
 
@@ -164,7 +165,8 @@ test("matching completed pre-submit capture binds once to the first real verific
   const avatarA = "https://example.test/avatar-binding-a.jpg";
   const session = await startFaceVerificationSession({ userId: String(user._id), avatar: avatarA });
   for (let index = 0; index < 5; index += 1) await acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: session.sessionReference, challengeIndex: String(index), file: file(index) });
-  await invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: submission("face-binding", avatarA) });
+  const bindingSubmission = submission("face-binding", avatarA);
+  await invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(user._id), bindingSubmission) });
   const [profile, request, bound] = await Promise.all([
     UserProfile.findById(session.profileId), ProfileVerificationRequest.findOne({ profileId: session.profileId }), FaceVerificationSession.findById(session._id),
   ]);

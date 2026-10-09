@@ -1,0 +1,7 @@
+import path from "node:path";
+import { canonicalJson } from "../research/textModerationDataset/manifest";
+import { MHS_TRUSTED_DEVELOPMENT_PARTITIONING_PURPOSE, createMhsDevelopmentProjection } from "../research/textModerationDataset/mhsDevelopmentProjection";
+
+const root = path.resolve(process.cwd(), "dataset-research", "text-moderation", "MEASURING_HATE_SPEECH"); const candidates = path.join(root, "candidates"); const splits = path.join(root, "splits"); const release = path.join(root, "release");
+const result = createMhsDevelopmentProjection({ purpose: MHS_TRUSTED_DEVELOPMENT_PARTITIONING_PURPOSE, candidatePath: path.join(candidates, "mhs-review-pilot-v1-candidate-v1.json"), candidateIntegrityPath: path.join(candidates, "mhs-review-pilot-v1-candidate-v1-integrity-audit.json"), splitManifestPath: path.join(splits, "mhs-split-manifest-v1.json"), internalTestFreezePath: path.join(splits, "mhs-internal-test-freeze-v1.json"), rEligibilityPlanPath: path.join(release, "mhs-training-eligibility-release-plan-v1.json"), releaseManifestPath: path.join(release, "mhs-release-manifest-v1.json"), eligibilityManifestPath: path.join(release, "mhs-training-eligibility-manifest-v1.json"), outputDirectory: path.join(root, "development") });
+process.stdout.write(canonicalJson({ projectionPath: result.projectionPath, projectionSha256: result.projectionSha256, manifestPath: result.manifestPath, manifestSha256: result.manifestSha256, manifestPayloadDigest: result.manifest.manifestPayloadDigest, counts: result.manifest.projection, protectedCount: result.protectedCount }));

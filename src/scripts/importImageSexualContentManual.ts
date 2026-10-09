@@ -1,0 +1,3 @@
+import { cacheRoot, importManualIncoming, isCoverageClass } from "../evaluation/imageModeration/dataset/sexualContentAcquisition.service";
+const coverage = (process.argv[2] ?? "ORDINARY_PORTRAIT_PASS") as Parameters<typeof importManualIncoming>[1];
+if (!isCoverageClass(coverage)) { console.error(`Unknown coverage class: ${coverage}`); process.exitCode = 1; } else importManualIncoming(cacheRoot(), coverage).then((items) => console.log(`Imported ${items.filter((item) => item.state === "REVIEW_REQUIRED").length}; duplicates ${items.filter((item) => item.state === "DUPLICATE").length}; invalid ${items.filter((item) => item.state === "INVALID").length}`)).catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

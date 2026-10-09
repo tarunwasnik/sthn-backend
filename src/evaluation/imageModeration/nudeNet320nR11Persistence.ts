@@ -1,0 +1,6 @@
+import { createHash } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
+export const r11Sha = (value: Buffer | Uint8Array) => createHash("sha256").update(value).digest("hex");
+export const persistR11Raw = async (file: string, values: Float32Array) => { const bytes = Buffer.from(values.buffer, values.byteOffset, values.byteLength); await writeFile(file, bytes, { flag: "wx" }); return { sha256: r11Sha(bytes), byteLength: bytes.length, elementCount: values.length }; };
+export const reloadR11Raw = async (file: string) => { const bytes = await readFile(file); if (bytes.length % 4) throw new Error("R11 raw output is not Float32-aligned"); return { values: new Float32Array(bytes.buffer, bytes.byteOffset, bytes.length / 4), sha256: r11Sha(bytes), byteLength: bytes.length }; };
+export const verifyR11RawReload = async (file: string, expected: Float32Array) => { const reloaded = await reloadR11Raw(file); const expectedBytes = Buffer.from(expected.buffer, expected.byteOffset, expected.byteLength); const actualBytes = Buffer.from(reloaded.values.buffer, reloaded.values.byteOffset, reloaded.values.byteLength); return { exact: expectedBytes.equals(actualBytes), sha256: reloaded.sha256, elementCount: reloaded.values.length, byteLength: reloaded.byteLength }; };

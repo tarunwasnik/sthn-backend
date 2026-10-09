@@ -1,6 +1,20 @@
 node_modules
 # Keep environment variables out of version control
 .env
+.env.*
+!.env.example
+
+__pycache__/
+*.pyc
 
 /src/generated/prisma
 dist/
+evaluation-output/text-moderation/
+evaluation-output/image-moderation/
+evaluation-cache/text-moderation/
+evaluation-cache/image-moderation/
+dataset-research/text-moderation/
+
+# Local evaluation tooling and API artifacts
+evaluation-cache/uv-cache/
+evaluation-cache/marqo-api.json

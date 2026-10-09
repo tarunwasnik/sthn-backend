@@ -1,0 +1,1 @@
+import {createDatasetV2DevelopmentReviewServer}from"../evaluation/imageModeration/dataset/datasetV2DevelopmentReviewServer";(async()=>{const app=await createDatasetV2DevelopmentReviewServer({port:4320});console.log(`STHN D3 DEVELOPMENT reviewer: ${app.url}`)})().catch(e=>{console.error(e);process.exitCode=1});

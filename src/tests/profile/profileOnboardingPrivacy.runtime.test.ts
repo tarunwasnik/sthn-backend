@@ -13,6 +13,7 @@ import {
   connectPhase7HDatabase,
   disconnectPhase7HDatabase,
 } from "../financial/phase7h/helpers/database";
+import { withUserProfileTextAdmission } from "../textModeration/helpers/textModerationTestAdmission";
 
 process.env.NODE_ENV = "test";
 
@@ -47,7 +48,7 @@ test("private onboarding accepts intended fields and ignores verification mass a
 
   await invoke(upsertProfile, {
     user: { id: String(user._id), role: "user", status: "pending_profile" },
-    body: {
+    body: withUserProfileTextAdmission(String(user._id), {
       username: "privacy-safe-user",
       realName: "Private Account Name",
       dateOfBirth: "1990-01-01",
@@ -65,7 +66,7 @@ test("private onboarding accepts intended fields and ignores verification mass a
       rejectionReason: "client supplied",
       verificationSubmittedAt: "2000-01-01",
       userId: "client supplied",
-    },
+    }),
   });
 
   const profile = await UserProfile.findOne({ userId: user._id }).lean();
@@ -172,7 +173,7 @@ test("onboarding rejects malformed mobile contact input", async () => {
   await assert.rejects(
     invoke(upsertProfile, {
       user: { id: String(user._id), role: "user", status: "pending_profile" },
-      body: {
+      body: withUserProfileTextAdmission(String(user._id), {
         username: "invalid-mobile-profile",
         realName: "Private Account Name",
         dateOfBirth: "1990-01-01",
@@ -186,7 +187,7 @@ test("onboarding rejects malformed mobile contact input", async () => {
         avatar: "https://example.test/avatar.jpg",
         cover: "https://example.test/cover.jpg",
         profilePhotos: ["https://example.test/one.jpg", "https://example.test/two.jpg"],
-      },
+      }),
     }),
   );
   assert.equal(await UserProfile.exists({ userId: user._id }), null);

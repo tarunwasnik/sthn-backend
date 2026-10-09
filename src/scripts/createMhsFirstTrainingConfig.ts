@@ -1,0 +1,7 @@
+import path from "node:path";
+import { CLASSIFIER_BASE_AUTHORITY_FILENAME } from "../research/textModerationDataset/classifierBaseModelAuthority";
+import { MHS_MATERIALIZATION_MANIFEST_FILENAME, MHS_TRAIN_FILENAME, MHS_VALIDATION_FILENAME } from "../research/textModerationDataset/mhsMaterialization";
+import { createMhsFirstTrainingConfig } from "../research/textModerationDataset/mhsFirstTrainingConfig";
+import { MHS_PREPROCESSING_FILENAME } from "../research/textModerationDataset/mhsPreprocessingContract";
+const root=process.cwd(),mhs=path.resolve(root,"dataset-research","text-moderation","MEASURING_HATE_SPEECH"),materialized=path.join(mhs,"materialized");
+const result=createMhsFirstTrainingConfig({classifierAuthorityPath:path.resolve(root,"dataset-research","text-moderation","model-authority",CLASSIFIER_BASE_AUTHORITY_FILENAME),preprocessingContractPath:path.join(mhs,"preprocessing",MHS_PREPROCESSING_FILENAME),materializationManifestPath:path.join(materialized,MHS_MATERIALIZATION_MANIFEST_FILENAME),trainPath:path.join(materialized,MHS_TRAIN_FILENAME),validationPath:path.join(materialized,MHS_VALIDATION_FILENAME),outputDirectory:path.join(mhs,"training"),generatedAt:"2026-09-14T01:20:00.000Z"});process.stdout.write(JSON.stringify({artifactPath:result.artifactPath,artifactSha256:result.artifactSha256,configPayloadDigest:result.artifact.configPayloadDigest,authorizationDecision:result.artifact.authorizationDecision},null,2));

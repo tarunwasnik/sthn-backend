@@ -1,4 +1,4 @@
-import { Types } from "mongoose";
+import { ClientSession, Types } from "mongoose";
 
 import {
   ProfileVerificationJob,
@@ -10,16 +10,16 @@ export class ProfileVerificationJobRepository {
     return ProfileVerificationJob.findById(jobId).exec();
   }
 
-  findByRequestId(verificationRequestId: Types.ObjectId) {
-    return ProfileVerificationJob.findOne({ verificationRequestId, jobType: "PROFILE_VERIFICATION_PROCESSING" }).exec();
+  findByRequestId(verificationRequestId: Types.ObjectId, session?: ClientSession) {
+    return ProfileVerificationJob.findOne({ verificationRequestId, jobType: "PROFILE_VERIFICATION_PROCESSING" }).session(session ?? null).exec();
   }
 
   findByRequestIds(verificationRequestIds: Types.ObjectId[]) {
     return ProfileVerificationJob.find({ verificationRequestId: { $in: verificationRequestIds }, jobType: "PROFILE_VERIFICATION_PROCESSING" }).exec();
   }
 
-  async create(input: Pick<ProfileVerificationJobDocument, "jobReference" | "verificationRequestId" | "profileId" | "userId" | "profileSubmissionVersion" | "nextAttemptAt">) {
-    const [job] = await ProfileVerificationJob.create([{ ...input, jobType: "PROFILE_VERIFICATION_PROCESSING", status: "PENDING", attemptCount: 0, maxRetryCount: 3 }]);
+  async create(input: Pick<ProfileVerificationJobDocument, "jobReference" | "verificationRequestId" | "profileId" | "userId" | "profileSubmissionVersion" | "nextAttemptAt">, session?: ClientSession) {
+    const [job] = await ProfileVerificationJob.create([{ ...input, jobType: "PROFILE_VERIFICATION_PROCESSING", status: "PENDING", attemptCount: 0, maxRetryCount: 3 }], session ? { session } : undefined);
     return job;
   }
 

@@ -1,0 +1,5 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { canExecuteR8StageB, compareR8Bytes, G8C_R8_STAGE_A_IDS } from "../../evaluation/imageModeration/nudeNet320nR8Contract";
+test("R8 locks the exact frozen sixteen and permits Stage B only after exact preprocessing tensor parity", () => { assert.equal(G8C_R8_STAGE_A_IDS.length, 16); assert.equal(new Set(G8C_R8_STAGE_A_IDS).size, 16); assert.equal(canExecuteR8StageB("FLOAT32_NORMALIZATION_DIVERGENCE"), false); assert.equal(canExecuteR8StageB("PREPROCESSING_TENSOR_PARITY_CONFIRMED"), true); });
+test("R8 byte comparison detects exact tensors and bounded preprocessing differences", () => { const equal = compareR8Bytes(Uint8Array.from([1, 2]), Uint8Array.from([1, 2])); assert.deepEqual({ exact: equal.exact, differing: equal.differingBytes, max: equal.maxAbsoluteDifference }, { exact: true, differing: 0, max: 0 }); const changed = compareR8Bytes(Uint8Array.from([1, 2]), Uint8Array.from([1, 4])); assert.deepEqual({ exact: changed.exact, differing: changed.differingBytes, max: changed.maxAbsoluteDifference }, { exact: false, differing: 1, max: 2 }); });

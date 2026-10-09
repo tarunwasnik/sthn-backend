@@ -188,10 +188,10 @@ export const acceptFaceVerificationCapture = async (input: { userId: string; ses
   return { session, evidence: finalized, replayed: false };
 };
 
-export const bindCompletedFaceSessionToVerificationRequest = async (input: { profile: UserProfileDocument; requestId: Types.ObjectId }) => {
-  const session = await faceVerificationSessionRepository.bindCompletedToRequest({ profileId: input.profile._id, requestId: input.requestId, version: input.profile.verificationSubmissionVersion, avatarFingerprint: fingerprintAvatarReference(input.profile.avatar) });
-  if (session) await faceVerificationEvidenceRepository.bindSessionEvidence(session._id, input.requestId);
-  return session;
+export const bindCompletedFaceSessionToVerificationRequest = async (input: { profile: UserProfileDocument; requestId: Types.ObjectId; session?: import("mongoose").ClientSession }) => {
+  const bound = await faceVerificationSessionRepository.bindCompletedToRequest({ profileId: input.profile._id, requestId: input.requestId, version: input.profile.verificationSubmissionVersion, avatarFingerprint: fingerprintAvatarReference(input.profile.avatar), session: input.session });
+  if (bound) await faceVerificationEvidenceRepository.bindSessionEvidence(bound._id, input.requestId, input.session);
+  return bound;
 };
 
 /** Stage 3E guard: only the initial incomplete-draft submission is capture-gated. */
@@ -239,11 +239,11 @@ export const requireCompletedFaceSessionForRejectedResubmission = async (input: 
   return session;
 };
 
-export const invalidateFaceSessionsForAvatar = async (profile: UserProfileDocument) => {
+export const invalidateFaceSessionsForAvatar = async (profile: UserProfileDocument, session?: import("mongoose").ClientSession) => {
   if (!profile.avatar?.trim()) return;
   const cleanupAfter = cleanAt();
-  const invalidated = await faceVerificationSessionRepository.invalidateCompletedForAvatar(profile._id, fingerprintAvatarReference(profile.avatar), cleanupAfter);
-  if (invalidated) await faceVerificationEvidenceRepository.setCleanupForSession(invalidated._id, cleanupAfter);
+  const invalidated = await faceVerificationSessionRepository.invalidateCompletedForAvatar(profile._id, fingerprintAvatarReference(profile.avatar), cleanupAfter, session);
+  if (invalidated) await faceVerificationEvidenceRepository.setCleanupForSession(invalidated._id, cleanupAfter, session);
 };
 
 export const expireFaceVerificationSessions = async (now = new Date()) => {

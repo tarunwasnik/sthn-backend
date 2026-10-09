@@ -228,6 +228,8 @@ export const faceVerificationCaptureUpload = multer({
   fileFilter: (_req, file, cb) => cb(null, faceEvidenceMimeTypes.has(file.mimetype)),
 });
 
+export const imageModerationUpload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
+
 export const assertFaceVerificationImageBytes = (file: Express.Multer.File) => {
   assertFaceVerificationImageBuffer(file.buffer);
 };

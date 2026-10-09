@@ -1,0 +1,8 @@
+import path from "node:path";
+import { loadManualBenchmarkManifest, manualBenchmarkRoot } from "../evaluation/imageModeration/dataset/manualBenchmarkInventory.service";
+import { approvedFixturesFromLocalReviews, loadLocalReviewManifest } from "../evaluation/imageModeration/dataset/sexualContentReview.service";
+import { evaluateOwenElliottXs, writeOwenElliottXsReport } from "../evaluation/imageModeration/owenElliottImageSafetyClassifierXsEvaluation";
+import { OwenElliottImageSafetyClassifierXsAdapter } from "../evaluation/imageModeration/owenElliottImageSafetyClassifierXsAdapter";
+
+if (process.env.NODE_ENV === "production") throw new Error("I4-B1 evaluation is development-only");
+(async () => { const root = manualBenchmarkRoot(); const acquisition = await loadManualBenchmarkManifest(root); const reviews = await loadLocalReviewManifest(root); const fixtures = await approvedFixturesFromLocalReviews(root, acquisition); if (fixtures.length !== 558) throw new Error(`Frozen I4-B1 requires 558 approved fixtures; found ${fixtures.length}`); const report = await evaluateOwenElliottXs({ fixtures, acquisition, reviews, assetRoot: root, adapter: new OwenElliottImageSafetyClassifierXsAdapter() }); const paths = await writeOwenElliottXsReport(report, path.resolve(process.cwd(), "evaluation-output", "image-moderation", "i4-b1-owen-elliott-xs")); console.log(JSON.stringify({ runId: report.runId, fixtureCount: report.fixtureCount, metrics: report.metrics, paths }, null, 2)); })().catch((error) => { console.error(error instanceof Error ? error.stack ?? error.message : String(error)); process.exitCode = 1; });

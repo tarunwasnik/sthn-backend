@@ -1,0 +1,6 @@
+export const PROVIDER_ASSET_GUARD_STATES=["ACTIVE","DELETE_RESERVED","DELETE_IN_PROGRESS","DELETE_UNKNOWN","DELETED"] as const;
+export type ProviderAssetGuardState=typeof PROVIDER_ASSET_GUARD_STATES[number];
+export const PROVIDER_ASSET_REFERENCE_STATES=["CURRENT","RELEASED"] as const;
+export type ProviderAssetReferenceState=typeof PROVIDER_ASSET_REFERENCE_STATES[number];
+export const PROVIDER_ASSET_ENTITY_TYPES=["USER_PROFILE","CREATOR_APPLICATION","CREATOR_PROFILE","CREATOR_SERVICE"] as const;
+export type ProviderAssetEntityType=typeof PROVIDER_ASSET_ENTITY_TYPES[number];

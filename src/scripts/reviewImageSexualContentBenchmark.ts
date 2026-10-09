@@ -1,0 +1,2 @@
+import { createSexualContentReviewServer } from "../evaluation/imageModeration/dataset/sexualContentReviewServer";
+(async () => { const app = await createSexualContentReviewServer({ port: 4318 }); console.log(`STHN Image Moderation Benchmark Review\nCandidates: ${app.summary.totalCandidates}\nReview required: ${app.summary.reviewRequired}\nApproved: ${app.summary.approved}\nExcluded: ${app.summary.excluded}\nReview UI: ${app.url}`); })().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

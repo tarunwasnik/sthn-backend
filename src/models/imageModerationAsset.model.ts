@@ -1,0 +1,8 @@
+import mongoose, { Document, Schema } from "mongoose";
+
+export interface ImageModerationAssetDocument extends Document { assetReference: string; actorId: mongoose.Types.ObjectId; contentSha256: string; providerAssetId: string; trustedMediaReference: string; status: "TEMPORARY" | "RESERVED" | "COMMITTED" | "INVALIDATED" | "EXPIRED"; expiresAt: Date; retentionDeadline: Date; committedAt?: Date; committedEntityBinding?: string; createdAt: Date; updatedAt: Date; }
+const schema = new Schema<ImageModerationAssetDocument>({
+  assetReference: { type: String, required: true, unique: true, immutable: true, index: true, maxlength: 80 }, actorId: { type: Schema.Types.ObjectId, ref: "User", required: true, immutable: true, index: true }, contentSha256: { type: String, required: true, immutable: true, lowercase: true, match: /^[a-f0-9]{64}$/, index: true }, providerAssetId: { type: String, required: true, immutable: true, maxlength: 512 }, trustedMediaReference: { type: String, required: true, immutable: true, maxlength: 2048 }, status: { type: String, required: true, enum: ["TEMPORARY", "RESERVED", "COMMITTED", "INVALIDATED", "EXPIRED"], default: "TEMPORARY", index: true }, expiresAt: { type: Date, required: true, immutable: true, index: true }, retentionDeadline: { type: Date, required: true, index: true }, committedAt: Date, committedEntityBinding: { type: String, maxlength: 200 },
+}, { timestamps: true });
+schema.index({ actorId: 1, contentSha256: 1, providerAssetId: 1 }, { unique: true });
+export const ImageModerationAsset = mongoose.model<ImageModerationAssetDocument>("ImageModerationAsset", schema);

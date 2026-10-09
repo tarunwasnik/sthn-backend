@@ -1,0 +1,9 @@
+export const resizeRgbOpenCvInterLinear = (input: Uint8Array, sourceWidth: number, sourceHeight: number, destinationWidth: number, destinationHeight: number): Uint8Array => {
+  if (!Number.isInteger(sourceWidth) || !Number.isInteger(sourceHeight) || !Number.isInteger(destinationWidth) || !Number.isInteger(destinationHeight) || sourceWidth <= 0 || sourceHeight <= 0 || destinationWidth <= 0 || destinationHeight <= 0 || input.length !== sourceWidth * sourceHeight * 3) throw new Error("Invalid RGB resize dimensions or input length");
+  const output = new Uint8Array(destinationWidth * destinationHeight * 3); const scaleX = sourceWidth / destinationWidth, scaleY = sourceHeight / destinationHeight;
+  for (let y = 0; y < destinationHeight; y += 1) { let sourceY = (y + .5) * scaleY - .5; let y0 = Math.floor(sourceY); let fy = sourceY - y0; if (y0 < 0) { y0 = 0; fy = 0; } if (y0 >= sourceHeight - 1) { y0 = sourceHeight - 1; fy = 0; } const y1 = Math.min(y0 + 1, sourceHeight - 1);
+    for (let x = 0; x < destinationWidth; x += 1) { let sourceX = (x + .5) * scaleX - .5; let x0 = Math.floor(sourceX); let fx = sourceX - x0; if (x0 < 0) { x0 = 0; fx = 0; } if (x0 >= sourceWidth - 1) { x0 = sourceWidth - 1; fx = 0; } const x1 = Math.min(x0 + 1, sourceWidth - 1), out = (y * destinationWidth + x) * 3;
+      for (let channel = 0; channel < 3; channel += 1) { const top = input[(y0 * sourceWidth + x0) * 3 + channel] * (1 - fx) + input[(y0 * sourceWidth + x1) * 3 + channel] * fx; const bottom = input[(y1 * sourceWidth + x0) * 3 + channel] * (1 - fx) + input[(y1 * sourceWidth + x1) * 3 + channel] * fx, value = top * (1 - fy) + bottom * fy, floor = Math.floor(value), rounded = value - floor === .5 && floor % 2 === 0 ? floor : Math.round(value); output[out + channel] = rounded; }
+    }
+  } return output;
+};

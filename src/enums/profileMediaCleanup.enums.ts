@@ -1,0 +1,2 @@
+export const PROFILE_MEDIA_CLEANUP_STATUSES = ["PENDING", "RUNNING", "RETRY_WAIT", "COMPLETED", "FAILED", "SKIPPED_STILL_REFERENCED"] as const;
+export type ProfileMediaCleanupStatus = typeof PROFILE_MEDIA_CLEANUP_STATUSES[number];

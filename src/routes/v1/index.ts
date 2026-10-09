@@ -7,6 +7,8 @@ import userRoutes from "./user.routes";
 import profileRoutes from "../profile.routes";
 import faceVerificationRoutes from "../faceVerification.routes";
 import profileVerificationRoutes from "./profileVerification.routes";
+import textModerationRoutes from "./textModeration.routes";
+import imageModerationRoutes from "./imageModeration.routes";
 
 import creatorApplicationRoutes from "./creatorApplication.routes";
 import creatorProfileRoutes from "./creatorProfile.routes";
@@ -45,6 +47,8 @@ router.use("/admin/financial", adminFinancialRoutes);
 router.use("/users", userRoutes);
 router.use("/profile", profileRoutes);
 router.use("/profile/face-verification", faceVerificationRoutes);
+router.use("/text-moderation", textModerationRoutes);
+router.use("/image-moderation", imageModerationRoutes);
 
 /* ================= WALLET ================= */
 router.use("/wallet", walletRoutes);

@@ -1,0 +1,6 @@
+import assert from "node:assert/strict"; import test from "node:test"; import { parseProfileMediaAdmissionRequest } from "../../services/profile/profileImageAdmissionContract";
+const admission=(n:string)=>({kind:"ADMISSION" as const,admissionReference:`imauth_${n}`}); const unchanged=(reference:string)=>({kind:"UNCHANGED" as const,reference});
+test("I5-A accepts new admission references and unchanged references",()=>assert.deepEqual(parseProfileMediaAdmissionRequest({avatar:admission("a"),cover:unchanged("https://owned/c")}),{avatar:admission("a"),cover:unchanged("https://owned/c")}));
+test("I5-A preserves ordered mixed gallery claims",()=>assert.deepEqual(parseProfileMediaAdmissionRequest({profilePhotos:[unchanged("https://owned/1"),admission("two")]}).profilePhotos,[unchanged("https://owned/1"),admission("two")]));
+test("I5-A rejects arbitrary URLs, duplicates, malformed entries, and internal metadata",()=>{for(const value of [{avatar:"https://evil"},{profilePhotos:[admission("x"),admission("x")]},{avatar:{kind:"ADMISSION",admissionReference:"imauth_x",assetId:"x"}},{avatar:{kind:"ADMISSION",admissionReference:"url"}}])assert.throws(()=>parseProfileMediaAdmissionRequest(value));});
+test("I5-A allows omitted media fields",()=>assert.deepEqual(parseProfileMediaAdmissionRequest({}),{}));

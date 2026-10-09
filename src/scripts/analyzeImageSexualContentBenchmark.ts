@@ -1,0 +1,6 @@
+import path from "node:path";
+import { sexualContentCoverageTargets, sexualContentModelQualityFixtures, SEXUAL_CONTENT_BENCHMARK_VERSION } from "../evaluation/imageModeration/dataset/sexualContentBenchmark.fixtures";
+import { analyzeSexualContentBenchmark } from "../evaluation/imageModeration/dataset/sexualContentBenchmark.service";
+import { writeSexualContentBenchmarkReport } from "../evaluation/imageModeration/dataset/sexualContentBenchmarkReport.service";
+const index = process.argv.indexOf("--output"); const output = index >= 0 && process.argv[index + 1] ? path.resolve(process.argv[index + 1]) : path.resolve(process.cwd(), "evaluation-output", "image-moderation", "dataset");
+(async () => { const analysis = analyzeSexualContentBenchmark(sexualContentModelQualityFixtures, sexualContentCoverageTargets, SEXUAL_CONTENT_BENCHMARK_VERSION); const paths = await writeSexualContentBenchmarkReport(analysis, output); console.log(`STHN sexual-content dataset: planned ${analysis.modelQualityFixtureCount}; approved ${analysis.approvedFixtureCount}; coverage gaps ${analysis.coverage.filter((item) => item.gap > 0).length}\nJSON: ${paths.jsonPath}\nMarkdown: ${paths.markdownPath}`); })().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

@@ -1,0 +1,8 @@
+import path from "node:path";
+import { evaluateImageModerationFixtures } from "../evaluation/imageModeration/imageModerationEvaluation.service";
+import { IMAGE_MODERATION_FIXTURE_VERSION, imageModerationEvaluationFixtures } from "../evaluation/imageModeration/imageModerationFixtures";
+import { DeterministicMockImageModerationDetector } from "../evaluation/imageModeration/imageModerationMockDetector";
+import { writeImageModerationEvaluationReport } from "../evaluation/imageModeration/imageModerationReport.service";
+if (process.env.NODE_ENV === "production") throw new Error("Image moderation evaluation is development-only");
+const outputIndex = process.argv.indexOf("--output"); const outputDirectory = outputIndex >= 0 && process.argv[outputIndex + 1] ? path.resolve(process.argv[outputIndex + 1]) : path.resolve(process.cwd(), "evaluation-output", "image-moderation");
+(async () => { const detector = new DeterministicMockImageModerationDetector(); const report = await evaluateImageModerationFixtures(imageModerationEvaluationFixtures, detector, { fixtureVersion: IMAGE_MODERATION_FIXTURE_VERSION, assetRoot: path.resolve(__dirname, "../evaluation/imageModeration/assets") }); const paths = await writeImageModerationEvaluationReport(report, outputDirectory); console.log(`STHN image moderation evaluation: ${detector.displayName}\nCases: ${report.metrics.total}; supported: ${report.metrics.supported}; correct: ${report.metrics.correct}; unsupported: ${report.metrics.unsupported}\nJSON: ${paths.jsonPath}\nMarkdown: ${paths.markdownPath}`); })().catch((error) => { console.error(error instanceof Error ? error.stack ?? error.message : String(error)); process.exitCode = 1; });

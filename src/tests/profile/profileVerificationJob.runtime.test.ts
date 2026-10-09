@@ -6,7 +6,7 @@ import { UserProfile } from "../../models/userProfile.model";
 import { ProfileVerificationRequest } from "../../models/profileVerificationRequest.model";
 import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
 import { ProfileVerificationInferenceResult } from "../../models/profileVerificationInferenceResult.model";
-import { Types } from "mongoose";
+import mongoose, { Types } from "mongoose";
 import { ensureActiveProfileVerificationRequest, decideProfileVerificationRequest, escalateProfileVerificationRequest } from "../../services/profile/profileVerificationRequest.service";
 import {
   claimProfileVerificationJob,
@@ -72,6 +72,23 @@ test("verification jobs are durable, unique per request, and atomically claimed"
   assert.ok(claimed?.actionable);
   assert.equal((await ProfileVerificationRequest.findById(request._id))?.status, "PROCESSING");
   assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification");
+});
+
+test("session-aware job creation sees an uncommitted request and rolls back together", async () => {
+  const { profile } = await makeProfile("session");
+  const session = await mongoose.startSession();
+  let requestId: Types.ObjectId | undefined;
+  await assert.rejects(() => session.withTransaction(async () => {
+    const request = await ensureActiveProfileVerificationRequest(profile, session);
+    requestId = request.request._id;
+    const job = await ensureProfileVerificationJob(request.request, session);
+    assert.equal(job.created, true);
+    assert.equal(await ProfileVerificationJob.countDocuments({ verificationRequestId: request.request._id }).session(session), 1);
+    assert.equal(await ProfileVerificationJob.countDocuments({ verificationRequestId: request.request._id }), 0);
+    throw new Error("abort session job");
+  }));
+  await session.endSession();
+  assert.equal(await ProfileVerificationJob.countDocuments({ verificationRequestId: requestId }), 0);
 });
 
 test("expired leases recover and background claims do not depend on an HTTP request", async () => {

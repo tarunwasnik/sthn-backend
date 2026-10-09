@@ -1,0 +1,9 @@
+import fs from "node:fs";
+import path from "node:path";
+import { canonicalJson, sha256 } from "../research/textModerationDataset/manifest";
+import { createMhsSplitManifest } from "../research/textModerationDataset/mhsSplitManifest";
+
+const root = path.resolve(process.cwd(), "dataset-research", "text-moderation", "MEASURING_HATE_SPEECH"); const candidates = path.join(root, "candidates"); const review = path.join(root, "semantic-review"); const grouping = path.join(root, "grouping");
+const inputs = { candidatePath: path.join(candidates, "mhs-review-pilot-v1-candidate-v1.json"), candidateIntegrityPath: path.join(candidates, "mhs-review-pilot-v1-candidate-v1-integrity-audit.json"), currentSemanticAuditPath: path.join(candidates, "mhs-review-pilot-v1-candidate-v1-semantic-audit-review-floor-0.85-v1.json"), lAuthorizationPath: path.join(review, "mhs-semantic-review-floor-0.85-authorization-v1.json"), mApplicationContractPath: path.join(review, "mhs-reviewed-semantic-application-contract-v1.json"), nSemanticOverlayPath: path.join(review, "mhs-semantic-grouping-overlay-v1.json"), oPlanningArtifactPath: path.join(grouping, "mhs-grouping-union-split-plan-v1.json") };
+const before = new Map(Object.values(inputs).map((filename) => [filename, sha256(fs.readFileSync(filename))])); const result = createMhsSplitManifest({ ...inputs, outputDirectory: path.join(root, "splits") }); for (const filename of Object.values(inputs)) if (sha256(fs.readFileSync(filename)) !== before.get(filename)) throw new Error(`Split manifest mutated authority: ${filename}`);
+console.log(canonicalJson({ artifactPath: result.artifactPath, artifactSha256: result.artifactSha256, payloadDigest: result.artifact.manifestPayloadDigest, manifestId: result.artifact.manifestId, splitSummary: result.artifact.splitSummary, integrity: result.artifact.integrity, usageContract: result.artifact.usageContract }));

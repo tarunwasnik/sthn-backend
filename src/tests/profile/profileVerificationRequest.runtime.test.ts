@@ -26,6 +26,7 @@ import {
   connectPhase7HDatabase,
   disconnectPhase7HDatabase,
 } from "../financial/phase7h/helpers/database";
+import { withUserProfileTextAdmission } from "../textModeration/helpers/textModerationTestAdmission";
 
 process.env.NODE_ENV = "test";
 
@@ -74,7 +75,7 @@ const submitProfile = async (email: string, username: string) => {
   const body = profileBody(username);
   const faceSession = await startFaceVerificationSession({ userId: String(user._id), avatar: body.avatar });
   await FaceVerificationSession.updateOne({ _id: faceSession._id }, { $set: { status: "CAPTURE_COMPLETE", acceptedCaptureCount: 5, captureCompletedAt: new Date() } });
-  await invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body });
+  await invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(user._id), body) });
   const profile = await UserProfile.findOne({ userId: user._id });
   assert.ok(profile);
   return { user, profile };
@@ -100,14 +101,15 @@ test("first submission creates exactly one active verification request and repla
 
 test("initial onboarding submission requires a current matching completed face session before promotion", async () => {
   const missing = await createUser("verification-face-guard-missing@test.local");
-  await assert.rejects(invoke(upsertProfile, { user: { id: String(missing._id), role: "user", status: "pending_profile" }, body: profileBody("verification-face-guard-missing") }), /Complete live face verification/);
+  const missingBody = profileBody("verification-face-guard-missing");
+  await assert.rejects(invoke(upsertProfile, { user: { id: String(missing._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(missing._id), missingBody) }), /Complete live face verification/);
   assert.equal(await ProfileVerificationRequest.countDocuments({ userId: missing._id }), 0);
 
   const invalid = await createUser("verification-face-guard-invalid@test.local");
   const invalidBody = profileBody("verification-face-guard-invalid");
   const cancelled = await startFaceVerificationSession({ userId: String(invalid._id), avatar: invalidBody.avatar });
   await FaceVerificationSession.updateOne({ _id: cancelled._id }, { $set: { status: "CANCELLED", isCurrent: false } });
-  await assert.rejects(invoke(upsertProfile, { user: { id: String(invalid._id), role: "user", status: "pending_profile" }, body: invalidBody }), /Complete live face verification/);
+  await assert.rejects(invoke(upsertProfile, { user: { id: String(invalid._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(invalid._id), invalidBody) }), /Complete live face verification/);
   assert.equal((await UserProfile.findById(cancelled.profileId))?.profileStatus, "incomplete");
 });
 
@@ -239,7 +241,7 @@ test("admin rejection preserves reason and a rejected resubmission creates a new
 
   await invoke(updateMyProfile, {
     user: { id: String(user._id), role: "user", status: "active" },
-    body: { ...profileBody("verification-reject"), bio: "Corrected profile information." },
+    body: withUserProfileTextAdmission(String(user._id), { ...profileBody("verification-reject"), bio: "Corrected profile information." }),
   });
   const reloaded = await UserProfile.findById(profile._id);
   assert.equal(reloaded?.profileStatus, "pending_verification");

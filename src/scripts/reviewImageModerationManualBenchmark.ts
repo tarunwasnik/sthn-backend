@@ -1,0 +1,3 @@
+import { createSexualContentReviewServer } from "../evaluation/imageModeration/dataset/sexualContentReviewServer";
+import { manualBenchmarkRoot } from "../evaluation/imageModeration/dataset/manualBenchmarkInventory.service";
+(async () => { const app = await createSexualContentReviewServer({ root: manualBenchmarkRoot(), port: 4319, manualBenchmark: true }); console.log(`STHN Image Moderation Manual Benchmark Review\nCandidates: ${app.summary.totalCandidates}\nReview required: ${app.summary.reviewRequired}\nApproved: ${app.summary.approved}\nExcluded: ${app.summary.excluded}\nReview UI: ${app.url}`); })().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

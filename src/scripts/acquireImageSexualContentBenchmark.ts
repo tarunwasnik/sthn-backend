@@ -1,0 +1,6 @@
+import { acquireCommonsSearch, cacheRoot, loadManifest, acquisitionSummary } from "../evaluation/imageModeration/dataset/sexualContentAcquisition.service";
+import { CoverageClass } from "../evaluation/imageModeration/dataset/sexualContentBenchmark.types";
+const plan: readonly { query: string; coverageClass: CoverageClass }[] = [
+  { query: "adult portrait", coverageClass: "ORDINARY_PORTRAIT_PASS" }, { query: "business portrait", coverageClass: "PROFESSIONAL_PORTRAIT_PASS" }, { query: "fitness adult", coverageClass: "FITNESS_PASS" }, { query: "adult swimwear", coverageClass: "SWIMWEAR_PASS" }, { query: "beachwear adult", coverageClass: "BEACH_PASS" }, { query: "shirtless man fitness", coverageClass: "SHIRTLESS_NONSEXUAL_PASS" }, { query: "fashion model adult", coverageClass: "FASHION_PASS" }, { query: "couple portrait adults", coverageClass: "COUPLE_GROUP_PASS" },
+];
+(async () => { const root = cacheRoot(); for (const item of plan) { try { await acquireCommonsSearch({ root, ...item, limit: 5 }); } catch (error) { console.error(`Commons search failed for ${item.coverageClass}: ${error instanceof Error ? error.message : String(error)}`); } } console.log(JSON.stringify(acquisitionSummary(await loadManifest(root)), null, 2)); })().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

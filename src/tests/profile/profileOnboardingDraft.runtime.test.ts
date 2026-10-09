@@ -1,16 +1,21 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
 import type { NextFunction, Request, Response } from "express";
+import { Types } from "mongoose";
 
 import User from "../../models/User";
 import { UserProfile } from "../../models/userProfile.model";
 import { ProfileVerificationRequest } from "../../models/profileVerificationRequest.model";
 import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
 import { FaceVerificationSession } from "../../models/faceVerificationSession.model";
+import { ImageModerationAsset } from "../../models/imageModerationAsset.model";
+import { ImageModerationAttempt } from "../../models/imageModerationAttempt.model";
+import { ImageAdmission } from "../../models/imageAdmission.model";
 import { getMyProfile, saveMyOnboardingDraft, upsertProfile } from "../../controllers/profile.controller";
 import { fingerprintAvatarReference, startFaceVerificationSession } from "../../services/profile/faceVerificationSession.service";
 import { setBiometricReferenceAvatarValidationDependenciesForTests } from "../../services/profile/profileVerificationReferenceAvatarValidation.service";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
+import { withUserProfileTextAdmission } from "../textModeration/helpers/textModerationTestAdmission";
 
 process.env.NODE_ENV = "test";
 
@@ -35,6 +40,22 @@ const body = (username = "draft-recovery") => ({
   profilePhotos: Array.from({ length: 6 }, (_, index) => `https://example.test/profile-${index}.jpg`),
 });
 
+const sha = "a".repeat(64);
+const future = () => new Date(Date.now() + 60_000);
+const admission = (admissionReference: string) => ({ kind: "ADMISSION" as const, admissionReference });
+const seedAdmission = async (actorId: Types.ObjectId, surface: "USER_PROFILE_AVATAR" | "USER_PROFILE_COVER" | "USER_PROFILE_PHOTO", trustedMediaReference: string) => {
+  const entityBinding = `PENDING:${actorId}:${surface}`;
+  const asset = await ImageModerationAsset.create({ assetReference: `ima_${new Types.ObjectId()}`, actorId, contentSha256: sha, providerAssetId: `provider_${new Types.ObjectId()}`, trustedMediaReference, expiresAt: future(), retentionDeadline: future() });
+  const attempt = await ImageModerationAttempt.create({ attemptReference: `imat_${new Types.ObjectId()}`, assetId: asset._id, actorId, contentSha256: sha, surface, entityBinding, status: "PASSED", provenanceModel: { identifier: "test", revision: "test", artifactSha256: sha }, policy: { key: "TEST", version: "V1" }, expiresAt: future(), retentionDeadline: future() });
+  return ImageAdmission.create({ admissionReference: `imauth_${new Types.ObjectId()}`, attemptId: attempt._id, assetId: asset._id, actorId, contentSha256: sha, surface, entityBinding, expiresAt: future() });
+};
+const admittedDraft = async (actorId: Types.ObjectId, input: ReturnType<typeof body>) => {
+  const avatar = await seedAdmission(actorId, "USER_PROFILE_AVATAR", input.avatar);
+  const cover = await seedAdmission(actorId, "USER_PROFILE_COVER", input.cover);
+  const photos = await Promise.all(input.profilePhotos.map((reference) => seedAdmission(actorId, "USER_PROFILE_PHOTO", reference)));
+  return { ...input, avatar: admission(avatar.admissionReference), cover: admission(cover.admissionReference), profilePhotos: photos.map((item) => admission(item.admissionReference)) };
+};
+
 before(async () => connectPhase7HDatabase(), { timeout: 120_000 });
 beforeEach(async () => {
   await clearPhase7HDatabase();
@@ -48,7 +69,7 @@ after(async () => { setBiometricReferenceAvatarValidationDependenciesForTests();
 test("complete incomplete onboarding drafts survive failed preflight and fresh-device hydration without verification side effects", async () => {
   const user = await User.create({ email: "onboarding-draft@test.local", password: "test-password", status: "pending_profile", governanceState: "ACTIVE" });
   const input = body();
-  await invoke(saveMyOnboardingDraft, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: input });
+  await invoke(saveMyOnboardingDraft, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: await admittedDraft(user._id, input) });
 
   const profile = await UserProfile.findOne({ userId: user._id }).lean();
   assert.ok(profile);
@@ -83,9 +104,9 @@ test("draft saving validates username uniqueness and cannot alter rejected recov
   const existingUser = await User.create({ email: "onboarding-draft-existing@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });
   await UserProfile.create({ userId: existingUser._id, username: "taken-draft-name", realName: "Rejected User", dateOfBirth: new Date("1990-01-01"), country: "India", city: "Mumbai", languages: ["English"], interests: [], bio: "Existing rejected profile", avatar: "https://example.test/rejected-avatar.jpg", cover: "https://example.test/rejected-cover.jpg", profilePhotos: ["https://example.test/rejected-one.jpg", "https://example.test/rejected-two.jpg"], profileStatus: "rejected", rejectionReason: "Review required", verificationSubmissionVersion: 2 });
   const newUser = await User.create({ email: "onboarding-draft-new@test.local", password: "test-password", status: "pending_profile", governanceState: "ACTIVE" });
-  await assert.rejects(invoke(saveMyOnboardingDraft, { user: { id: String(newUser._id), role: "user", status: "pending_profile" }, body: body("taken-draft-name") }), /Username already taken/);
+  await assert.rejects(invoke(saveMyOnboardingDraft, { user: { id: String(newUser._id), role: "user", status: "pending_profile" }, body: await admittedDraft(newUser._id, body("taken-draft-name")) }), /Username already taken/);
   assert.equal(await UserProfile.findOne({ userId: newUser._id }), null);
-  await assert.rejects(invoke(saveMyOnboardingDraft, { user: { id: String(existingUser._id), role: "user", status: "active" }, body: body("taken-draft-name") }), /not eligible/);
+  await assert.rejects(invoke(saveMyOnboardingDraft, { user: { id: String(existingUser._id), role: "user", status: "active" }, body: await admittedDraft(existingUser._id, body("taken-draft-name")) }), /not eligible/);
   const rejected = await UserProfile.findOne({ userId: existingUser._id }).lean();
   assert.equal(rejected?.profileStatus, "rejected");
   assert.equal(rejected?.verificationSubmissionVersion, 2);
@@ -98,10 +119,10 @@ test("gated final submission rejects a two-photo draft without partial authority
   try {
     const user = await User.create({ email: "onboarding-gated@test.local", password: "test-password", status: "pending_profile", governanceState: "ACTIVE" });
     const twoPhotoDraft = { ...body("gated-draft"), profilePhotos: body().profilePhotos.slice(0, 2) };
-    await invoke(saveMyOnboardingDraft, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: twoPhotoDraft });
+    await invoke(saveMyOnboardingDraft, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: await admittedDraft(user._id, twoPhotoDraft) });
 
     await assert.rejects(
-      invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: twoPhotoDraft }),
+      invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(user._id), twoPhotoDraft) }),
       (error: unknown) => (error as { statusCode?: number; code?: string }).statusCode === 400
         && (error as { code?: string }).code === "PROFILE_PHOTO_COUNT_INVALID",
     );
@@ -113,7 +134,7 @@ test("gated final submission rejects a two-photo draft without partial authority
     assert.equal(await ProfileVerificationJob.countDocuments({}), 0);
 
     const sixPhotoDraft = body("gated-draft");
-    await invoke(saveMyOnboardingDraft, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: sixPhotoDraft });
+    await invoke(saveMyOnboardingDraft, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: await admittedDraft(user._id, sixPhotoDraft) });
     profile = await UserProfile.findOne({ userId: user._id });
     assert.ok(profile);
     await FaceVerificationSession.create({
@@ -136,7 +157,7 @@ test("gated final submission rejects a two-photo draft without partial authority
       detector: async () => ({ width: 100, height: 100, decodedBytes: 30_000, faces: [{ x: 30, y: 30, width: 40, height: 40, confidence: 0.9, landmarks: { rightEye: { x: 40, y: 42 }, leftEye: { x: 55, y: 42 }, noseTip: { x: 48, y: 50 }, rightMouthCorner: { x: 42, y: 60 }, leftMouthCorner: { x: 54, y: 60 } } }] }),
     });
 
-    await invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: sixPhotoDraft });
+    await invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(user._id), sixPhotoDraft) });
     profile = await UserProfile.findOne({ userId: user._id });
     const request = await ProfileVerificationRequest.findOne({ userId: user._id });
     const session = await FaceVerificationSession.findOne({ userId: user._id });
