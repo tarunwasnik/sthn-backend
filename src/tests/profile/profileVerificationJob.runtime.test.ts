@@ -237,12 +237,13 @@ test("reconciliation skips an active stale request whose profile was already res
   assert.equal(resolvedProfile?.profileStatus, "verified");
 });
 
-test("legacy active requests reconcile into one job and unresolved escalated work remains AI-decidable", async () => {
+test("legacy active requests reconcile into one job and unresolved escalated work remains Admin-decidable", async () => {
   const { request, profile } = await makeProfile("legacy");
   await reconcileProfileVerificationJobs(new Date());
   await reconcileProfileVerificationJobs(new Date());
   assert.equal(await ProfileVerificationJob.countDocuments({ verificationRequestId: request._id }), 1);
   await escalateProfileVerificationRequest({ profileId: String(profile._id), reasonCode: "OTHER", reason: "Manual review is required." });
-  const decision = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: { source: "AI", model: { identifier: "OPENCV_ZOO_SFACE", version: "face_recognition_sface_2021dec" }, similarity: 0.99, threshold: 0.9, decidedAt: new Date() } });
+  const admin = await User.create({ email: "legacy-admin@test.local", password: "test-password", role: "admin", status: "active", governanceState: "ACTIVE" });
+  const decision = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "ADMIN", decidedBy: String(admin._id) });
   assert.equal(decision.request.status, "APPROVED");
 });

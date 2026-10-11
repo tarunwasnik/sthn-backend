@@ -6,7 +6,7 @@ import User from "../../models/User";
 import { UserProfile } from "../../models/userProfile.model";
 import { ProfileVerificationInferenceResult } from "../../models/profileVerificationInferenceResult.model";
 import { ProfileVerificationRequest } from "../../models/profileVerificationRequest.model";
-import { ensureActiveProfileVerificationRequest } from "../../services/profile/profileVerificationRequest.service";
+import { decideProfileVerificationRequest, ensureActiveProfileVerificationRequest } from "../../services/profile/profileVerificationRequest.service";
 import { applyProfileVerificationAiDecision } from "../../services/profile/profileVerificationAiDecision.service";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
 
@@ -26,11 +26,25 @@ const result = async (request: Awaited<ReturnType<typeof setup>>["request"], inp
 });
 
 before(async () => connectPhase7HDatabase(), { timeout: 120_000 }); beforeEach(async () => clearPhase7HDatabase()); after(async () => disconnectPhase7HDatabase(), { timeout: 30_000 });
-test("above and equal threshold positive results approve through the canonical lifecycle and persist the AI snapshot", async () => {
-  for (const [suffix, similarity] of [["above", 0.95], ["equal", 0.9]] as const) { const { profile, request } = await setup(suffix); const inference = await result(request, { similarity, threshold: 0.9, conclusion: "LIKELY_MATCH" }); await applyProfileVerificationAiDecision({ request, result: inference }); const stored = await ProfileVerificationRequest.findById(request._id); assert.equal(stored?.status, "APPROVED"); assert.equal(stored?.decisionAuthority, "AI"); assert.deepEqual(stored?.aiDecisionSnapshot?.source, "AI"); assert.equal(stored?.aiDecisionSnapshot?.similarity, similarity); assert.equal(stored?.aiDecisionSnapshot?.threshold, 0.9); assert.ok(stored?.aiDecisionSnapshot?.decidedAt instanceof Date); assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "verified"); }
+test("above and equal threshold positive results remain advisory and require Admin review", async () => {
+  for (const [suffix, similarity] of [["above", 0.95], ["equal", 0.9]] as const) { const { profile, request } = await setup(suffix); const inference = await result(request, { similarity, threshold: 0.9, conclusion: "LIKELY_MATCH" }); await applyProfileVerificationAiDecision({ request, result: inference }); const stored = await ProfileVerificationRequest.findById(request._id); assert.equal(stored?.status, "ADMIN_REVIEW_REQUIRED"); assert.equal(stored?.decision, undefined); assert.equal(stored?.decisionAuthority, undefined); assert.equal(stored?.aiDecisionSnapshot, undefined); assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification"); assert.equal((await User.findById(profile.userId))?.status, "active"); assert.equal(inference.shadowIdentityAnalysis?.similarity, similarity); }
 });
 test("below-threshold and absent-threshold results require Admin review and never reject", async () => {
   for (const [suffix, input] of [["below", { similarity: 0.89, threshold: 0.9, conclusion: "LIKELY_MISMATCH" as const }], ["absent", { conclusion: "UNABLE_TO_DETERMINE" as const }]] as const) { const { profile, request } = await setup(suffix); await applyProfileVerificationAiDecision({ request, result: await result(request, input) }); const stored = await ProfileVerificationRequest.findById(request._id); assert.equal(stored?.status, "ADMIN_REVIEW_REQUIRED"); assert.equal(stored?.decision, undefined); assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification"); }
 });
 test("an inference/request authority mismatch cannot approve or persist an AI snapshot", async () => { const { profile, request } = await setup("mismatch"); await applyProfileVerificationAiDecision({ request, result: await result(request, { similarity: 0.95, threshold: 0.9, conclusion: "LIKELY_MATCH", mismatch: true }) }); const stored = await ProfileVerificationRequest.findById(request._id); assert.equal(stored?.status, "ADMIN_REVIEW_REQUIRED"); assert.equal(stored?.aiDecisionSnapshot, undefined); assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification"); });
 test("a persisted gated request never enters the legacy .90 approval authority", async () => { const previousThreshold = process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD; process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD = "0.90"; try { const { profile, request } = await setup("gated-high", true); delete process.env.STHN_PROFILE_VERIFICATION_POLICY; await applyProfileVerificationAiDecision({ request, result: await result(request, { similarity: 0.99, threshold: 0.9, conclusion: "LIKELY_MATCH" }) }); const stored = await ProfileVerificationRequest.findById(request._id); assert.equal(stored?.verificationPolicy?.key, "GATED_MULTI_MEDIA"); assert.equal(stored?.verificationPolicy?.version, "V1"); assert.equal(stored?.status, "ADMIN_REVIEW_REQUIRED"); assert.equal(stored?.decision, undefined); assert.equal(stored?.aiDecisionSnapshot, undefined); assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification"); } finally { if (previousThreshold === undefined) delete process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD; else process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD = previousThreshold; } });
+test("AI cannot directly finalize while Admin approval and rejection remain authoritative", async () => {
+  const approval = await setup("admin-approval");
+  await assert.rejects(() => decideProfileVerificationRequest({ profileId: String(approval.profile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: { source: "AI", model: { identifier: "test", version: "1" }, similarity: .99, threshold: .9, decidedAt: new Date() } }), /Only an Admin/);
+  assert.equal((await ProfileVerificationRequest.findById(approval.request._id))?.status, "PENDING");
+  assert.equal((await UserProfile.findById(approval.profile._id))?.profileStatus, "pending_verification");
+  const admin = await User.create({ email: "ai-decision-admin@test.local", password: "test-password", role: "admin", status: "active", governanceState: "ACTIVE" });
+  const approved = await decideProfileVerificationRequest({ profileId: String(approval.profile._id), decision: "APPROVE", authority: "ADMIN", decidedBy: String(admin._id) });
+  assert.equal(approved.request.decisionAuthority, "ADMIN");
+  assert.equal((await UserProfile.findById(approval.profile._id))?.profileStatus, "verified");
+  const rejection = await setup("admin-rejection");
+  const rejected = await decideProfileVerificationRequest({ profileId: String(rejection.profile._id), decision: "REJECT", authority: "ADMIN", decidedBy: String(admin._id), reason: "Please correct the profile." });
+  assert.equal(rejected.request.decisionAuthority, "ADMIN");
+  assert.equal((await UserProfile.findById(rejection.profile._id))?.profileStatus, "rejected");
+});

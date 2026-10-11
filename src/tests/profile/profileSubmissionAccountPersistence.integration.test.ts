@@ -96,28 +96,35 @@ test("preserves an already-active account and all unrelated governance fields", 
   assert.equal(stored?.abuseScore, 12);
 });
 
-test("rejected-resubmission and verified-edit actions cannot change account state or contact", async () => {
+test("incomplete-edit, rejected-resubmission, and verified-edit actions cannot change account state or contact", async () => {
   const actor = await seedUser("active");
   actor.mobileCountryCode = "+44";
   actor.mobileNumber = "1234567890";
+  actor.creatorStatus = "approved";
+  actor.governanceState = "PENDING_SUSPENSION";
   await actor.save();
-  for (const kind of ["REJECTED_RESUBMISSION", "VERIFIED_EDIT"] as const) {
+  for (const kind of ["INCOMPLETE_EDIT", "REJECTED_RESUBMISSION", "VERIFIED_EDIT"] as const) {
     await transaction((session) => profileSubmissionAccountPersistenceService.persist({ session, actorId: actor._id, action: { kind } }));
   }
   const stored = await User.findById(actor._id);
   assert.equal(stored?.status, "active");
   assert.equal(stored?.mobileCountryCode, "+44");
   assert.equal(stored?.mobileNumber, "1234567890");
+  assert.equal(stored?.creatorStatus, "approved");
+  assert.equal(stored?.governanceState, "PENDING_SUSPENSION");
 });
 
-test("migrates legacy contact fields inside the caller transaction without changing account status", async () => {
+test("incomplete-edit migrates legacy contact fields inside the caller transaction without changing account state", async () => {
   const actor = await seedUser("active");
+  actor.creatorStatus = "approved";
+  actor.governanceState = "PENDING_SUSPENSION";
+  await actor.save();
   const profile = await seedLegacyProfile(actor._id);
   await UserProfile.collection.updateOne({ _id: profile._id }, { $set: { mobileCountryCode: "+61", mobileNumber: "234567890" } });
   await transaction((session) => profileSubmissionAccountPersistenceService.persist({
     session,
     actorId: actor._id,
-    action: { kind: "VERIFIED_EDIT" },
+    action: { kind: "INCOMPLETE_EDIT" },
   }));
   const [stored, rawProfile] = await Promise.all([
     User.findById(actor._id),
@@ -126,8 +133,41 @@ test("migrates legacy contact fields inside the caller transaction without chang
   assert.equal(stored?.status, "active");
   assert.equal(stored?.mobileCountryCode, "+61");
   assert.equal(stored?.mobileNumber, "234567890");
+  assert.equal(stored?.creatorStatus, "approved");
+  assert.equal(stored?.governanceState, "PENDING_SUSPENSION");
   assert.equal(Object.prototype.hasOwnProperty.call(rawProfile ?? {}, "mobileCountryCode"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(rawProfile ?? {}, "mobileNumber"), false);
+});
+
+test("incomplete-edit transaction rollback restores legacy contact fields without changing account state", async () => {
+  const actor = await seedUser("active");
+  const profile = await seedLegacyProfile(actor._id);
+  await UserProfile.collection.updateOne({ _id: profile._id }, { $set: { mobileCountryCode: "+81", mobileNumber: "345678901" } });
+  const session = await mongoose.startSession();
+  try {
+    await assert.rejects(session.withTransaction(async () => {
+      await profileSubmissionAccountPersistenceService.persist({ session, actorId: actor._id, action: { kind: "INCOMPLETE_EDIT" } });
+      throw new Error("callback failure");
+    }), /callback failure/);
+  } finally {
+    await session.endSession();
+  }
+  const [stored, rawProfile] = await Promise.all([User.findById(actor._id), UserProfile.collection.findOne({ _id: profile._id })]);
+  assert.equal(stored?.status, "active");
+  assert.equal(stored?.mobileNumber, null);
+  assert.equal(rawProfile?.mobileCountryCode, "+81");
+  assert.equal(rawProfile?.mobileNumber, "345678901");
+});
+
+test("incomplete-edit reports a missing authenticated account consistently", async () => {
+  await assert.rejects(
+    transaction((session) => profileSubmissionAccountPersistenceService.persist({
+      session,
+      actorId: new Types.ObjectId(),
+      action: { kind: "INCOMPLETE_EDIT" },
+    })),
+    (error: unknown) => error instanceof ProfileSubmissionAccountPersistenceError && error.code === "ACCOUNT_NOT_FOUND",
+  );
 });
 
 test("transaction abort and callback-style failure restore contact, status, and legacy fields", async () => {

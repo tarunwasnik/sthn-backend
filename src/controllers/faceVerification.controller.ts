@@ -5,7 +5,7 @@ import { assertFaceVerificationImageBytes } from "../middlewares/upload.middlewa
 import { acceptFaceVerificationCapture, cancelFaceVerificationSession, getOwnedFaceVerificationSession, startFaceVerificationSession, toFaceVerificationSessionDto } from "../services/profile/faceVerificationSession.service";
 
 export const beginFaceVerificationSession = catchAsync(async (req: Request, res: Response) => {
-  const session = await startFaceVerificationSession({ userId: req.user!.id, avatar: req.body.avatar });
+  const session = await startFaceVerificationSession({ userId: req.user!.id, avatar: req.body.avatar, candidateAvatar: req.body.candidateAvatar });
   res.status(201).json({ session: toFaceVerificationSessionDto(session) });
 });
 export const getFaceVerificationSessionStatus = catchAsync(async (req: Request, res: Response) => {

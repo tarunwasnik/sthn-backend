@@ -1,6 +1,7 @@
 import { UserProfile } from "../../models/userProfile.model";
 import cloudinary, { extractPublicId } from "../../config/cloudinary";
 import { ProfileVerificationInferenceError } from "../../errors/profile/ProfileVerificationInferenceError";
+import type { TrustedAvatarAdmissionCandidate } from "../imageModeration/imageAdmission.service";
 import { fingerprintAvatarReference } from "./faceVerificationSession.service";
 import { FACE_VERIFICATION_EVIDENCE_MAX_BYTES, FACE_VERIFICATION_EVIDENCE_READ_TIMEOUT_MS } from "./faceVerification.constants";
 
@@ -19,30 +20,51 @@ const readBytes = async (response: Response) => {
   return Buffer.concat(chunks, total);
 };
 
+type FetchResponse = Pick<Response, "ok" | "status" | "headers" | "body">;
+type FetchImplementation = (input: RequestInfo | URL, init?: RequestInit) => Promise<FetchResponse>;
+type TrustedAvatarReferenceReaderDependencies = Readonly<{
+  fetchImplementation?: FetchImplementation;
+  cloudinaryUrlFactory?: (publicId: string) => string;
+}>;
+
+/** Shared protected reader for a server-derived Cloudinary avatar reference. */
+export const createTrustedFaceVerificationAvatarReferenceReader = (dependencies: TrustedAvatarReferenceReaderDependencies = {}) => async (trustedMediaReference: string) => {
+  if (!trustedAvatarUrl(trustedMediaReference)) throw new ProfileVerificationInferenceError("Avatar media authority is invalid", "EVIDENCE_NOT_AVAILABLE", 409);
+  const publicId = extractPublicId(trustedMediaReference);
+  if (!publicId) throw new ProfileVerificationInferenceError("Avatar media authority is invalid", "EVIDENCE_NOT_AVAILABLE", 409);
+  const url = (dependencies.cloudinaryUrlFactory ?? ((id: string) => cloudinary.url(id, {
+    secure: true,
+    resource_type: "image",
+    transformation: [{ width: 2048, height: 2048, crop: "limit", fetch_format: "jpg", quality: "auto" }],
+  })))(publicId);
+  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), FACE_VERIFICATION_EVIDENCE_READ_TIMEOUT_MS);
+  try {
+    const response = await (dependencies.fetchImplementation ?? (fetch as FetchImplementation))(url, { method: "GET", redirect: "error", signal: controller.signal, headers: { accept: "image/jpeg, image/png, image/webp" } });
+    if (!response.ok) throw new ProfileVerificationInferenceError("Avatar retrieval failed", "EVIDENCE_RETRIEVAL_FAILED", 503, response.status >= 500);
+    return await readBytes(response as Response);
+  } catch (error) {
+    if (error instanceof ProfileVerificationInferenceError) throw error;
+    throw new ProfileVerificationInferenceError("Avatar retrieval failed", "EVIDENCE_RETRIEVAL_FAILED", 503, true);
+  } finally { clearTimeout(timer); }
+};
+
+export const readTrustedFaceVerificationAvatarReference = createTrustedFaceVerificationAvatarReferenceReader();
+
+/**
+ * Reads a candidate that was returned by resolveTrustedAvatarAdmissionCandidate.
+ * The caller is responsible for obtaining that server-derived authority; this
+ * reader never accepts client request media as an authority source.
+ */
+export const readTrustedAvatarAdmissionCandidate = (candidate: TrustedAvatarAdmissionCandidate) =>
+  readTrustedFaceVerificationAvatarReference(candidate.trustedMediaReference);
+
 /** Reads only the current Cloudinary avatar proven to belong to the exact session submission. */
 export const readBoundProfileVerificationAvatar = async (input: { profileId: string; userId: string; avatarFingerprint: string }) => {
   const profile = await UserProfile.findById(input.profileId).exec();
   if (!profile || String(profile.userId) !== input.userId || !profile.avatar || fingerprintAvatarReference(profile.avatar) !== input.avatarFingerprint) {
     throw new ProfileVerificationInferenceError("Avatar submission authority is stale", "STALE_SUBMISSION", 409);
   }
-  if (!trustedAvatarUrl(profile.avatar)) throw new ProfileVerificationInferenceError("Avatar media authority is invalid", "EVIDENCE_NOT_AVAILABLE", 409);
-  const publicId = extractPublicId(profile.avatar);
-  if (!publicId) throw new ProfileVerificationInferenceError("Avatar media authority is invalid", "EVIDENCE_NOT_AVAILABLE", 409);
-  // The source remains the exact authoritative avatar; this only bounds its runtime representation.
-  const url = cloudinary.url(publicId, {
-    secure: true,
-    resource_type: "image",
-    transformation: [{ width: 2048, height: 2048, crop: "limit", fetch_format: "jpg", quality: "auto" }],
-  });
-  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), FACE_VERIFICATION_EVIDENCE_READ_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, { method: "GET", redirect: "error", signal: controller.signal, headers: { accept: "image/jpeg, image/png, image/webp" } });
-    if (!response.ok) throw new ProfileVerificationInferenceError("Avatar retrieval failed", "EVIDENCE_RETRIEVAL_FAILED", 503, response.status >= 500);
-    return await readBytes(response);
-  } catch (error) {
-    if (error instanceof ProfileVerificationInferenceError) throw error;
-    throw new ProfileVerificationInferenceError("Avatar retrieval failed", "EVIDENCE_RETRIEVAL_FAILED", 503, true);
-  } finally { clearTimeout(timer); }
+  return readTrustedFaceVerificationAvatarReference(profile.avatar);
 };
 
 /** Reads the current profile-bound avatar only when it also belongs to the immutable submitted version. */

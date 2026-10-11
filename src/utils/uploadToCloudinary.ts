@@ -67,3 +67,27 @@ export const uploadTemporaryImageToCloudinary = (buffer: Buffer, publicId: strin
 });
 
 export const deleteTemporaryImageFromCloudinary = (publicId: string) => cloudinary.uploader.destroy(publicId, { resource_type: "image", type: "upload", invalidate: true });
+
+export type TemporaryImageDeletionOutcome = "DELETED" | "ALREADY_MISSING" | "RETRYABLE_FAILURE" | "AMBIGUOUS_FAILURE";
+
+/**
+ * The provider call remains non-transactional. Callers must reserve durable
+ * ownership before invoking it and must contain ambiguous outcomes.
+ */
+export const deleteCloudinaryImageSafely = async (publicId: string): Promise<TemporaryImageDeletionOutcome> => {
+  try {
+    const result = await deleteTemporaryImageFromCloudinary(publicId);
+    if (result?.result === "ok") return "DELETED";
+    if (result?.result === "not found") return "ALREADY_MISSING";
+    return "AMBIGUOUS_FAILURE";
+  } catch (error) {
+    const status = typeof error === "object" && error !== null && "http_code" in error
+      ? Number((error as { http_code?: unknown }).http_code)
+      : 0;
+    if (status === 408 || status === 429 || status >= 500) return "RETRYABLE_FAILURE";
+    return "AMBIGUOUS_FAILURE";
+  }
+};
+
+/** Compatibility alias for temporary-media callers. */
+export const deleteTemporaryImageFromCloudinarySafely = deleteCloudinaryImageSafely;

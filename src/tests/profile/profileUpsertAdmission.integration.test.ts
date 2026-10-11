@@ -9,6 +9,7 @@ import { ImageModerationAsset } from "../../models/imageModerationAsset.model";
 import { ImageModerationAttempt } from "../../models/imageModerationAttempt.model";
 import { FaceVerificationEvidence } from "../../models/faceVerificationEvidence.model";
 import { FaceVerificationSession } from "../../models/faceVerificationSession.model";
+import type { FaceVerificationAvatarCandidate } from "../../models/faceVerificationSession.model";
 import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
 import { ProfileVerificationRequest } from "../../models/profileVerificationRequest.model";
 import { UserProfile } from "../../models/userProfile.model";
@@ -48,6 +49,7 @@ async function admission(actorId: Types.ObjectId, surface: ImageModerationSurfac
   const record = await ImageAdmission.create({ admissionReference: `imauth_${new Types.ObjectId()}`, attemptId: attempt._id, assetId: asset._id, actorId, contentSha256: sha, surface, entityBinding, expiresAt: future() });
   return { asset, record };
 }
+const admissionCandidate = (input: Awaited<ReturnType<typeof admission>>): FaceVerificationAvatarCandidate => ({ kind: "ADMISSION", admissionId: input.record._id, admissionReference: input.record.admissionReference, assetId: input.asset._id, trustedMediaReference: input.asset.trustedMediaReference, contentSha256: input.record.contentSha256, fingerprint: fingerprintAvatarReference(input.asset.trustedMediaReference), expiresAt: input.record.expiresAt });
 
 async function media(actorId: Types.ObjectId, prefix = "new") {
   const avatar = await admission(actorId, "USER_PROFILE_AVATAR", `https://trusted.test/${prefix}-avatar`);
@@ -57,8 +59,8 @@ async function media(actorId: Types.ObjectId, prefix = "new") {
   return { all: [avatar, cover, one, two], avatar, body: { avatar: claim(avatar.record.admissionReference), cover: claim(cover.record.admissionReference), profilePhotos: [claim(one.record.admissionReference), claim(two.record.admissionReference)] } };
 }
 
-async function completedSession(input: { userId: Types.ObjectId; profileId: Types.ObjectId; avatar: string; version: number; evidenceCount?: number }) {
-  const session = await FaceVerificationSession.create({ sessionReference: `FACE_${new Types.ObjectId()}`, userId: input.userId, profileId: input.profileId, profileSubmissionVersion: input.version, avatarFingerprint: fingerprintAvatarReference(input.avatar), status: "CAPTURE_COMPLETE", isCurrent: true, challenges: [...challenges], requiredCaptureCount: 5, acceptedCaptureCount: 5, startedAt: new Date(), expiresAt: future(), captureCompletedAt: new Date() });
+async function completedSession(input: { userId: Types.ObjectId; profileId: Types.ObjectId; avatar: string; version: number; evidenceCount?: number; avatarCandidate?: FaceVerificationAvatarCandidate }) {
+  const session = await FaceVerificationSession.create({ sessionReference: `FACE_${new Types.ObjectId()}`, userId: input.userId, profileId: input.profileId, profileSubmissionVersion: input.version, avatarFingerprint: fingerprintAvatarReference(input.avatar), avatarCandidate: input.avatarCandidate, status: "CAPTURE_COMPLETE", isCurrent: true, challenges: [...challenges], requiredCaptureCount: 5, acceptedCaptureCount: 5, startedAt: new Date(), expiresAt: future(), captureCompletedAt: new Date() });
   await FaceVerificationEvidence.insertMany(challenges.slice(0, input.evidenceCount ?? 5).map((challenge, challengeIndex) => ({ evidenceReference: `E_${new Types.ObjectId()}`, sessionId: session._id, userId: input.userId, profileId: input.profileId, challengeIndex, challenge, cloudinaryPublicId: `face/${new Types.ObjectId()}`, status: "STORED", mimeType: "image/jpeg", bytes: 1, format: "jpg" })));
   return session;
 }
@@ -80,7 +82,7 @@ test("initial/incomplete submission atomically commits media, request, job, evid
 
 test("rejected resubmission advances only the profile submission version while verified edit does not", async () => {
   const account = await user("active"); const rejected = await profile(account._id, "rejected"); const claims = await media(account._id, "rejected");
-  await completedSession({ userId: account._id, profileId: rejected._id, avatar: "https://trusted.test/rejected-avatar", version: 2 });
+  await completedSession({ userId: account._id, profileId: rejected._id, avatar: "https://trusted.test/rejected-avatar", version: 2, avatarCandidate: admissionCandidate(claims.avatar) });
   await invoke(account._id, withUserProfileTextAdmission(String(account._id), body(rejected.username, claims.body)));
   assert.equal((await UserProfile.findById(rejected._id))?.verificationSubmissionVersion, 2);
   const verified = await profile((await user("active"))._id, "verified");

@@ -5,7 +5,7 @@ import { migrateLegacyProfileMobileContact } from "./legacyMobileContactMigratio
 
 export type ProfileSubmissionAccountAction =
   | Readonly<{ kind: "FIRST_SUBMISSION"; mobileContact: Readonly<{ mobileCountryCode: string; mobileNumber: string }> }>
-  | Readonly<{ kind: "REJECTED_RESUBMISSION" | "VERIFIED_EDIT" }>;
+  | Readonly<{ kind: "INCOMPLETE_EDIT" | "REJECTED_RESUBMISSION" | "VERIFIED_EDIT" }>;
 
 export class ProfileSubmissionAccountPersistenceError extends Error {
   constructor(readonly code: "TRANSACTION_REQUIRED" | "ACCOUNT_NOT_FOUND" | "INVALID_CONTACT") {

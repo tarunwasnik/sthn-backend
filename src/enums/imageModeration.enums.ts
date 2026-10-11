@@ -4,4 +4,7 @@ export const IMAGE_MODERATION_ATTEMPT_STATUSES = ["CREATED", "PROCESSING", "PASS
 export type ImageModerationAttemptStatus = typeof IMAGE_MODERATION_ATTEMPT_STATUSES[number];
 export const IMAGE_ADMISSION_STATUSES = ["ACTIVE", "CONSUMED", "INVALIDATED", "EXPIRED"] as const;
 export type ImageAdmissionStatus = typeof IMAGE_ADMISSION_STATUSES[number];
+/** Durable provider-cleanup state for an expired temporary image asset. */
+export const IMAGE_TEMPORARY_CLEANUP_STATUSES = ["PENDING", "RETRY_WAIT", "DELETE_RESERVED", "DELETE_IN_PROGRESS", "DELETE_UNKNOWN", "DELETED"] as const;
+export type ImageTemporaryCleanupStatus = typeof IMAGE_TEMPORARY_CLEANUP_STATUSES[number];
 export type ImageModerationFailureKind = "INVALID_IMAGE" | "MODEL_UNAVAILABLE";

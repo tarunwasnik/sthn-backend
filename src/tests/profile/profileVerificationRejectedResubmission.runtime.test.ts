@@ -20,6 +20,7 @@ const validReferenceDetection = { width: 100, height: 100, decodedBytes: 30000, 
 
 const avatar = "https://example.test/avatar-a.jpg";
 const body = { username: "rejected-resubmit", realName: "Rejected User", dateOfBirth: "1990-01-01", mobileCountryCode: "+91", mobileNumber: "9876543210", country: "India", city: "Mumbai", languages: ["English"], interests: [], bio: "Corrected profile.", avatar, cover: "https://example.test/cover.jpg", profilePhotos: ["https://example.test/one.jpg", "https://example.test/two.jpg"] };
+const unchangedMediaClaims = <T extends typeof body>(input: T) => ({ ...input, avatar: { kind: "UNCHANGED" as const, reference: input.avatar }, cover: { kind: "UNCHANGED" as const, reference: input.cover }, profilePhotos: input.profilePhotos.map((reference) => ({ kind: "UNCHANGED" as const, reference })) });
 const invoke = (controller: (req: Request, res: Response, next: NextFunction) => unknown, user: Record<string, unknown>, requestBody: Record<string, unknown>) => new Promise<void>((resolve, reject) => {
   const response = { status: () => response, json: () => { resolve(); return response; } } as unknown as Response;
   controller({ user, body: requestBody } as unknown as Request, response, reject);
@@ -53,10 +54,10 @@ test("rejected resubmission cannot create a request or job without a fresh compl
 test("fresh next-version captures create exactly one isolated rejected resubmission attempt", async () => {
   const user = await User.create({ email: "rejected-with-session@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });
   const profile = await UserProfile.create({ ...body, userId: user._id, profileStatus: "rejected", rejectionReason: "Update your profile.", verificationSubmissionVersion: 1, verificationSubmittedAt: new Date() });
-  const session = await startFaceVerificationSession({ userId: String(user._id), avatar });
+  const session = await startFaceVerificationSession({ userId: String(user._id), candidateAvatar: { kind: "UNCHANGED", reference: avatar } });
   assert.equal(session.profileSubmissionVersion, 2);
   await completeWithEvidence(session._id);
-  await invoke(upsertProfile, { id: String(user._id), role: "user", status: "active" }, withUserProfileTextAdmission(String(user._id), body));
+  await invoke(upsertProfile, { id: String(user._id), role: "user", status: "active" }, withUserProfileTextAdmission(String(user._id), unchangedMediaClaims(body)));
   const current = await UserProfile.findById(profile._id).orFail();
   const request = await ProfileVerificationRequest.findOne({ profileId: profile._id, isActive: true }).orFail();
   const boundSession = await FaceVerificationSession.findById(session._id).orFail();
@@ -69,15 +70,16 @@ test("fresh next-version captures create exactly one isolated rejected resubmiss
 test("a session completed for avatar A cannot authorize rejected resubmission with avatar B", async () => {
   const user = await User.create({ email: "rejected-avatar-mismatch@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });
   const profile = await UserProfile.create({ ...body, userId: user._id, profileStatus: "rejected", rejectionReason: "Use the correct photo.", verificationSubmissionVersion: 1, verificationSubmittedAt: new Date() });
-  const session = await startFaceVerificationSession({ userId: String(user._id), avatar });
+  const session = await startFaceVerificationSession({ userId: String(user._id), candidateAvatar: { kind: "UNCHANGED", reference: avatar } });
   await completeWithEvidence(session._id);
-  await assert.rejects(invoke(upsertProfile, { id: String(user._id), role: "user", status: "active" }, withUserProfileTextAdmission(String(user._id), { ...body, avatar: "https://example.test/avatar-b.jpg" })), /fresh live face verification/);
+  profile.avatar = "https://example.test/avatar-b.jpg"; await profile.save();
+  await assert.rejects(invoke(upsertProfile, { id: String(user._id), role: "user", status: "active" }, withUserProfileTextAdmission(String(user._id), unchangedMediaClaims({ ...body, avatar: "https://example.test/avatar-b.jpg" }))), /fresh live face verification/);
   const current = await UserProfile.findById(profile._id).orFail();
   assert.equal(current.profileStatus, "rejected"); assert.equal(current.verificationSubmissionVersion, 1);
   assert.equal(await ProfileVerificationRequest.countDocuments({ profileId: profile._id }), 0);
 });
 
-test("a corrective V2 AI rejection enters the same fresh-session isolated resubmission lifecycle", async () => {
+test("an Admin corrective V2 rejection enters the same fresh-session isolated resubmission lifecycle", async () => {
   const sixPhotoBody = { ...body, username: "v2-ai-rejected-resubmit", profilePhotos: Array.from({ length: 6 }, (_, index) => `https://example.test/v2-${index}.jpg`) };
   const user = await User.create({ email: "v2-ai-rejected-resubmit@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });
   const profile = await UserProfile.create({ ...sixPhotoBody, userId: user._id, profileStatus: "pending_verification", rejectionReason: "", verificationSubmissionVersion: 1, verificationSubmittedAt: new Date() });
@@ -85,14 +87,15 @@ test("a corrective V2 AI rejection enters the same fresh-session isolated resubm
   process.env.STHN_PROFILE_VERIFICATION_POLICY = "GATED_MULTI_MEDIA_V2";
   try {
     const oldRequest = (await ensureActiveProfileVerificationRequest(profile)).request;
-    await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "REJECT", authority: "AI", reasonCode: "IDENTITY_MISMATCH", reason: "The avatar did not match the completed live captures. Update it and try again.", expectedRequestId: String(oldRequest._id), expectedSubmissionVersion: 1 });
+    const admin = await User.create({ email: "v2-admin-rejected-resubmit@test.local", password: "test-password", role: "admin", status: "active", governanceState: "ACTIVE" });
+    await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "REJECT", authority: "ADMIN", decidedBy: String(admin._id), reason: "The avatar did not match the completed live captures. Update it and try again.", expectedRequestId: String(oldRequest._id), expectedSubmissionVersion: 1 });
     const rejected = await UserProfile.findById(profile._id).orFail();
     assert.equal(rejected.profileStatus, "rejected"); assert.equal((await User.findById(user._id))?.governanceState, "ACTIVE");
 
-    const freshSession = await startFaceVerificationSession({ userId: String(user._id), avatar });
+    const freshSession = await startFaceVerificationSession({ userId: String(user._id), candidateAvatar: { kind: "UNCHANGED", reference: avatar } });
     assert.equal(freshSession.profileSubmissionVersion, 2);
     await completeWithEvidence(freshSession._id);
-    await invoke(upsertProfile, { id: String(user._id), role: "user", status: "active" }, withUserProfileTextAdmission(String(user._id), sixPhotoBody));
+    await invoke(upsertProfile, { id: String(user._id), role: "user", status: "active" }, withUserProfileTextAdmission(String(user._id), unchangedMediaClaims(sixPhotoBody)));
 
     const newRequest = await ProfileVerificationRequest.findOne({ profileId: profile._id, isActive: true }).orFail();
     const storedOldRequest = await ProfileVerificationRequest.findById(oldRequest._id).orFail();

@@ -9,6 +9,7 @@ export type BiometricReferenceAvatarValidation = { valid: true } | { valid: fals
 export type ReferenceAvatarPreflightReasonCode = "REFERENCE_AVATAR_NO_FACE" | "REFERENCE_AVATAR_MULTIPLE_FACES" | "REFERENCE_AVATAR_INVALID_GEOMETRY" | "REFERENCE_AVATAR_INVALID_LANDMARKS";
 type Reader = typeof readBoundProfileVerificationAvatar;
 type Detector = typeof detectYuNetFaces;
+type CandidateReader = () => Promise<Buffer>;
 const REFERENCE_FACE_AREA = { min: 0.03, max: 0.65 } as const;
 let testDependencies: { reader?: Reader; detector?: Detector } | undefined;
 
@@ -75,6 +76,10 @@ export const validateBiometricReferenceAvatar = async (input: { profileId: strin
 export const requireBiometricReferenceAvatar = async (input: { profileId: string; userId: string; avatarFingerprint: string }) => {
   const result = await validateBiometricReferenceAvatar(input);
   if (result.valid) return;
+  throwReferenceAvatarPreflightError(result);
+};
+
+const throwReferenceAvatarPreflightError = (result: Exclude<BiometricReferenceAvatarValidation, { valid: true }>) => {
   throw new AppError(
     result.reason === "MULTIPLE_FACES"
       ? "This profile photo cannot be used for face verification. Choose a clear photo containing only you."
@@ -82,4 +87,38 @@ export const requireBiometricReferenceAvatar = async (input: { profileId: string
     409,
     referenceAvatarPreflightReasonCode(result.reason),
   );
+};
+
+/** Runs the existing YuNet preflight against a server-resolved candidate reader. */
+export const requireBiometricReferenceAvatarFromReader = async (input: { profileId: string; userId: string; avatarFingerprint: string }, reader: CandidateReader) => {
+  const detector = testDependencies?.detector ?? detectYuNetFaces;
+  let scores: YuNetDecisionScoreSummary | undefined;
+  const bytes = await (testDependencies?.reader ? testDependencies.reader(input) : reader());
+  const detection = await detector(bytes, "REFERENCE", true, (summary) => { scores = summary; });
+  const result = validateBiometricReferenceDetection(detection);
+  if (scores) {
+    const revision = process.env.RENDER_GIT_COMMIT;
+    try {
+      logger.info(JSON.stringify({
+        event: "REFERENCE_AVATAR_PREFLIGHT_DIAGNOSTIC",
+        detectorModelId: YUNET_ARTIFACT.identifier,
+        detectorModelVersion: YUNET_ARTIFACT.version,
+        artifactSha256: YUNET_ARTIFACT.sha256,
+        confidenceThreshold: YUNET_LIMITS.scoreThreshold,
+        nmsThreshold: YUNET_LIMITS.nmsThreshold,
+        referenceFaceAreaMin: REFERENCE_FACE_AREA.min,
+        referenceFaceAreaMax: REFERENCE_FACE_AREA.max,
+        transformedWidth: detection.width,
+        transformedHeight: detection.height,
+        maxRawConfidence: scores.maxRawConfidence,
+        rawFiniteCandidateCount: scores.rawFiniteCandidateCount,
+        candidatesAtThreshold: scores.candidatesAtThreshold,
+        postNmsFaceCount: detection.faces.length,
+        classification: result.valid ? "VALID" : result.reason,
+        ...(revision && /^[a-f0-9]{40}$/i.test(revision) ? { deploymentRevision: revision } : {}),
+      }));
+    } catch { /* Logging must not affect reference validation or public errors. */ }
+  }
+  if (result.valid) return;
+  throwReferenceAvatarPreflightError(result);
 };

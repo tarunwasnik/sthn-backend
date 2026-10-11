@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
 import type { NextFunction, Request, Response } from "express";
+import { Types } from "mongoose";
 
 import User from "../../models/User";
 import { UserProfile } from "../../models/userProfile.model";
@@ -8,7 +9,11 @@ import { ProfileVerificationRequest } from "../../models/profileVerificationRequ
 import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
 import { FaceVerificationSession } from "../../models/faceVerificationSession.model";
 import { FaceVerificationEvidence } from "../../models/faceVerificationEvidence.model";
-import { upsertProfile, updateMyProfile } from "../../controllers/profile.controller";
+import { ImageAdmission } from "../../models/imageAdmission.model";
+import { ImageModerationAsset } from "../../models/imageModerationAsset.model";
+import { ImageModerationAttempt } from "../../models/imageModerationAttempt.model";
+import { ImageModerationSurface } from "../../enums/imageModeration.enums";
+import { saveMyOnboardingDraft, upsertProfile, updateMyProfile } from "../../controllers/profile.controller";
 import {
   decideProfileVerificationRequest,
   escalateProfileVerificationRequest,
@@ -32,6 +37,10 @@ process.env.NODE_ENV = "test";
 
 const aiApprovalSnapshot = () => ({ source: "AI" as const, model: { identifier: "OPENCV_ZOO_SFACE", version: "face_recognition_sface_2021dec" }, similarity: 0.99, threshold: 0.9, decidedAt: new Date() });
 const validReferenceDetection = { width: 100, height: 100, decodedBytes: 30000, faces: [{ x: 30, y: 30, width: 40, height: 40, confidence: 0.9, landmarks: { rightEye: { x: 40, y: 42 }, leftEye: { x: 55, y: 42 }, noseTip: { x: 48, y: 50 }, rightMouthCorner: { x: 42, y: 60 }, leftMouthCorner: { x: 54, y: 60 } } }] } as const;
+const sha = "a".repeat(64);
+const future = () => new Date(Date.now() + 60_000);
+const claim = (admissionReference: string) => ({ kind: "ADMISSION" as const, admissionReference });
+const unchanged = (reference: string) => ({ kind: "UNCHANGED" as const, reference });
 
 const invoke = (
   controller: (req: Request, res: Response, next: NextFunction) => unknown,
@@ -47,7 +56,7 @@ const invoke = (
   controller(request as unknown as Request, response, reject);
 });
 
-const profileBody = (username: string) => ({
+const profileFields = (username: string) => ({
   username,
   realName: "Verification Test User",
   dateOfBirth: "1990-01-01",
@@ -58,10 +67,48 @@ const profileBody = (username: string) => ({
   languages: ["English"],
   interests: ["Music"],
   bio: "Profile verification foundation test.",
-  avatar: "https://example.test/avatar.jpg",
-  cover: "https://example.test/cover.jpg",
-  profilePhotos: ["https://example.test/one.jpg", "https://example.test/two.jpg"],
 });
+
+async function seedAdmission(actorId: Types.ObjectId, surface: ImageModerationSurface, trustedMediaReference: string) {
+  const entityBinding = `PENDING:${actorId}:${surface}`;
+  const asset = await ImageModerationAsset.create({ assetReference: `ima_${new Types.ObjectId()}`, actorId, contentSha256: sha, providerAssetId: `provider_${new Types.ObjectId()}`, trustedMediaReference, expiresAt: future(), retentionDeadline: future() });
+  const attempt = await ImageModerationAttempt.create({ attemptReference: `imat_${new Types.ObjectId()}`, assetId: asset._id, actorId, contentSha256: sha, surface, entityBinding, status: "PASSED", provenanceModel: { identifier: "test", revision: "test", artifactSha256: sha }, policy: { key: "TEST", version: "V1" }, expiresAt: future(), retentionDeadline: future() });
+  return ImageAdmission.create({ admissionReference: `imauth_${new Types.ObjectId()}`, attemptId: attempt._id, assetId: asset._id, actorId, contentSha256: sha, surface, entityBinding, expiresAt: future() });
+}
+
+async function admissionMedia(actorId: Types.ObjectId, prefix: string) {
+  const [avatar, cover, one, two] = await Promise.all([
+    seedAdmission(actorId, "USER_PROFILE_AVATAR", `https://trusted.test/${prefix}-avatar`),
+    seedAdmission(actorId, "USER_PROFILE_COVER", `https://trusted.test/${prefix}-cover`),
+    seedAdmission(actorId, "USER_PROFILE_PHOTO", `https://trusted.test/${prefix}-one`),
+    seedAdmission(actorId, "USER_PROFILE_PHOTO", `https://trusted.test/${prefix}-two`),
+  ]);
+  return { avatar: claim(avatar.admissionReference), cover: claim(cover.admissionReference), profilePhotos: [claim(one.admissionReference), claim(two.admissionReference)] };
+}
+
+const persistedMediaClaims = (profile: { avatar: string; cover: string; profilePhotos: string[] }) => ({
+  avatar: unchanged(profile.avatar),
+  cover: unchanged(profile.cover),
+  profilePhotos: profile.profilePhotos.map(unchanged),
+});
+
+async function completeSessionWithEvidence(session: Awaited<ReturnType<typeof startFaceVerificationSession>>) {
+  await FaceVerificationEvidence.insertMany(session.challenges.map((challenge, challengeIndex) => ({
+    evidenceReference: `REQUEST_${String(session._id)}_${challengeIndex}`,
+    sessionId: session._id, userId: session.userId, profileId: session.profileId,
+    challengeIndex, challenge, cloudinaryPublicId: `opaque-${String(session._id)}-${challengeIndex}`,
+    cloudinaryResourceType: "image", status: "STORED", mimeType: "image/jpeg", bytes: 10, format: "jpg", captureReceivedAt: new Date(),
+  })));
+  await FaceVerificationSession.updateOne({ _id: session._id }, { $set: { status: "CAPTURE_COMPLETE", acceptedCaptureCount: 5, captureCompletedAt: new Date() } });
+}
+
+async function saveAdmissionBackedDraft(user: Awaited<ReturnType<typeof createUser>>, username: string) {
+  await invoke(saveMyOnboardingDraft, {
+    user: { id: String(user._id), role: "user", status: "pending_profile" },
+    body: { ...profileFields(username), ...await admissionMedia(user._id, username) },
+  });
+  return UserProfile.findOne({ userId: user._id }).orFail();
+}
 
 const createUser = (email: string, status: "pending_profile" | "active" = "pending_profile") => User.create({
   email,
@@ -72,10 +119,10 @@ const createUser = (email: string, status: "pending_profile" | "active" = "pendi
 
 const submitProfile = async (email: string, username: string) => {
   const user = await createUser(email);
-  const body = profileBody(username);
-  const faceSession = await startFaceVerificationSession({ userId: String(user._id), avatar: body.avatar });
-  await FaceVerificationSession.updateOne({ _id: faceSession._id }, { $set: { status: "CAPTURE_COMPLETE", acceptedCaptureCount: 5, captureCompletedAt: new Date() } });
-  await invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(user._id), body) });
+  const draft = await saveAdmissionBackedDraft(user, username);
+  const faceSession = await startFaceVerificationSession({ userId: String(user._id), avatar: draft.avatar });
+  await completeSessionWithEvidence(faceSession);
+  await invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(user._id), { ...profileFields(username), ...persistedMediaClaims(draft) }) });
   const profile = await UserProfile.findOne({ userId: user._id });
   assert.ok(profile);
   return { user, profile };
@@ -101,13 +148,15 @@ test("first submission creates exactly one active verification request and repla
 
 test("initial onboarding submission requires a current matching completed face session before promotion", async () => {
   const missing = await createUser("verification-face-guard-missing@test.local");
-  const missingBody = profileBody("verification-face-guard-missing");
+  const missingDraft = await saveAdmissionBackedDraft(missing, "verification-face-guard-missing");
+  const missingBody = { ...profileFields("verification-face-guard-missing"), ...persistedMediaClaims(missingDraft) };
   await assert.rejects(invoke(upsertProfile, { user: { id: String(missing._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(missing._id), missingBody) }), /Complete live face verification/);
   assert.equal(await ProfileVerificationRequest.countDocuments({ userId: missing._id }), 0);
 
   const invalid = await createUser("verification-face-guard-invalid@test.local");
-  const invalidBody = profileBody("verification-face-guard-invalid");
-  const cancelled = await startFaceVerificationSession({ userId: String(invalid._id), avatar: invalidBody.avatar });
+  const invalidDraft = await saveAdmissionBackedDraft(invalid, "verification-face-guard-invalid");
+  const invalidBody = { ...profileFields("verification-face-guard-invalid"), ...persistedMediaClaims(invalidDraft) };
+  const cancelled = await startFaceVerificationSession({ userId: String(invalid._id), avatar: invalidDraft.avatar });
   await FaceVerificationSession.updateOne({ _id: cancelled._id }, { $set: { status: "CANCELLED", isCurrent: false } });
   await assert.rejects(invoke(upsertProfile, { user: { id: String(invalid._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(invalid._id), invalidBody) }), /Complete live face verification/);
   assert.equal((await UserProfile.findById(cancelled.profileId))?.profileStatus, "incomplete");
@@ -176,19 +225,21 @@ test("admin approval is terminal, replay-safe, and cannot be overwritten by futu
   assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "verified");
 });
 
-test("an AI terminal decision cannot be overwritten by a later admin decision", async () => {
+test("an AI terminal decision is rejected and an Admin remains able to decide", async () => {
   const { profile } = await submitProfile("verification-ai-first@test.local", "verification-ai-first");
   const admin = await User.create({ email: "verification-ai-first-admin@test.local", password: "test-password", role: "admin", status: "active", governanceState: "ACTIVE" });
-  const approved = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: aiApprovalSnapshot() });
-  assert.equal(approved.request.decisionAuthority, "AI");
-  await assert.rejects(decideProfileVerificationRequest({ profileId: String(profile._id), decision: "REJECT", authority: "ADMIN", decidedBy: String(admin._id), reason: "stale manual decision" }));
+  await assert.rejects(decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: aiApprovalSnapshot() }), /Only an Admin/);
+  const approved = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "ADMIN", decidedBy: String(admin._id) });
+  assert.equal(approved.request.decisionAuthority, "ADMIN");
   assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "verified");
 });
 
-test("AI approval and Admin decisions resolve an unresolved Admin Review request, and terminal requests leave both queues", async () => {
+test("only Admin decisions resolve an unresolved Admin Review request, and terminal requests leave both queues", async () => {
   const { profile } = await submitProfile("verification-review-ai@test.local", "verification-review-ai");
   await escalateProfileVerificationRequest({ profileId: String(profile._id), reasonCode: "MODEL_FAILURE" });
-  const decided = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: aiApprovalSnapshot() });
+  const admin = await User.create({ email: "verification-review-ai-admin@test.local", password: "test-password", role: "admin", status: "active", governanceState: "ACTIVE" });
+  await assert.rejects(decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: aiApprovalSnapshot() }), /Only an Admin/);
+  const decided = await decideProfileVerificationRequest({ profileId: String(profile._id), decision: "APPROVE", authority: "ADMIN", decidedBy: String(admin._id) });
   assert.equal(decided.request.status, "APPROVED");
   assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "verified");
   const [aiQueue, adminReviewQueue] = await Promise.all([
@@ -199,7 +250,6 @@ test("AI approval and Admin decisions resolve an unresolved Admin Review request
   assert.equal(adminReviewQueue.some((entry) => entry._id === String(profile._id)), false);
 
   const { profile: adminProfile } = await submitProfile("verification-review-admin@test.local", "verification-review-admin");
-  const admin = await User.create({ email: "verification-review-admin-user@test.local", password: "test-password", role: "admin", status: "active", governanceState: "ACTIVE" });
   await escalateProfileVerificationRequest({ profileId: String(adminProfile._id), reasonCode: "TEXT_MODERATION_UNCERTAIN" });
   const approved = await decideProfileVerificationRequest({ profileId: String(adminProfile._id), decision: "APPROVE", authority: "ADMIN", decidedBy: String(admin._id) });
   assert.equal(approved.request.status, "APPROVED");
@@ -218,8 +268,8 @@ test("first terminal decision still wins after escalation and same-decision repl
 
   const { profile: aiProfile } = await submitProfile("verification-review-ai-race@test.local", "verification-review-ai-race");
   await escalateProfileVerificationRequest({ profileId: String(aiProfile._id), reasonCode: "FACE_MATCH_UNCERTAIN" });
-  await decideProfileVerificationRequest({ profileId: String(aiProfile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: aiApprovalSnapshot() });
-  await assert.rejects(decideProfileVerificationRequest({ profileId: String(aiProfile._id), decision: "REJECT", authority: "ADMIN", decidedBy: String(admin._id), reason: "stale manual result" }));
+  await assert.rejects(decideProfileVerificationRequest({ profileId: String(aiProfile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: aiApprovalSnapshot() }), /Only an Admin/);
+  await decideProfileVerificationRequest({ profileId: String(aiProfile._id), decision: "APPROVE", authority: "ADMIN", decidedBy: String(admin._id) });
   assert.equal((await UserProfile.findById(aiProfile._id))?.profileStatus, "verified");
 });
 
@@ -230,18 +280,12 @@ test("admin rejection preserves reason and a rejected resubmission creates a new
   assert.equal(rejected.request.status, "REJECTED");
   assert.equal((await UserProfile.findById(profile._id))?.rejectionReason, "Please improve the profile information.");
 
-  const resubmissionSession = await startFaceVerificationSession({ userId: String(user._id), avatar: profileBody("verification-reject").avatar });
-  await FaceVerificationEvidence.insertMany(resubmissionSession.challenges.map((challenge, challengeIndex) => ({
-    evidenceReference: `REQUEST_RESUBMIT_${String(resubmissionSession._id)}_${challengeIndex}`,
-    sessionId: resubmissionSession._id, userId: user._id, profileId: profile._id,
-    challengeIndex, challenge, cloudinaryPublicId: `opaque-${String(resubmissionSession._id)}-${challengeIndex}`,
-    cloudinaryResourceType: "image", status: "STORED", mimeType: "image/jpeg", bytes: 10, format: "jpg", captureReceivedAt: new Date(),
-  })));
-  await FaceVerificationSession.updateOne({ _id: resubmissionSession._id }, { $set: { status: "CAPTURE_COMPLETE", acceptedCaptureCount: 5, captureCompletedAt: new Date() } });
+  const resubmissionSession = await startFaceVerificationSession({ userId: String(user._id), candidateAvatar: unchanged(profile.avatar) });
+  await completeSessionWithEvidence(resubmissionSession);
 
   await invoke(updateMyProfile, {
     user: { id: String(user._id), role: "user", status: "active" },
-    body: withUserProfileTextAdmission(String(user._id), { ...profileBody("verification-reject"), bio: "Corrected profile information." }),
+    body: withUserProfileTextAdmission(String(user._id), { ...profileFields("verification-reject"), ...persistedMediaClaims(profile), bio: "Corrected profile information." }),
   });
   const reloaded = await UserProfile.findById(profile._id);
   assert.equal(reloaded?.profileStatus, "pending_verification");

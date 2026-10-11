@@ -47,32 +47,32 @@ before(async () => connectPhase7HDatabase(), { timeout: 120_000 });
 beforeEach(async () => clearPhase7HDatabase());
 after(async () => disconnectPhase7HDatabase(), { timeout: 30_000 });
 
-test("Attempt-3-equivalent V2 result uses Gate 3 .36 and canonical AI approval", async () => {
+test("Attempt-3-equivalent V2 result is an advisory recommendation requiring Admin review", async () => {
   const { user, profile, request } = await setup("match", "V2");
   const originalLegacyThreshold = process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD;
   process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD = "0.99";
   try { await applyProfileVerificationAiDecision({ request, result: await inference(request, gated("V2")) }); }
   finally { if (originalLegacyThreshold === undefined) delete process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD; else process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD = originalLegacyThreshold; }
   const stored = await ProfileVerificationRequest.findById(request._id).orFail();
-  assert.equal(stored.status, "APPROVED"); assert.equal(stored.decision, "APPROVE"); assert.equal(stored.decisionAuthority, "AI");
-  assert.equal(stored.aiDecisionSnapshot?.similarity, 0.4289849647); assert.equal(stored.aiDecisionSnapshot?.threshold, 0.36);
-  assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "verified");
+  assert.equal(stored.status, "ADMIN_REVIEW_REQUIRED"); assert.equal(stored.decision, undefined); assert.equal(stored.decisionAuthority, undefined);
+  assert.equal(stored.aiDecisionSnapshot, undefined);
+  assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification");
   assert.equal((await User.findById(user._id))?.governanceState, "ACTIVE");
 });
 
-test("V2 clear Gate 1, Gate 2, and Gate 3 failures are corrective AI rejections", async () => {
+test("V2 clear Gate 1, Gate 2, and Gate 3 failures are advisory corrective recommendations", async () => {
   const cases = [
-    ["technical", gated("V2", { gate1: { outcome: "LIVE_CAPTURE_TECHNICAL_FAILURE", usableCaptureCount: 4, threshold: 0.28, policyVersion: "V1" }, gate2: undefined, gate3: undefined }), "LIVE_CAPTURE_TECHNICAL_FAILURE"],
-    ["coherence", gated("V2", { gate1: { outcome: "LIVE_ANCHOR_INCOHERENT", usableCaptureCount: 5, weakestPeerMedian: 0.2, threshold: 0.28, policyVersion: "V1" }, gate2: undefined, gate3: undefined }), "LIVE_ANCHOR_INCOHERENT"],
-    ["avatar", gated("V2", { gate2: { outcome: "AVATAR_INVALID", avatarAdmission: "AVATAR_INVALID_NO_FACE", optionalMediaSummary: optionalSummary }, gate3: undefined }), "MANDATORY_AVATAR_INVALID"],
-    ["mismatch", gated("V2", { gate3: gate3("LIKELY_MISMATCH") }), "IDENTITY_MISMATCH"],
+    ["technical", gated("V2", { gate1: { outcome: "LIVE_CAPTURE_TECHNICAL_FAILURE", usableCaptureCount: 4, threshold: 0.28, policyVersion: "V1" }, gate2: undefined, gate3: undefined })],
+    ["coherence", gated("V2", { gate1: { outcome: "LIVE_ANCHOR_INCOHERENT", usableCaptureCount: 5, weakestPeerMedian: 0.2, threshold: 0.28, policyVersion: "V1" }, gate2: undefined, gate3: undefined })],
+    ["avatar", gated("V2", { gate2: { outcome: "AVATAR_INVALID", avatarAdmission: "AVATAR_INVALID_NO_FACE", optionalMediaSummary: optionalSummary }, gate3: undefined })],
+    ["mismatch", gated("V2", { gate3: gate3("LIKELY_MISMATCH") })],
   ] as const;
-  for (const [suffix, analysis, reasonCode] of cases) {
+  for (const [suffix, analysis] of cases) {
     const { user, profile, request } = await setup(suffix, "V2");
     await applyProfileVerificationAiDecision({ request, result: await inference(request, analysis) });
     const stored = await ProfileVerificationRequest.findById(request._id).orFail();
-    assert.equal(stored.status, "REJECTED"); assert.equal(stored.decisionAuthority, "AI"); assert.equal(stored.decisionReasonCode, reasonCode);
-    assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "rejected"); assert.equal((await User.findById(user._id))?.governanceState, "ACTIVE");
+    assert.equal(stored.status, "ADMIN_REVIEW_REQUIRED"); assert.equal(stored.decisionAuthority, undefined); assert.equal(stored.decisionReasonCode, undefined);
+    assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification"); assert.equal((await User.findById(user._id))?.governanceState, "ACTIVE");
   }
 });
 

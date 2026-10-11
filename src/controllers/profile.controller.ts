@@ -1,19 +1,18 @@
 // backend/src/controllers/profile.controller.ts
 
 import { Request, Response } from "express";
-import { UserProfile } from "../models/userProfile.model";
+import { UserProfile, UserProfileDocument } from "../models/userProfile.model";
 import User from "../models/User";
 import { AppError } from "../utils/AppError";
 import { catchAsync } from "../utils/catchAsync";
-import { v2 as cloudinary } from "cloudinary";
-import { extractPublicId } from "../utils/extractPublicId";
 import { calculateAge } from "../utils/calculateAge";
 import { migrateLegacyProfileMobileContact } from "../services/profile/legacyMobileContactMigration.service";
 import { ensureActiveProfileVerificationRequest } from "../services/profile/profileVerificationRequest.service";
 import { selectNewProfileVerificationPolicy } from "../services/profile/profileVerificationPolicy.service";
 import { requireProfilePhotoCountForVerificationPolicy } from "../services/profile/profileVerificationSubmittedMedia.service";
 import { ensureProfileVerificationJob } from "../services/profile/profileVerificationJob.service";
-import { bindCompletedFaceSessionToVerificationRequest, invalidateFaceSessionsForAvatar, requireCompletedFaceSessionForInitialSubmission, requireCompletedFaceSessionForRejectedResubmission } from "../services/profile/faceVerificationSession.service";
+import { bindCompletedFaceSessionToVerificationRequest, invalidateFaceSessionsForAvatar, requireCompletedFaceSessionForInitialSubmission, requireCompletedFaceSessionForRejectedResubmission, resolveRejectedResubmissionAvatarCandidate } from "../services/profile/faceVerificationSession.service";
+import type { FaceVerificationAvatarCandidate } from "../models/faceVerificationSession.model";
 import { profileVerificationRequestRepository } from "../repositories/profileVerificationRequest.repository";
 import { profileVerificationJobRepository } from "../repositories/profileVerificationJob.repository";
 import { profileVerificationInferenceResultRepository } from "../repositories/profileVerificationInferenceResult.repository";
@@ -24,7 +23,7 @@ import { Types } from "mongoose";
 import { parseProfileMediaAdmissionRequest } from "../services/profile/profileImageAdmissionContract";
 import { ProfileMediaAdmissionPersistenceError, profileMediaAdmissionPersistenceService } from "../services/profile/profileMediaAdmissionPersistence.service";
 import { imageAdmissionService } from "../services/imageModeration/imageAdmission.service";
-import { ProfileSubmissionAccountPersistenceError, profileSubmissionAccountPersistenceService } from "../services/profile/profileSubmissionAccountPersistence.service";
+import { ProfileSubmissionAccountAction, ProfileSubmissionAccountPersistenceError, profileSubmissionAccountPersistenceService } from "../services/profile/profileSubmissionAccountPersistence.service";
 import { faceVerificationEvidenceRepository } from "../repositories/faceVerificationEvidence.repository";
 
 const requireText = (value: unknown, field: string, maxLength: number): string => {
@@ -68,13 +67,6 @@ const normalizeMobileNumber = (value: unknown): string => {
   return mobileNumber;
 };
 
-const validateProfilePhotos = (value: unknown): string[] => {
-  if (!Array.isArray(value) || value.length < 2 || value.length > 6 || value.some((item) => typeof item !== "string" || !item.trim())) {
-    throw new AppError("Profile must have between 2 and 6 photos", 400);
-  }
-  return value;
-};
-
 const normalizeOnboardingDraft = (body: Record<string, unknown>) => ({
   username: requireText(body.username, "username", 40).toLowerCase(),
   realName: requireText(body.realName, "real name", 120),
@@ -87,6 +79,31 @@ const normalizeOnboardingDraft = (body: Record<string, unknown>) => ({
   interests: normalizeStringArray(body.interests ?? [], "interests", 20),
   bio: requireText(body.bio, "bio", 2000),
 });
+
+const persistProfileVerificationTransaction = async (input: {
+  session: import("mongoose").ClientSession;
+  actorId: Types.ObjectId;
+  profile: UserProfileDocument;
+  previousProfile?: Readonly<Record<string, unknown>>;
+  action: ProfileSubmissionAccountAction;
+  createsVerificationAuthority: boolean;
+  avatarCandidate?: FaceVerificationAvatarCandidate;
+}) => {
+  if (input.createsVerificationAuthority) {
+    const expectedVersion = ((input.previousProfile?.verificationSubmissionVersion as number | undefined) ?? 0) + 1;
+    if (input.profile.profileStatus !== "pending_verification" || input.profile.verificationSubmissionVersion !== expectedVersion) {
+      throw new AppError("Profile submission lifecycle is stale", 409);
+    }
+    const verificationRequest = await ensureActiveProfileVerificationRequest(input.profile, input.session);
+    await ensureProfileVerificationJob(verificationRequest.request, input.session);
+    const bound = await bindCompletedFaceSessionToVerificationRequest({ profile: input.profile, requestId: verificationRequest.request._id, session: input.session, actorId: input.actorId, avatarCandidate: input.avatarCandidate, previousAvatar: input.previousProfile?.avatar as string | undefined });
+    if (!bound) throw new AppError("Completed face verification session is no longer eligible", 409);
+    const boundEvidence = await faceVerificationEvidenceRepository.countStoredBoundToRequest(bound._id, verificationRequest.request._id, input.session);
+    if (boundEvidence !== 5) throw new AppError("Completed face verification evidence is no longer eligible", 409);
+  }
+  await invalidateFaceSessionsForAvatar(input.profile, input.session);
+  await profileSubmissionAccountPersistenceService.persist({ session: input.session, actorId: input.actorId, action: input.action });
+};
 
 /**
  * Persists a complete ordinary-media onboarding draft before pre-capture
@@ -215,7 +232,10 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
       throw new AppError("Avatar image admission is not eligible", 400);
     }
   };
-  const proposedAvatar = await resolveProposedAvatar();
+  const rejectedAvatarAuthority = profile?.profileStatus === "rejected"
+    ? await resolveRejectedResubmissionAvatarCandidate({ actorId, profile, claim: media.avatar })
+    : undefined;
+  const proposedAvatar = rejectedAvatarAuthority?.avatar ?? await resolveProposedAvatar();
   const submittedAt = new Date();
   const lifecycle = isFirstSubmission
     ? { kind: "SUBMIT_INITIAL_OR_INCOMPLETE" as const, submittedAt }
@@ -224,7 +244,7 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
       : undefined;
 
   if (isFirstSubmission) await requireCompletedFaceSessionForInitialSubmission({ userId, avatar: proposedAvatar });
-  if (profile?.profileStatus === "rejected") await requireCompletedFaceSessionForRejectedResubmission({ userId, avatar: proposedAvatar });
+  if (profile?.profileStatus === "rejected") await requireCompletedFaceSessionForRejectedResubmission({ userId, avatar: proposedAvatar, avatarCandidate: rejectedAvatarAuthority?.avatarCandidate });
 
   let createProfile;
   let profileFields: Record<string, unknown> = {};
@@ -300,27 +320,18 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
       mobileContact: undefined,
       allowedExistingProfileStatuses: isFirstSubmission ? ["incomplete"] : profile?.profileStatus === "rejected" ? ["rejected"] : ["verified"],
       withinTransaction: async ({ session, profile: current, previousProfile }) => {
-        if (lifecycle) {
-          const expectedVersion = ((previousProfile?.verificationSubmissionVersion as number | undefined) ?? 0) + 1;
-          if (current.profileStatus !== "pending_verification" || current.verificationSubmissionVersion !== expectedVersion) {
-            throw new AppError("Profile submission lifecycle is stale", 409);
-          }
-          const verificationRequest = await ensureActiveProfileVerificationRequest(current, session);
-          await ensureProfileVerificationJob(verificationRequest.request, session);
-          const bound = await bindCompletedFaceSessionToVerificationRequest({ profile: current, requestId: verificationRequest.request._id, session });
-          if (!bound) throw new AppError("Completed face verification session is no longer eligible", 409);
-          const boundEvidence = await faceVerificationEvidenceRepository.countStoredBoundToRequest(bound._id, verificationRequest.request._id, session);
-          if (boundEvidence !== 5) throw new AppError("Completed face verification evidence is no longer eligible", 409);
-        }
-        await invalidateFaceSessionsForAvatar(current, session);
-        await profileSubmissionAccountPersistenceService.persist({
+        await persistProfileVerificationTransaction({
           session,
           actorId,
+          profile: current,
+          previousProfile,
           action: isFirstSubmission
             ? { kind: "FIRST_SUBMISSION", mobileContact: mobileContact! }
             : lifecycle
               ? { kind: "REJECTED_RESUBMISSION" }
               : { kind: "VERIFIED_EDIT" },
+          createsVerificationAuthority: Boolean(lifecycle),
+          avatarCandidate: rejectedAvatarAuthority?.avatarCandidate,
         });
         committedProfileId = current._id;
       },
@@ -412,7 +423,6 @@ export const getMyProfile = catchAsync(async (req: Request, res: Response) => {
 export const updateMyProfile = catchAsync(
   async (req: Request, res: Response) => {
     const userId = req.user!.id;
-    await migrateLegacyProfileMobileContact(userId);
 
     const {
       realName,
@@ -433,6 +443,10 @@ export const updateMyProfile = catchAsync(
       throw new AppError("Profile not found", 404);
     }
 
+    const usesAdmissionBackedPersistence = profile.profileStatus === "incomplete" || profile.profileStatus === "verified";
+    const usesTransactionalRejectedResubmission = profile.profileStatus === "rejected";
+    if (!usesAdmissionBackedPersistence && !usesTransactionalRejectedResubmission) await migrateLegacyProfileMobileContact(userId);
+
     if (profile.profileStatus === "pending_verification") {
       throw new AppError("Profile is pending verification and cannot be edited", 409);
     }
@@ -452,112 +466,122 @@ export const updateMyProfile = catchAsync(
       });
     }
 
-    // Validate before mutating profile/media or creating a request. A rejected
-    // profile may only become pending through a fresh next-version session.
-    if (profile.profileStatus === "rejected") {
-      const resubmissionAvatar = avatar === undefined ? profile.avatar : requireText(avatar, "avatar", 2048);
-      await requireCompletedFaceSessionForRejectedResubmission({ userId, avatar: resubmissionAvatar });
-      const nextProfilePhotos = profilePhotos === undefined ? profile.profilePhotos : validateProfilePhotos(profilePhotos);
-      requireProfilePhotoCountForVerificationPolicy(nextProfilePhotos, selectNewProfileVerificationPolicy());
-    }
-
-    /* 🔥 CLOUDINARY CLEANUP */
-
-    if (avatar !== undefined && profile.avatar && avatar !== profile.avatar) {
+    if (usesAdmissionBackedPersistence) {
+      let media;
       try {
-        const publicId = extractPublicId(profile.avatar);
-
-        if (publicId) {
-          await cloudinary.uploader.destroy(publicId);
-        }
-      } catch (e) {
-        console.error("Avatar delete failed:", e);
+        media = parseProfileMediaAdmissionRequest(req.body);
+      } catch (error) {
+        throw new AppError(error instanceof Error ? error.message : "Invalid image admission request", 400);
       }
-    }
 
-    if (cover !== undefined && profile.cover && cover !== profile.cover) {
+      const profileFields: Record<string, unknown> = {};
+      if (bio !== undefined) profileFields.bio = moderatedText!.bio;
+      if (interests !== undefined) profileFields.interests = moderatedText!.interests;
+      if (dateOfBirth !== undefined) profileFields.dateOfBirth = parseDateOfBirth(dateOfBirth);
+      const normalizedRealName = optionalText(realName, "real name", 120);
+      if (normalizedRealName !== undefined) profileFields.realName = normalizedRealName;
+      const normalizedCountry = optionalText(country, "country", 100);
+      if (normalizedCountry !== undefined) profileFields.country = normalizedCountry;
+      const normalizedCity = optionalText(city, "city", 100);
+      if (normalizedCity !== undefined) profileFields.city = normalizedCity;
+      if (languages !== undefined) profileFields.languages = normalizeStringArray(languages, "languages", 12);
+
       try {
-        const publicId = extractPublicId(profile.cover);
-
-        if (publicId) {
-          await cloudinary.uploader.destroy(publicId);
+        const persisted = await profileMediaAdmissionPersistenceService.persist({
+          actorId: profile.userId,
+          expectedProfileVersion: profile.__v ?? 0,
+          media,
+          profileFields,
+          allowedExistingProfileStatuses: [profile.profileStatus],
+          withinTransaction: async ({ session, profile: current }) => {
+            await persistProfileVerificationTransaction({
+              session,
+              actorId: profile.userId,
+              profile: current,
+              action: { kind: profile.profileStatus === "incomplete" ? "INCOMPLETE_EDIT" : "VERIFIED_EDIT" },
+              createsVerificationAuthority: false,
+            });
+          },
+        });
+        const updated = await UserProfile.findById(persisted.profileId);
+        if (!updated) throw new AppError("Profile persistence failed", 500);
+        res.status(200).json({
+          message: "Profile updated successfully",
+          profile: updated,
+        });
+        return;
+      } catch (error) {
+        if (error instanceof ProfileMediaAdmissionPersistenceError) {
+          const statusCode = error.code === "PROFILE_MEDIA_PROFILE_NOT_ELIGIBLE" || error.code === "PROFILE_MEDIA_VERSION_CONFLICT" ? 409 : error.code === "PROFILE_MEDIA_ACCOUNT_NOT_FOUND" ? 404 : 400;
+          throw new AppError(error.message, statusCode, error.code);
         }
-      } catch (e) {
-        console.error("Cover delete failed:", e);
-      }
-    }
-
-    if (profilePhotos && Array.isArray(profile.profilePhotos)) {
-      const removed = profile.profilePhotos.filter(
-        (img) => !profilePhotos.includes(img),
-      );
-
-      for (const img of removed) {
-        try {
-          const publicId = extractPublicId(img);
-
-          if (publicId) {
-            await cloudinary.uploader.destroy(publicId);
-          }
-        } catch (e) {
-          console.error("Gallery delete failed:", e);
+        if (error instanceof ProfileSubmissionAccountPersistenceError) {
+          throw new AppError(error.message, error.code === "ACCOUNT_NOT_FOUND" ? 404 : error.code === "INVALID_CONTACT" ? 400 : 409, error.code);
         }
+        throw error;
       }
-    }
-
-    /* ================= ORIGINAL ================= */
-
-    if (bio !== undefined) {
-      profile.bio = moderatedText!.bio;
-    }
-
-    if (interests !== undefined) {
-      profile.interests = moderatedText!.interests;
-    }
-
-    if (dateOfBirth !== undefined) {
-      profile.dateOfBirth = parseDateOfBirth(dateOfBirth);
-    }
-
-    const normalizedRealName = optionalText(realName, "real name", 120);
-    if (normalizedRealName !== undefined) profile.realName = normalizedRealName;
-    const normalizedCountry = optionalText(country, "country", 100);
-    if (normalizedCountry !== undefined) profile.country = normalizedCountry;
-    const normalizedCity = optionalText(city, "city", 100);
-    if (normalizedCity !== undefined) profile.city = normalizedCity;
-    if (languages !== undefined) profile.languages = normalizeStringArray(languages, "languages", 12);
-
-    if (profilePhotos !== undefined) {
-      profile.profilePhotos = validateProfilePhotos(profilePhotos);
-    }
-
-    if (avatar !== undefined) {
-      profile.avatar = requireText(avatar, "avatar", 2048);
-    }
-
-    if (cover !== undefined) {
-      profile.cover = requireText(cover, "cover", 2048);
     }
 
     if (profile.profileStatus === "rejected") {
-      profile.profileStatus = "pending_verification";
-      profile.rejectionReason = "";
-      profile.verificationSubmittedAt = new Date();
-      profile.verificationSubmissionVersion = (profile.verificationSubmissionVersion || 0) + 1;
+      let media;
+      try {
+        media = parseProfileMediaAdmissionRequest(req.body);
+      } catch (error) {
+        throw new AppError(error instanceof Error ? error.message : "Invalid image admission request", 400);
+      }
+      const avatarClaim = media.avatar ?? { kind: "UNCHANGED" as const, reference: profile.avatar };
+      const rejectedAvatarAuthority = await resolveRejectedResubmissionAvatarCandidate({ actorId: profile.userId, profile, claim: avatarClaim });
+      await requireCompletedFaceSessionForRejectedResubmission({ userId, avatar: rejectedAvatarAuthority.avatar, avatarCandidate: rejectedAvatarAuthority.avatarCandidate });
+      const nextProfilePhotos = media.profilePhotos ?? profile.profilePhotos.map((reference) => ({ kind: "UNCHANGED" as const, reference }));
+      requireProfilePhotoCountForVerificationPolicy(nextProfilePhotos.map(() => "media-claim"), selectNewProfileVerificationPolicy());
+
+      const profileFields: Record<string, unknown> = {};
+      if (bio !== undefined) profileFields.bio = moderatedText!.bio;
+      if (interests !== undefined) profileFields.interests = moderatedText!.interests;
+      if (dateOfBirth !== undefined) profileFields.dateOfBirth = parseDateOfBirth(dateOfBirth);
+      const normalizedRealName = optionalText(realName, "real name", 120);
+      if (normalizedRealName !== undefined) profileFields.realName = normalizedRealName;
+      const normalizedCountry = optionalText(country, "country", 100);
+      if (normalizedCountry !== undefined) profileFields.country = normalizedCountry;
+      const normalizedCity = optionalText(city, "city", 100);
+      if (normalizedCity !== undefined) profileFields.city = normalizedCity;
+      if (languages !== undefined) profileFields.languages = normalizeStringArray(languages, "languages", 12);
+
+      try {
+        const persisted = await profileMediaAdmissionPersistenceService.persist({
+          actorId: profile.userId,
+          expectedProfileVersion: profile.__v ?? 0,
+          media,
+          profileFields,
+          lifecycle: { kind: "RESUBMIT_REJECTED", submittedAt: new Date() },
+          allowedExistingProfileStatuses: ["rejected"],
+          withinTransaction: async ({ session, profile: current, previousProfile }) => {
+            await persistProfileVerificationTransaction({
+              session,
+              actorId: profile.userId,
+              profile: current,
+              previousProfile,
+              action: { kind: "REJECTED_RESUBMISSION" },
+              createsVerificationAuthority: true,
+              avatarCandidate: rejectedAvatarAuthority.avatarCandidate,
+            });
+          },
+        });
+        const updated = await UserProfile.findById(persisted.profileId);
+        if (!updated) throw new AppError("Profile persistence failed", 500);
+        res.status(200).json({ message: "Profile updated successfully", profile: updated });
+        return;
+      } catch (error) {
+        if (error instanceof ProfileMediaAdmissionPersistenceError) {
+          const statusCode = error.code === "PROFILE_MEDIA_PROFILE_NOT_ELIGIBLE" || error.code === "PROFILE_MEDIA_VERSION_CONFLICT" || error.code === "PROFILE_MEDIA_INVALID_LIFECYCLE" ? 409 : error.code === "PROFILE_MEDIA_ACCOUNT_NOT_FOUND" ? 404 : 400;
+          throw new AppError(error.message, statusCode, error.code);
+        }
+        if (error instanceof ProfileSubmissionAccountPersistenceError) {
+          throw new AppError(error.message, error.code === "ACCOUNT_NOT_FOUND" ? 404 : error.code === "INVALID_CONTACT" ? 400 : 409, error.code);
+        }
+        throw error;
+      }
     }
-
-    await profile.save();
-
-    await invalidateFaceSessionsForAvatar(profile);
-    if (profile.profileStatus === "pending_verification") {
-      const verificationRequest = await ensureActiveProfileVerificationRequest(profile);
-      await ensureProfileVerificationJob(verificationRequest.request);
-      await bindCompletedFaceSessionToVerificationRequest({ profile, requestId: verificationRequest.request._id });
-    }
-
-    res.status(200).json({
-      message: "Profile updated successfully",
-      profile,
-    });
+    throw new AppError("Profile is not eligible for editing", 409);
   },
 );

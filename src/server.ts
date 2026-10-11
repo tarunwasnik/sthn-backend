@@ -22,6 +22,7 @@ import { profileVerificationReconciliationJob } from "./jobs/profileVerification
 import { faceVerificationEvidenceCleanupJob } from "./jobs/faceVerificationEvidenceCleanup.job";
 import { stopProfileVerificationWorker } from "./services/profile/profileVerificationWorker.service";
 import { startProfileVerificationWorkerIfEnabled } from "./services/profile/profileVerificationWorkerBootstrap.service";
+import { startMediaCleanupSchedulerIfEnabled, stopMediaCleanupScheduler } from "./services/mediaCleanupScheduler.service";
 import sharp from "sharp";
 import { detectYuNetFaces } from "./services/profile/profileVerificationYuNetRunner";
 import { reportProfileVerificationMemory } from "./services/profile/profileVerificationMemoryDiagnostic.service";
@@ -185,6 +186,7 @@ export async function startServer() {
 
       startJobLoop();
       startProfileVerificationWorkerIfEnabled();
+      startMediaCleanupSchedulerIfEnabled();
       const runYuNetSyntheticDiagnostic = () => void sharp({ create: { width: 32, height: 32, channels: 3, background: { r: 0, g: 0, b: 0 } } }).png().toBuffer().then((synthetic) => detectYuNetFaces(synthetic, "SYNTHETIC")).catch((error) => console.error("YuNet synthetic diagnostic smoke failed", error));
       runYuNetSyntheticDiagnostic();
       setTimeout(runYuNetSyntheticDiagnostic, 70_000);
@@ -199,6 +201,7 @@ export async function startServer() {
       console.log("🛑 Shutting down server...");
       await stopJobLoop();
       await stopProfileVerificationWorker();
+      await stopMediaCleanupScheduler();
       await mongoose.connection.close();
       httpServer.close(() => {
         process.exit(0);

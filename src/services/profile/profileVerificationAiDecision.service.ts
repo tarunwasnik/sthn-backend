@@ -4,8 +4,8 @@ import { Y4E_FACE_MEMBERSHIP_THRESHOLD, Y4E_MULTI_FACE_MIN_MARGIN } from "../../
 import { SFACE_ARTIFACT } from "./profileVerificationFaceEmbeddingAdapter";
 import { LIVE_ANCHOR_MIN_WEAKEST_PEER_MEDIAN } from "./profileVerificationGate1LiveAnchorPolicy.service";
 import { SFACE_SHADOW_MINIMUM_USABLE_CAPTURES } from "./profileVerificationSFaceShadowAnalysis.service";
-import { decideProfileVerificationRequest, escalateProfileVerificationRequest } from "./profileVerificationRequest.service";
-import { hasGatedAutomatedDecisionAuthority, isGatedProfileVerificationPolicy, resolveProfileVerificationPolicy } from "./profileVerificationPolicy.service";
+import { escalateProfileVerificationRequest } from "./profileVerificationRequest.service";
+import { isGatedProfileVerificationPolicy, resolveProfileVerificationPolicy } from "./profileVerificationPolicy.service";
 
 type GatedAutomatedDecision =
   | { type: "APPROVE"; similarity: number; threshold: number }
@@ -62,21 +62,23 @@ const exactInferenceAuthority = (request: ProfileVerificationRequestDocument, re
   && String(result.userId) === String(request.userId) && result.profileSubmissionVersion === request.profileSubmissionVersion,
 );
 
-/** Applies the immutable policy captured by this request through the canonical lifecycle. */
+/**
+ * Shadow-mode boundary: inference is persisted separately and may recommend an
+ * outcome, but never becomes the terminal verification authority.
+ */
 export const applyProfileVerificationAiDecision = async (input: { request: ProfileVerificationRequestDocument; result: ProfileVerificationInferenceResultDocument | null }) => {
   const policy = resolveProfileVerificationPolicy(input.request);
   const escalateCurrent = (reasonCode: "FACE_MATCH_UNCERTAIN" | "MODEL_FAILURE", reason: string) => escalateProfileVerificationRequest({ profileId: String(input.request.profileId), reasonCode, reason, expectedRequestId: String(input.request._id), expectedSubmissionVersion: input.request.profileSubmissionVersion });
   if (!exactInferenceAuthority(input.request, input.result)) return escalateCurrent("MODEL_FAILURE", "Verification inference authority did not match the active submission.");
   if (isGatedProfileVerificationPolicy(policy)) {
-    if (!hasGatedAutomatedDecisionAuthority(policy)) return escalateCurrent("FACE_MATCH_UNCERTAIN", "Gated multi-media V1 evaluation requires manual review.");
     const mapped = mapGatedV2AutomatedDecision(input.result!);
     if (mapped.type === "ADMIN_REVIEW") return escalateCurrent("FACE_MATCH_UNCERTAIN", mapped.reason);
-    if (mapped.type === "REJECT") return decideProfileVerificationRequest({ profileId: String(input.request.profileId), decision: "REJECT", authority: "AI", reasonCode: mapped.reasonCode, reason: mapped.reason, expectedRequestId: String(input.request._id), expectedSubmissionVersion: input.request.profileSubmissionVersion });
-    return decideProfileVerificationRequest({ profileId: String(input.request.profileId), decision: "APPROVE", authority: "AI", expectedRequestId: String(input.request._id), expectedSubmissionVersion: input.request.profileSubmissionVersion, aiDecisionSnapshot: { source: "AI", model: { identifier: SFACE_ARTIFACT.identifier, version: SFACE_ARTIFACT.version }, similarity: mapped.similarity, threshold: mapped.threshold, decidedAt: new Date() } });
+    if (mapped.type === "REJECT") return escalateCurrent("FACE_MATCH_UNCERTAIN", `AI advisory recommendation: ${mapped.reason}`);
+    return escalateCurrent("FACE_MATCH_UNCERTAIN", "AI advisory recommendation: identity evidence supports approval; Admin review is required.");
   }
   const analysis = input.result!.shadowIdentityAnalysis;
   const usableCaptureCount = input.result!.findings.crossCapture?.usableCaptureCount ?? 0;
   const valid = Boolean(analysis?.status === "COMPLETED" && analysis.conclusion === "LIKELY_MATCH" && Number.isFinite(analysis.similarity) && Number.isFinite(analysis.threshold) && analysis.model?.identifier === SFACE_ARTIFACT.identifier && analysis.model?.version === SFACE_ARTIFACT.version && usableCaptureCount >= SFACE_SHADOW_MINIMUM_USABLE_CAPTURES);
-  if (!valid) return escalateCurrent("FACE_MATCH_UNCERTAIN", analysis?.reason ?? "Automated identity approval conditions were not met.");
-  return decideProfileVerificationRequest({ profileId: String(input.request.profileId), decision: "APPROVE", authority: "AI", expectedRequestId: String(input.request._id), expectedSubmissionVersion: input.request.profileSubmissionVersion, aiDecisionSnapshot: { source: "AI", model: analysis!.model!, similarity: analysis!.similarity!, threshold: analysis!.threshold!, decidedAt: new Date() } });
+  if (!valid) return escalateCurrent("FACE_MATCH_UNCERTAIN", analysis?.reason ?? "Automated identity evidence requires Admin review.");
+  return escalateCurrent("FACE_MATCH_UNCERTAIN", "AI advisory recommendation: identity evidence supports approval; Admin review is required.");
 };

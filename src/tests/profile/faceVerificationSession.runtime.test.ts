@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
 import { FaceVerificationEvidence } from "../../models/faceVerificationEvidence.model";
 import { FaceVerificationSession } from "../../models/faceVerificationSession.model";
+import { ImageAdmission } from "../../models/imageAdmission.model";
+import { ImageModerationAsset } from "../../models/imageModerationAsset.model";
+import { ImageModerationAttempt } from "../../models/imageModerationAttempt.model";
 import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
 import { ProfileVerificationRequest } from "../../models/profileVerificationRequest.model";
 import { UserProfile } from "../../models/userProfile.model";
 import User from "../../models/User";
-import { acceptFaceVerificationCapture, fingerprintAvatarReference, startFaceVerificationSession } from "../../services/profile/faceVerificationSession.service";
+import { ImageModerationSurface } from "../../enums/imageModeration.enums";
+import { acceptFaceVerificationCapture, fingerprintAvatarReference, startFaceVerificationSession as startFaceVerificationSessionService } from "../../services/profile/faceVerificationSession.service";
 import { bindCompletedFaceSessionToVerificationRequest, cancelFaceVerificationSession, expireFaceVerificationSessions, getOwnedFaceVerificationSession, invalidateFaceSessionsForAvatar } from "../../services/profile/faceVerificationSession.service";
 import { reconcileFaceVerificationEvidenceRetention, scheduleFaceEvidenceRetentionForDecision } from "../../services/profile/faceVerificationEvidenceCleanup.service";
 import { faceVerificationEvidenceRepository } from "../../repositories/faceVerificationEvidence.repository";
@@ -18,6 +22,7 @@ import { setBiometricReferenceAvatarValidationDependenciesForTests } from "../..
 import type { NextFunction, Request, Response } from "express";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
 import { withUserProfileTextAdmission } from "../textModeration/helpers/textModerationTestAdmission";
+import { Types } from "mongoose";
 
 process.env.NODE_ENV = "test";
 
@@ -33,15 +38,61 @@ const invoke = (controller: (req: Request, res: Response, next: NextFunction) =>
   const response = { status: () => response, json: (body: unknown) => { resolve(body); return response; } } as unknown as Response;
   controller(request as unknown as Request, response, reject);
 });
-const submission = (username: string, avatar: string) => ({ username, realName: "Face Test User", dateOfBirth: "1990-01-01", mobileCountryCode: "+91", mobileNumber: "9876543210", country: "India", city: "Mumbai", languages: ["English"], interests: [], bio: "Face verification test profile.", avatar, cover: "https://example.test/cover.jpg", profilePhotos: ["https://example.test/one.jpg", "https://example.test/two.jpg"] });
+const sha = "a".repeat(64);
+const future = () => new Date(Date.now() + 60_000);
+const claim = (admissionReference: string) => ({ kind: "ADMISSION" as const, admissionReference });
+
+async function admission(actorId: Types.ObjectId, surface: ImageModerationSurface, trustedMediaReference: string) {
+  const entityBinding = `PENDING:${actorId}:${surface}`;
+  const asset = await ImageModerationAsset.create({ assetReference: `ima_${new Types.ObjectId()}`, actorId, contentSha256: sha, providerAssetId: `provider_${new Types.ObjectId()}`, trustedMediaReference, expiresAt: future(), retentionDeadline: future() });
+  const attempt = await ImageModerationAttempt.create({ attemptReference: `imat_${new Types.ObjectId()}`, assetId: asset._id, actorId, contentSha256: sha, surface, entityBinding, status: "PASSED", provenanceModel: { identifier: "test", revision: "test", artifactSha256: sha }, policy: { key: "TEST", version: "V1" }, expiresAt: future(), retentionDeadline: future() });
+  return ImageAdmission.create({ admissionReference: `imauth_${new Types.ObjectId()}`, attemptId: attempt._id, assetId: asset._id, actorId, contentSha256: sha, surface, entityBinding, expiresAt: future() });
+}
+
+/** Session lifecycle fixtures start from an already-persisted avatar authority. */
+async function startFaceVerificationSession(input: Parameters<typeof startFaceVerificationSessionService>[0]) {
+  if (typeof input.avatar === "string") {
+    const userId = new Types.ObjectId(input.userId);
+    const profile = await UserProfile.findOne({ userId });
+    if (!profile) {
+      await UserProfile.create({
+        userId,
+        username: `face-session-${userId.toString().slice(-12)}`,
+        bio: "",
+        interests: [],
+        avatar: input.avatar,
+        cover: "",
+        profilePhotos: [],
+        profileStatus: "incomplete",
+        verificationSubmissionVersion: 0,
+      });
+    }
+  }
+  return startFaceVerificationSessionService(input);
+}
+
+async function admissionBackedSubmission(actorId: Types.ObjectId, username: string, avatarReference: string) {
+  const [avatar, cover, one, two] = await Promise.all([
+    admission(actorId, "USER_PROFILE_AVATAR", avatarReference),
+    admission(actorId, "USER_PROFILE_COVER", "https://trusted.test/face-binding-cover.jpg"),
+    admission(actorId, "USER_PROFILE_PHOTO", "https://trusted.test/face-binding-one.jpg"),
+    admission(actorId, "USER_PROFILE_PHOTO", "https://trusted.test/face-binding-two.jpg"),
+  ]);
+  return { username, realName: "Face Test User", dateOfBirth: "1990-01-01", mobileCountryCode: "+91", mobileNumber: "9876543210", country: "India", city: "Mumbai", languages: ["English"], interests: [], bio: "Face verification test profile.", avatar: claim(avatar.admissionReference), cover: claim(cover.admissionReference), profilePhotos: [claim(one.admissionReference), claim(two.admissionReference)] };
+}
 
 before(async () => connectPhase7HDatabase(), { timeout: 120_000 });
 beforeEach(async () => { await clearPhase7HDatabase(); uploadCalls = 0; setBiometricReferenceAvatarValidationDependenciesForTests({ reader: async () => Buffer.from("test-avatar"), detector: async () => validReferenceDetection }); storage.storeFaceVerificationEvidence = async (input) => { uploadCalls += 1; return { publicId: input.publicId, bytes: input.buffer.length, format: "jpeg", mimeType: "image/jpeg" }; }; });
 after(async () => { setBiometricReferenceAvatarValidationDependenciesForTests(); storage.storeFaceVerificationEvidence = originalStore; deletionStorage.deleteFaceVerificationEvidence = originalDelete; await disconnectPhase7HDatabase(); }, { timeout: 30_000 });
 
-test("face session provisions only a draft and never creates a submitted verification authority", async () => {
+test("session start requires a persisted matching avatar and never creates profile authority", async () => {
   const user = await User.create({ email: "face-draft@test.local", password: "test-password", status: "pending_profile", governanceState: "ACTIVE" });
-  const session = await startFaceVerificationSession({ userId: String(user._id), avatar: "https://example.test/avatar-a.jpg" });
+  const avatar = "https://example.test/avatar-a.jpg";
+  await assert.rejects(startFaceVerificationSessionService({ userId: String(user._id), avatar }), /admission-backed profile draft/);
+  assert.equal(await UserProfile.findOne({ userId: user._id }), null);
+  await UserProfile.create({ userId: user._id, username: "face-draft", bio: "", interests: [], avatar, cover: "", profilePhotos: [], profileStatus: "incomplete", verificationSubmissionVersion: 0 });
+  const session = await startFaceVerificationSessionService({ userId: String(user._id), avatar });
+  await assert.rejects(startFaceVerificationSessionService({ userId: String(user._id), avatar: "https://example.test/avatar-other.jpg" }), /must match the persisted profile avatar/);
   const profile = await UserProfile.findById(session.profileId);
   assert.equal(profile?.profileStatus, "incomplete");
   assert.equal(await ProfileVerificationRequest.countDocuments({ profileId: session.profileId }), 0);
@@ -104,6 +155,7 @@ test("cancelled and expired partial sessions become cleanup eligible and cannot 
   await cancelFaceVerificationSession({ userId: String(user._id), sessionReference: cancelled.sessionReference });
   await assert.rejects(acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: cancelled.sessionReference, challengeIndex: "1", file: file(1) }), /not accepting/);
   const cancelledEvidence = await FaceVerificationEvidence.findOne({ sessionId: cancelled._id }); assert.ok(cancelledEvidence?.cleanupAfter);
+  await UserProfile.updateOne({ _id: cancelled.profileId }, { $set: { avatar: "https://example.test/avatar-expired.jpg" } });
   const expired = await startFaceVerificationSession({ userId: String(user._id), avatar: "https://example.test/avatar-expired.jpg" });
   await acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: expired.sessionReference, challengeIndex: "0", file: file(0) });
   await FaceVerificationSession.updateOne({ _id: expired._id }, { $set: { expiresAt: new Date(Date.now() - 1) } });
@@ -165,7 +217,7 @@ test("matching completed pre-submit capture binds once to the first real verific
   const avatarA = "https://example.test/avatar-binding-a.jpg";
   const session = await startFaceVerificationSession({ userId: String(user._id), avatar: avatarA });
   for (let index = 0; index < 5; index += 1) await acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: session.sessionReference, challengeIndex: String(index), file: file(index) });
-  const bindingSubmission = submission("face-binding", avatarA);
+  const bindingSubmission = await admissionBackedSubmission(user._id, "face-binding", avatarA);
   await invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(user._id), bindingSubmission) });
   const [profile, request, bound] = await Promise.all([
     UserProfile.findById(session.profileId), ProfileVerificationRequest.findOne({ profileId: session.profileId }), FaceVerificationSession.findById(session._id),
@@ -216,18 +268,21 @@ test("an abandoned partial session is retired and a same-avatar restart begins a
 test("avatar mismatch replaces created, partial, and completed sessions without preserving current authority", async () => {
   const createdUser = await User.create({ email: "face-avatar-created@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });
   const created = await startFaceVerificationSession({ userId: String(createdUser._id), avatar: "https://example.test/avatar-created-a.jpg" });
+  await UserProfile.updateOne({ _id: created.profileId }, { $set: { avatar: "https://example.test/avatar-created-b.jpg" } });
   const createdReplacement = await startFaceVerificationSession({ userId: String(createdUser._id), avatar: "https://example.test/avatar-created-b.jpg" });
   assert.equal((await FaceVerificationSession.findById(created._id))?.status, "INVALIDATED"); assert.equal(createdReplacement.acceptedCaptureCount, 0);
 
   const partialUser = await User.create({ email: "face-avatar-partial@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });
   const partial = await startFaceVerificationSession({ userId: String(partialUser._id), avatar: "https://example.test/avatar-partial-a.jpg" });
   await acceptFaceVerificationCapture({ userId: String(partialUser._id), sessionReference: partial.sessionReference, challengeIndex: "0", file: file(0) });
+  await UserProfile.updateOne({ _id: partial.profileId }, { $set: { avatar: "https://example.test/avatar-partial-b.jpg" } });
   await startFaceVerificationSession({ userId: String(partialUser._id), avatar: "https://example.test/avatar-partial-b.jpg" });
   const invalidatedPartial = await FaceVerificationSession.findById(partial._id); assert.equal(invalidatedPartial?.status, "INVALIDATED"); assert.equal(invalidatedPartial?.isCurrent, false); assert.ok(invalidatedPartial?.cleanupAfter);
 
   const completeUser = await User.create({ email: "face-avatar-complete@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });
   const complete = await startFaceVerificationSession({ userId: String(completeUser._id), avatar: "https://example.test/avatar-complete-a.jpg" });
   for (let index = 0; index < 5; index += 1) await acceptFaceVerificationCapture({ userId: String(completeUser._id), sessionReference: complete.sessionReference, challengeIndex: String(index), file: file(index) });
+  await UserProfile.updateOne({ _id: complete.profileId }, { $set: { avatar: "https://example.test/avatar-complete-b.jpg" } });
   const completeReplacement = await startFaceVerificationSession({ userId: String(completeUser._id), avatar: "https://example.test/avatar-complete-b.jpg" });
   const invalidatedComplete = await FaceVerificationSession.findById(complete._id); assert.equal(invalidatedComplete?.status, "INVALIDATED"); assert.equal(invalidatedComplete?.isCurrent, false); assert.ok(invalidatedComplete?.cleanupAfter);
   assert.equal(await FaceVerificationEvidence.countDocuments({ sessionId: complete._id, status: "STORED" }), 5); assert.equal(completeReplacement.acceptedCaptureCount, 0);
@@ -293,7 +348,7 @@ test("duplicate-key recovery retires an incompatible winner instead of returning
   }
 });
 
-test("invalid and technical reference validation never creates a session, request, job, or submission version", async () => {
+test("failed biometric preflight leaves a persisted avatar and submission authority unchanged", async () => {
   const user = await User.create({ email: "face-reference-negative@test.local", password: "test-password", status: "pending_profile", governanceState: "ACTIVE" });
   const avatar = "https://example.test/avatar-negative.jpg";
   for (const detector of [
@@ -305,18 +360,17 @@ test("invalid and technical reference validation never creates a session, reques
     assert.equal(await FaceVerificationSession.countDocuments({ userId: user._id }), 0);
     assert.equal(await ProfileVerificationRequest.countDocuments({ userId: user._id }), 0);
     assert.equal(await ProfileVerificationJob.countDocuments({ userId: user._id }), 0);
-    assert.equal(await UserProfile.findOne({ userId: user._id }), null);
+    assert.equal((await UserProfile.findOne({ userId: user._id }))?.avatar, avatar);
   }
   setBiometricReferenceAvatarValidationDependenciesForTests({ reader: async () => { throw new Error("reader unavailable"); } });
   await assert.rejects(startFaceVerificationSession({ userId: String(user._id), avatar }), /reader unavailable/);
   assert.equal(await FaceVerificationSession.countDocuments({ userId: user._id }), 0);
-  assert.equal(await UserProfile.findOne({ userId: user._id }), null);
+  assert.equal((await UserProfile.findOne({ userId: user._id }))?.avatar, avatar);
 });
 
-test("failed preflight removes a newly-created skeletal draft and leaves subsequent profile reads avatar-free", async () => {
+test("missing persisted avatars cannot be bootstrapped through session start", async () => {
   const user = await User.create({ email: "face-reference-no-draft@test.local", password: "test-password", status: "pending_profile", governanceState: "ACTIVE" });
-  setBiometricReferenceAvatarValidationDependenciesForTests({ reader: async () => Buffer.from("test-avatar"), detector: async () => ({ ...validReferenceDetection, faces: [] }) });
-  await assert.rejects(startFaceVerificationSession({ userId: String(user._id), avatar: "https://example.test/avatar-invalid.jpg" }), (error: unknown) => (error as { code?: string }).code === "REFERENCE_AVATAR_NO_FACE");
+  await assert.rejects(startFaceVerificationSessionService({ userId: String(user._id), avatar: "https://example.test/avatar-invalid.jpg" }), /admission-backed profile draft/);
   assert.equal(await UserProfile.findOne({ userId: user._id }), null);
   const response = await invoke(getMyProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" } }) as { username: string; avatar: string; profileStatus: string };
   assert.deepEqual(response, { ...response, username: "", avatar: "", profileStatus: "incomplete" });
@@ -329,7 +383,9 @@ test("failed preflight restores existing incomplete and rejected profile media w
   for (const status of ["incomplete", "rejected"] as const) {
     const user = await User.create({ email: `face-reference-preserve-${status}@test.local`, password: "test-password", status: "active", governanceState: "ACTIVE" });
     const profile = await UserProfile.create({ userId: user._id, username: `retained-${status}`, profileStatus: status, rejectionReason: status === "rejected" ? "Prior review reason" : "", ...base });
-    await assert.rejects(startFaceVerificationSession({ userId: String(user._id), avatar: "https://example.test/avatar-attempted.jpg" }), (error: unknown) => (error as { code?: string }).code === "REFERENCE_AVATAR_INVALID_LANDMARKS");
+    await assert.rejects(startFaceVerificationSession(status === "rejected"
+      ? { userId: String(user._id), candidateAvatar: { kind: "UNCHANGED", reference: base.avatar } }
+      : { userId: String(user._id), avatar: base.avatar }), (error: unknown) => (error as { code?: string }).code === "REFERENCE_AVATAR_INVALID_LANDMARKS");
     const reloaded = await UserProfile.findById(profile._id).lean();
     assert.ok(reloaded);
     assert.equal(reloaded.username, `retained-${status}`);
