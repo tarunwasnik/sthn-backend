@@ -12,6 +12,29 @@ export type ProviderMetadata = Record<string, unknown>;
 
 export type ProviderPayload = Record<string, unknown>;
 
+/**
+ * VERIFIED is an adapter assertion backed by authenticated provider evidence,
+ * not a caller-supplied status. Statuses are normalized (for example,
+ * CANCELLED and REFUNDED). Definitive failure means the adapter can prove the
+ * requested mutation did not occur. Unsupported and ambiguous lookups are not
+ * evidence of either success or non-mutation.
+ */
+export interface TerminationEvidenceRequest {
+  kind: "PAYMENT" | "CANCEL" | "REFUND";
+  paymentId: string;
+  providerPaymentId: string;
+  amount: Money;
+  refundId?: string;
+  providerOperationReference?: string;
+}
+
+export type TerminationEvidence =
+  | { outcome: "UNSUPPORTED" | "UNKNOWN" | "IDENTITY_MISMATCH" }
+  | { outcome: "VERIFIED"; kind: TerminationEvidenceRequest["kind"]; paymentId: string;
+      providerPaymentId: string; amount: Money; providerStatus: string;
+      result: "SUCCESS" | "DEFINITIVE_FAILURE" | "PENDING"; refundId?: string;
+      providerOperationReference?: string };
+
 /* -------------------------------------------------------------------------- */
 /* Payment Session                                                            */
 /* -------------------------------------------------------------------------- */
@@ -135,6 +158,10 @@ export interface GetPaymentStatusResponse {
   providerTransactionId?: string;
 
   providerStatus: string;
+
+  /** Provider-verified amount. Required before a CAPTURED result can be
+   * finalized by the provider-neutral operation reconciler. */
+  amount?: Money;
 
   payload?: ProviderPayload;
 }

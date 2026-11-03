@@ -7,7 +7,6 @@ import { ISettlement } from "../../models/settlement.model";
 
 import { paymentService, CreatePaymentInput } from "./payment.service";
 import { paymentRepository } from "../../repositories/payment.repository";
-import ProviderPaymentService from "../internalProvider/payments/providerPayment.service";
 
 import { settlementService } from "./settlement.service";
 import { ledgerService } from "./ledger.service";
@@ -37,6 +36,10 @@ import { PaymentFailureReason } from "../../enums/financial/paymentFailureReason
 import { escrowRecognitionService } from "./escrowRecognition.service";
 import { createFinancialAudit } from "../auditLog.service";
 import { AuditAction } from "../../enums/financial/auditAction.enum";
+import { paymentOperationService } from "./paymentOperation.service";
+import { assertFinancialSimulatorAllowed } from "./simulatorAccess.service";
+import { authoritativeRefundAuthorizationService } from "./authoritativeRefundAuthorization.service";
+import { Booking } from "../../models/booking.model";
 
 export interface InitiatePaymentInput {
   bookingId: string;
@@ -76,6 +79,13 @@ export class PaymentLifecycleService {
   /** Provider effects and Payment state are authoritative; secondary audit failure is non-fatal. */
   private async auditSafely(params: Parameters<typeof createFinancialAudit>[0]): Promise<void> {
     try { await createFinancialAudit(params); } catch (error) { console.error("Financial audit write failed", error); }
+  }
+
+  private async authorizeTerminalLateCaptureRefund(payment: IPayment): Promise<IPayment> {
+    const booking = await Booking.findById(payment.bookingId).select("status paymentId").exec();
+    if (!booking || !["CANCELLED", "REJECTED", "EXPIRED"].includes(booking.status) || !booking.paymentId?.equals(payment._id)) return payment;
+    await authoritativeRefundAuthorizationService.authorize({ authority: "TERMINAL_LATE_CAPTURE_V1", decisionId: String(booking._id) });
+    return payment;
   }
 
   /* ---------------------------------------------------------------------- */
@@ -201,6 +211,8 @@ export class PaymentLifecycleService {
     session: CreatePaymentSessionResponse;
   }> {
     const payment = await this.payments.getPayment(paymentId);
+    if (payment.provider === PaymentProvider.INTERNAL && payment.method !== PaymentMethod.WALLET) assertFinancialSimulatorAllowed();
+    const provider = paymentProviderRegistry.select({ provider: payment.provider, currency: payment.currency, operation: "PAYMENT", requiredCapabilities: ["session", "verify", "status"] });
 
     if (payment.status === PaymentStatus.INITIALIZING) {
       if (!payment.providerPaymentId) {
@@ -221,7 +233,14 @@ export class PaymentLifecycleService {
 
     this.ensureStatus(payment, [PaymentStatus.CREATED]);
 
-    const provider = this.resolveProvider(payment.provider);
+    let operation = await paymentOperationService.prepare(payment);
+
+    if (operation.status === "UNKNOWN") {
+      throw new PaymentError(
+        "Payment operation outcome is unknown and must be reconciled before another provider attempt.",
+        "PAYMENT_PROVIDER_OUTCOME_UNKNOWN",
+      );
+    }
 
     const sessionRequest: CreatePaymentSessionRequest = {
       /**
@@ -261,55 +280,27 @@ export class PaymentLifecycleService {
       idempotencyKey: payment.idempotencyKey,
     };
 
-    const session = await provider.createPaymentSession(sessionRequest);
-
-    const providerPayment = await ProviderPaymentService.findByProviderPaymentId(
-      session.providerPaymentId,
-    );
-
-    if (!providerPayment || !providerPayment.paymentId.equals(payment._id)) {
-      throw new PaymentError(
-        "Provider payment does not belong to the Financial Payment.",
-        "PAYMENT_PROVIDER_REFERENCE_MISMATCH",
-      );
+    let session: CreatePaymentSessionResponse;
+    if (operation.providerPaymentId) {
+      session = { providerPaymentId: operation.providerPaymentId, providerOrderId: operation.providerOrderId };
+    } else {
+      operation = await paymentOperationService.startAttempt(operation);
+      try {
+        session = await provider.createPaymentSession(sessionRequest);
+      } catch (error) {
+        await paymentOperationService.markUnknown(operation, "Provider session creation did not produce a durable response.");
+        throw error;
+      }
+      operation = await paymentOperationService.linkProviderSession(operation, session);
     }
-
-    if (providerPayment.amount !== payment.amount) {
-      throw new PaymentError(
-        "Provider payment amount does not match Financial Payment.",
-        "PAYMENT_PROVIDER_AMOUNT_MISMATCH",
-      );
-    }
-
-    if (providerPayment.currency !== payment.currency) {
-      throw new PaymentError(
-        "Provider payment currency does not match Financial Payment.",
-        "PAYMENT_PROVIDER_CURRENCY_MISMATCH",
-      );
-    }
-
-    if (
-      session.providerOrderId &&
-      providerPayment.providerReference !== session.providerOrderId
-    ) {
-      throw new PaymentError(
-        "Provider payment order identity is inconsistent.",
-        "PAYMENT_PROVIDER_REFERENCE_MISMATCH",
-      );
-    }
-
-    const providerState = await provider.getPaymentStatus({
-      providerPaymentId: session.providerPaymentId,
-    });
-
-    if (
-      providerState.providerPaymentId !== session.providerPaymentId ||
-      providerState.providerStatus !== providerPayment.status
-    ) {
-      throw new PaymentError(
-        "Provider payment status is inconsistent.",
-        "PAYMENT_PROVIDER_REFERENCE_MISMATCH",
-      );
+    try {
+      const providerState = await provider.getPaymentStatus({ providerPaymentId: session.providerPaymentId });
+      operation = await paymentOperationService.reconcile(operation, providerState);
+    } catch (error) {
+      if (operation.status !== "CONFIRMED" && operation.status !== "FAILED") {
+        await paymentOperationService.markUnknown(operation, "Provider status retrieval was indeterminate.");
+      }
+      throw error;
     }
 
     const financialSession = await mongoose.startSession();
@@ -424,6 +415,95 @@ export class PaymentLifecycleService {
     return completed.payment;
   }
 
+  /** Sandbox-only Razorpay checkout confirmation. It binds pay_* only to the
+   * order_* already durably created by this payment operation. */
+  async confirmRazorpaySandboxPayment(input: { paymentId: string; customerId: string; orderId: string; razorpayPaymentId: string; signature: string }): Promise<IPayment> {
+    if (!["test", "development"].includes(process.env.NODE_ENV ?? "")) throw new PaymentError("Razorpay sandbox confirmation is unavailable outside test and development.", "PAYMENT_PROVIDER_UNAVAILABLE");
+    const payment = await this.payments.getPayment(input.paymentId);
+    if (payment.provider === PaymentProvider.RAZORPAY && payment.userId.toString() === input.customerId && payment.status === PaymentStatus.CAPTURED && payment.providerOrderId === input.orderId && payment.providerPaymentId === input.razorpayPaymentId) return this.authorizeTerminalLateCaptureRefund(payment);
+    if (payment.provider !== PaymentProvider.RAZORPAY || payment.userId.toString() !== input.customerId || payment.status !== PaymentStatus.INITIALIZING || payment.providerOrderId !== input.orderId || payment.providerPaymentId !== input.orderId) throw new PaymentError("Razorpay confirmation does not match the existing payment.", "PAYMENT_PROVIDER_LINK_CONFLICT");
+    const operation = await paymentOperationService.prepare(payment);
+    if (operation.status === "UNKNOWN") throw new PaymentError("Payment operation outcome is unknown and requires reconciliation before confirmation.", "PAYMENT_PROVIDER_OUTCOME_UNKNOWN");
+    const provider = this.resolveProvider(PaymentProvider.RAZORPAY);
+    let verification;
+    let status;
+    try {
+      verification = await provider.verifyPayment({ providerPaymentId: input.razorpayPaymentId, providerOrderId: input.orderId, providerSignature: input.signature });
+      if (!verification.verified) throw new PaymentError("Razorpay payment is not captured.", "PAYMENT_PROVIDER_REFERENCE_MISMATCH");
+      status = await provider.getPaymentStatus({ providerPaymentId: input.razorpayPaymentId });
+    } catch (error) {
+      if (!(error instanceof PaymentError) || error.code === "PAYMENT_PROVIDER_OUTCOME_UNKNOWN") {
+        await paymentOperationService.markUnknown(operation, "Razorpay payment lookup did not produce a definitive result.");
+      }
+      throw error;
+    }
+    if (status.providerStatus !== "CAPTURED" || !status.amount || status.amount.amount !== payment.amount || status.amount.currency !== payment.currency) throw new PaymentError("Razorpay captured payment evidence does not match the financial payment.", "PAYMENT_PROVIDER_REFERENCE_MISMATCH");
+    const bound = await paymentOperationService.bindRazorpayCapturedPayment(operation, input.orderId, input.razorpayPaymentId);
+    const reconciled = await paymentOperationService.reconcile(bound, status);
+    if (reconciled.status !== "CONFIRMED") throw new PaymentError("Captured Razorpay payment was not reconciled.", "PAYMENT_PROVIDER_REFERENCE_MISMATCH");
+
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        let current = await paymentRepository.findById(payment._id, session);
+        if (!current) throw new PaymentError("Payment not found.");
+        if (
+          current.provider !== PaymentProvider.RAZORPAY ||
+          current.userId.toString() !== input.customerId ||
+          current.providerOrderId !== input.orderId
+        ) {
+          throw new PaymentError("Razorpay confirmation conflicts with the existing payment identity.", "PAYMENT_PROVIDER_LINK_CONFLICT");
+        }
+
+        if (current.status === PaymentStatus.CAPTURED && current.providerPaymentId === input.razorpayPaymentId) return;
+        if (current.providerPaymentId !== input.orderId) {
+          throw new PaymentError("Razorpay confirmation conflicts with the existing payment identity.", "PAYMENT_PROVIDER_LINK_CONFLICT");
+        }
+
+        const providerData = {
+          providerPaymentId: input.razorpayPaymentId,
+          providerOrderId: input.orderId,
+          providerTransactionId: status.providerTransactionId ?? verification.providerTransactionId ?? input.razorpayPaymentId,
+          providerPayload: status.payload ?? verification.payload,
+        };
+
+        if (current.status === PaymentStatus.INITIALIZING) {
+          const authorized = await paymentRepository.transition(
+            current._id,
+            [PaymentStatus.INITIALIZING],
+            {
+              status: PaymentStatus.AUTHORIZED,
+              ...providerData,
+              authorizationId: providerData.providerTransactionId,
+            },
+            session,
+          );
+          if (!authorized) throw new PaymentError("Payment authorization transition conflicted.", "PAYMENT_LIFECYCLE_CONFLICT");
+          current = authorized;
+        }
+
+        if (current.status === PaymentStatus.AUTHORIZED) {
+          const captured = await paymentRepository.transition(
+            current._id,
+            [PaymentStatus.AUTHORIZED],
+            { status: PaymentStatus.CAPTURED, ...providerData },
+            session,
+          );
+          if (!captured) throw new PaymentError("Payment capture transition conflicted.", "PAYMENT_LIFECYCLE_CONFLICT");
+          current = captured;
+        }
+
+        if (current.status !== PaymentStatus.CAPTURED) {
+          throw new PaymentError("Razorpay confirmation conflicts with the payment lifecycle.", "PAYMENT_LIFECYCLE_CONFLICT");
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    return this.authorizeTerminalLateCaptureRefund(await this.payments.getPayment(input.paymentId));
+  }
+
   /**
    * Executes the complete provider lifecycle for a Payment that has already
    * been created by another domain transaction, such as Booking creation.
@@ -446,6 +526,19 @@ export class PaymentLifecycleService {
     const initialized = await this.initializeExistingPayment(paymentId);
     let payment = initialized.payment;
 
+    // A Razorpay checkout order is a pending browser-session identity, not
+    // capture evidence.  Only the authenticated sandbox-confirm endpoint can
+    // bind and verify the later pay_* reference.  Treating order_* as a
+    // payment here would either reject a valid checkout session or, worse,
+    // conflate order creation with collection confirmation.
+    if (
+      payment.provider === PaymentProvider.RAZORPAY &&
+      payment.status === PaymentStatus.INITIALIZING &&
+      initialized.session.providerPaymentId.startsWith("order_")
+    ) {
+      return initialized;
+    }
+
     if (payment.status === PaymentStatus.CAPTURED) {
       await this.auditSafely({ action: AuditAction.PAYMENT_REPLAY_DETECTED, actor: { type: "SYSTEM", reference: "payment-lifecycle" }, entityType: "PAYMENT", entityId: payment._id, financialContext: { domain: "PAYMENT", primaryReference: payment.paymentReference, paymentReference: payment.paymentReference, amount: payment.amount, currency: payment.currency, provider: payment.provider, providerReference: payment.providerPaymentId, ledgerTransactionReference: payment.escrowLedgerTransactionReference }, transition: { fromStatus: PaymentStatus.CAPTURED, toStatus: PaymentStatus.CAPTURED, outcome: "REPLAYED" } });
       return { payment: await this.ensureCapturedEscrowRecognized(payment._id.toString()), session: initialized.session };
@@ -455,6 +548,10 @@ export class PaymentLifecycleService {
       throw new PaymentError("Initialized payment is missing its provider payment id.");
     }
 
+    const operation = await paymentOperationService.prepare(payment);
+    if (operation.status === "UNKNOWN") {
+      throw new PaymentError("Payment operation outcome is unknown and requires reconciliation before another provider attempt.", "PAYMENT_PROVIDER_OUTCOME_UNKNOWN");
+    }
     const provider = this.resolveProvider(payment.provider);
     const verification = await provider.verifyPayment({
       providerPaymentId: payment.providerPaymentId,
@@ -466,20 +563,9 @@ export class PaymentLifecycleService {
     const providerState = await provider.getPaymentStatus({
       providerPaymentId: payment.providerPaymentId,
     });
-    const providerPayment = await ProviderPaymentService.findByProviderPaymentId(
-      payment.providerPaymentId,
-    );
-    if (!providerPayment || !providerPayment.paymentId.equals(payment._id)) {
-      throw new PaymentError("Provider payment does not belong to the Financial Payment.", "PAYMENT_PROVIDER_REFERENCE_MISMATCH");
-    }
-    if (providerPayment.amount !== payment.amount) {
-      throw new PaymentError("Provider payment amount does not match Financial Payment.", "PAYMENT_PROVIDER_AMOUNT_MISMATCH");
-    }
-    if (providerPayment.currency !== payment.currency) {
-      throw new PaymentError("Provider payment currency does not match Financial Payment.", "PAYMENT_PROVIDER_CURRENCY_MISMATCH");
-    }
-    if (providerState.providerPaymentId !== payment.providerPaymentId) {
-      throw new PaymentError("Provider payment identifier is inconsistent.");
+    const reconciledOperation = await paymentOperationService.reconcile(operation, providerState);
+    if (providerState.providerStatus === "CAPTURED" && reconciledOperation.status !== "CONFIRMED") {
+      throw new PaymentError("Captured provider result was not independently reconciled.", "PAYMENT_PROVIDER_REFERENCE_MISMATCH");
     }
 
     const session = await mongoose.startSession();

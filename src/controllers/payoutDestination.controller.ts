@@ -12,6 +12,7 @@ const CREATE_FIELDS = new Set([
   "accountNumber",
   "ifsc",
   "upiId",
+  "destinationCountry",
   "idempotencyKey",
 ]);
 
@@ -45,6 +46,7 @@ export const createPayoutDestination = asyncHandler(
       accountNumber: body.accountNumber,
       ifsc: body.ifsc,
       upiId: body.upiId,
+      destinationCountry: body.destinationCountry,
       idempotencyKey: body.idempotencyKey,
     });
     const response = payoutDestinationService.serialize(result.destination);

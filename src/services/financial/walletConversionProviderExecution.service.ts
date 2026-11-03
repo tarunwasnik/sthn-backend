@@ -1,4 +1,5 @@
 import mongoose, { ClientSession, Types } from "mongoose";
+import { assertFinancialSimulatorAllowed } from "./simulatorAccess.service";
 
 import { ProviderEntityType, ProviderEventType, ProviderOperation,
   ProviderSimulationMode } from "../../constants/internalProvider";
@@ -592,6 +593,7 @@ export class WalletConversionProviderExecutionService {
   }
 
   async execute(raw: ExecuteWalletConversionProviderInput) {
+    assertFinancialSimulatorAllowed();
     const input = this.normalize(raw);
     const existing = await
       internalWalletConversionProviderRequestRepository.findByConversion(

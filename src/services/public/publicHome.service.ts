@@ -3,10 +3,6 @@
 import { getPublicCreatorsData } from "./publicCreator.service";
 
 export const getPublicHomeData = async () => {
-  console.log(
-    "🔥 PUBLIC HOME SERVICE EXECUTING"
-  );
-
   const creatorsResponse =
     await getPublicCreatorsData({
       page: 1,

@@ -18,6 +18,7 @@ import { interactionTriggerJob } from "./jobs/interactionTrigger.job";
 import { sessionEndingSoonJob } from "./jobs/sessionEndingSoon.job";
 import { disputeEscalationJob } from "./jobs/disputeEscalation.job";
 import { settleBookingsJob } from "./jobs/settleBookings.job";
+import { evaluateCreatorEntitlementsJob } from "./jobs/evaluateCreatorEntitlements.job";
 import { profileVerificationReconciliationJob } from "./jobs/profileVerificationReconciliation.job";
 import { faceVerificationEvidenceCleanupJob } from "./jobs/faceVerificationEvidenceCleanup.job";
 import { stopProfileVerificationWorker } from "./services/profile/profileVerificationWorker.service";
@@ -26,6 +27,8 @@ import { startMediaCleanupSchedulerIfEnabled, stopMediaCleanupScheduler } from "
 import sharp from "sharp";
 import { detectYuNetFaces } from "./services/profile/profileVerificationYuNetRunner";
 import { reportProfileVerificationMemory } from "./services/profile/profileVerificationMemoryDiagnostic.service";
+import { readLocalMobileDevelopmentConfig } from "./config/localMobileDevelopment";
+import { assertNoRetiredAdamCoddConfiguration } from "./services/imageModeration/adamCoddImageSafety.config";
 
 import { errorHandler } from "./middlewares/errorHandler"; // ✅ ADDED
 
@@ -35,10 +38,13 @@ const app = express();
 
 /* ===================== CORS CONFIG ===================== */
 
+const localMobileDevelopment = readLocalMobileDevelopmentConfig();
+
 const allowedOrigins = [
   "http://localhost:5173",
   "https://sthn-frontend.vercel.app",
   "https://sthn-frontend-hmcpkqxce-tarunwasniks-projects.vercel.app",
+  ...(localMobileDevelopment.allowedOrigin ? [localMobileDevelopment.allowedOrigin] : []),
 ];
 
 app.use(
@@ -88,6 +94,7 @@ async function runBackgroundJobs() {
     await sessionEndingSoonJob();
     await disputeEscalationJob();
     await settleBookingsJob();
+    await evaluateCreatorEntitlementsJob();
     await profileVerificationReconciliationJob();
     await faceVerificationEvidenceCleanupJob();
 
@@ -156,6 +163,7 @@ async function stopJobLoop() {
 
 export async function startServer() {
   try {
+    assertNoRetiredAdamCoddConfiguration();
     await mongoose.connect(process.env.MONGODB_URI as string);
 
     console.log("✅ MongoDB connected");
@@ -181,7 +189,7 @@ export async function startServer() {
 
     initSockets(io);
 
-    httpServer.listen(PORT, () => {
+    const onListening = () => {
       console.log(`🚀 Server + Socket.IO running on port ${PORT}`);
 
       startJobLoop();
@@ -191,7 +199,9 @@ export async function startServer() {
       runYuNetSyntheticDiagnostic();
       setTimeout(runYuNetSyntheticDiagnostic, 70_000);
       console.log("⏱ Background jobs scheduled");
-    });
+    };
+    if (localMobileDevelopment.bindHost) httpServer.listen(Number(PORT), localMobileDevelopment.bindHost, onListening);
+    else httpServer.listen(PORT, onListening);
 
     let shutdownStarted = false;
     const shutdown = async (signal: "SIGINT" | "SIGTERM") => {

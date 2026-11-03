@@ -10,7 +10,7 @@ interface JwtPayload {
   role: Role;
 }
 
-export const protect = async (
+const authenticate = (allowRestrictedRead: boolean) => async (
   req: Request,
   res: Response,
   next: NextFunction,
@@ -36,7 +36,7 @@ export const protect = async (
       return res.status(401).json({ message: "User not found" });
     }
 
-    if (user.status === "suspended") {
+    if (!allowRestrictedRead && user.status === "suspended") {
       return res.status(403).json({
         message: "Account suspended. Contact support.",
       });
@@ -56,3 +56,12 @@ export const protect = async (
     return res.status(401).json({ message: "Invalid or expired token" });
   }
 };
+
+export const protect = authenticate(false);
+
+/**
+ * Suspended accounts may read their own status and financial history, but
+ * remain subject to all role and active-Creator mutation guards. Banned
+ * accounts remain blocked by the base authentication policy.
+ */
+export const protectRestrictedRead = authenticate(true);

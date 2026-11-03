@@ -28,6 +28,9 @@ export enum RefundStatus {
    */
   PROCESSING = "PROCESSING",
 
+  /** A provider mutation may have occurred, but its result is not yet authoritative. */
+  UNKNOWN = "UNKNOWN",
+
   /**
    * Refund completed successfully.
    */

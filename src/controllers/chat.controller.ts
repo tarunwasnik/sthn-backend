@@ -174,8 +174,8 @@ export const sendMessage = async (req: Request, res: Response) => {
     abuseScore = await applyAbuseScore(
       isUser ? booking.userId : booking.creatorId,
       booking.hasInteracted
-        ? "USER_CANCEL_AFTER_INTERACTION"
-        : "USER_CANCEL_EARLY",
+        ? "CHAT_CONTACT_AFTER_INTERACTION"
+        : "CHAT_CONTACT_ATTEMPT",
     );
   }
 
@@ -868,7 +868,6 @@ export const markChatAsSeen = async (req: Request, res: Response) => {
   const booking = await Booking.findById(bookingId);
   if (!booking) return res.status(404).json({ message: "Booking not found" });
   if (!booking.userId.equals(actorId) && !booking.creatorId.equals(actorId)) return res.status(403).json({ message: "Access denied" });
-  if (isTerminalChatBooking(booking.status)) return terminalChatReadOnly(res);
 
   await Chat.updateMany(
     { bookingId, seenBy: { $ne: actorId } },

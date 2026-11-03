@@ -17,6 +17,8 @@ import {
 } from "../constants/financial/supportedCurrencies";
 
 export interface IPayment extends Document {
+  /** Internal optimistic fence for dormant disposition dispatch. */
+  dispositionDispatchFence?: number;
   /**
    * Internal immutable payment reference.
    */
@@ -56,6 +58,11 @@ export interface IPayment extends Document {
   reconciliationNote?: string;
   /** Explicit future-settlement guard; escrow proof is still ledger-derived. */
   automaticSettlementBlocked?: boolean;
+  checkoutQuoteId?: string;
+  checkoutQuoteFingerprint?: string;
+  financialPolicyVersion?: string;
+  financialPolicyContentReference?: string;
+  financialPolicyAcceptedAt?: Date;
 
   /**
    * ISO currency code.
@@ -135,6 +142,7 @@ export interface IPayment extends Document {
 
 const PaymentSchema = new Schema<IPayment>(
   {
+    dispositionDispatchFence: { type: Number, select: false },
     paymentReference: {
       type: String,
       required: true,
@@ -291,6 +299,11 @@ const PaymentSchema = new Schema<IPayment>(
     reconciliationReason: { type: String, enum: Object.values(FinancialReconciliationReason) },
     reconciliationNote: { type: String, trim: true, maxlength: 500 },
     automaticSettlementBlocked: { type: Boolean, default: false, index: true },
+    checkoutQuoteId: { type: String, immutable: true, trim: true, index: true },
+    checkoutQuoteFingerprint: { type: String, immutable: true, trim: true, select: false },
+    financialPolicyVersion: { type: String, immutable: true, trim: true },
+    financialPolicyContentReference: { type: String, immutable: true, trim: true },
+    financialPolicyAcceptedAt: { type: Date, immutable: true },
 
     lifecycleVersion: {
       type: Number,

@@ -1,0 +1,43 @@
+# Dockerfile-specific deny-all context for the isolated Linux qualification image.
+# Patterns are evaluated from the backend build-context root.
+*
+
+# Build manifests and compiler configuration.
+!package.json
+!package-lock.json
+!tsconfig.json
+
+# Compiled qualification entrypoints and their production dependencies.
+!src/
+!src/**
+
+# Frozen V2 runtime artifact only; no V1 or experimental model artifacts.
+!models/
+!models/adamcodd-v2/
+!models/adamcodd-v2/model_int8.onnx
+
+# Frozen Collection C authority and the selected benchmark source images.
+!evaluation-cache/
+!evaluation-cache/image-moderation/
+!evaluation-cache/image-moderation/benchmark/
+!evaluation-cache/image-moderation/benchmark/collection-c/
+!evaluation-cache/image-moderation/benchmark/collection-c/**
+
+# I3B-5E validates this completed prior report before it starts workers.
+!evaluation-output/
+!evaluation-output/image-moderation/
+!evaluation-output/image-moderation/i3b-5d-v2-memory-validation/
+!evaluation-output/image-moderation/i3b-5d-v2-memory-validation/full/
+!evaluation-output/image-moderation/i3b-5d-v2-memory-validation/full/validation-report.json
+
+# Immutable Stage I3A reference decisions required by the fixed four-image
+# qualification sample. Exclude the adjacent float32 tensor cache.
+!evaluation-output/image-moderation/i5-v2-preprocessing-compatibility/
+!evaluation-output/image-moderation/i5-v2-preprocessing-compatibility/run-i3a-node-v2/
+!evaluation-output/image-moderation/i5-v2-preprocessing-compatibility/run-i3a-node-v2/*.json
+
+# Retain the selected Docker build definition and its rules for auditability.
+!tools/
+!tools/image-ai-qualification/
+!tools/image-ai-qualification/Dockerfile
+!tools/image-ai-qualification/Dockerfile.dockerignore

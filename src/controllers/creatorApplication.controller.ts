@@ -1,15 +1,16 @@
 // backend/src/controllers/creatorApplication.controller.ts
 
 import { Request, Response } from "express";
-import mongoose from "mongoose";
+import { Types } from "mongoose";
 import { CreatorApplication } from "../models/creatorApplication.model";
 import { UserProfile } from "../models/userProfile.model";
 import { Booking } from "../models/booking.model";
 import User from "../models/User";
 import { ROLES } from "../constants/roles";
 import { AppError } from "../utils/AppError";
-import { fingerprintTextModerationPayload, normalizeCreatorApplicationModerationPayload } from "../services/textModeration/textModerationNormalization.service";
-import { requireTextModerationAdmission } from "../services/textModeration/textModerationAdmission.service";
+import { normalizeCreatorApplicationModerationPayload } from "../services/textModeration/textModerationNormalization.service";
+import { parseCreatorMediaClaims } from "../services/creator/creatorMediaAdmissionContract";
+import { creatorMediaAdmissionPersistenceService } from "../services/creator/creatorMediaAdmissionPersistence.service";
 
 export const applyForCreator = async (req: Request, res: Response) => {
   const authUser = req.user;
@@ -97,9 +98,6 @@ export const applyForCreator = async (req: Request, res: Response) => {
     country,
     city,
     languages,
-    avatarUrl,
-    coverUrl,
-    media,
   } = req.body;
 
   if (
@@ -114,109 +112,42 @@ export const applyForCreator = async (req: Request, res: Response) => {
   }
 
   const moderatedText = normalizeCreatorApplicationModerationPayload({ publicBio, services });
-  requireTextModerationAdmission({
-    token: req.body.textModerationAdmission,
-    domain: moderatedText.domain,
-    userId: authUser.id,
-    fingerprint: fingerprintTextModerationPayload(moderatedText),
-  });
 
   const normalizedServices = moderatedText.services;
 
   const normalizedLanguages = Array.isArray(languages) ? languages : [];
 
-  const session = await mongoose.startSession();
-
+  if (req.body.avatarUrl !== undefined || req.body.coverUrl !== undefined) throw new AppError("Creator application media must use image admission claims", 400);
+  let claims;
+  try { claims = parseCreatorMediaClaims({ avatar: req.body.avatar, cover: req.body.cover, media: req.body.media }); }
+  catch (error) { throw new AppError(error instanceof Error ? error.message : "Invalid creator application media claims", 400); }
+  const existingApplicationId = existingApplication?._id;
+  let applicationId: Types.ObjectId | undefined;
   try {
-    session.startTransaction();
-
-    let application;
-
-    /* ================= FIRST SUBMISSION ================= */
-
-    if (!existingApplication) {
-      application = await CreatorApplication.create(
-        [
-          {
-            userId: authUser.id,
-
-            displayName,
-            primaryCategory,
-
-            country,
-            city,
-
-            currency: currency.toUpperCase(),
-
-            services: normalizedServices,
-            publicBio: moderatedText.publicBio,
-
-            languages: normalizedLanguages,
-
-            avatarUrl: avatarUrl || null,
-            coverUrl: coverUrl || null,
-            media: Array.isArray(media) ? media : [],
-
-            status: "submitted",
-
-            submittedForReviewAt: new Date(),
-          },
-        ],
-        { session },
-      );
-    } else {
-      /* ================= REJECTED RESUBMISSION ================= */
-
-      existingApplication.displayName = displayName;
-      existingApplication.primaryCategory = primaryCategory;
-
-      existingApplication.country = country;
-      existingApplication.city = city;
-
-      existingApplication.currency = currency.toUpperCase();
-
-      existingApplication.services = normalizedServices;
-      existingApplication.publicBio = moderatedText.publicBio;
-
-      existingApplication.languages = normalizedLanguages;
-
-      existingApplication.avatarUrl = avatarUrl || null;
-      existingApplication.coverUrl = coverUrl || null;
-      existingApplication.media = Array.isArray(media) ? media : [];
-
-      existingApplication.status = "submitted";
-      existingApplication.rejectionReason = "";
-
-      existingApplication.submittedForReviewAt = new Date();
-
-      await existingApplication.save({ session });
-
-      application = [existingApplication];
-    }
-
-    fullUser.creatorStatus = "pending";
-
-    await fullUser.save({ session });
-
-    await session.commitTransaction();
-
-    session.endSession();
-
-    return res.status(201).json({
-      message: "Creator application submitted",
-      application: Array.isArray(application) ? application[0] : application,
+    const persisted = await creatorMediaAdmissionPersistenceService.persist<{ applicationId: string; applicantUserId: string; submitted: true }>({
+      actorId: fullUser._id, kind: "CREATOR_APPLICATION", claims,
+      loadOwnedResource: async (session) => {
+        let application = existingApplicationId ? await CreatorApplication.findOne({ _id: existingApplicationId, userId: fullUser._id, status: "rejected" }).session(session).exec() : null;
+        if (existingApplicationId && !application) return null;
+        if (!application) [application] = await CreatorApplication.create([{ userId: fullUser._id, displayName, primaryCategory, country, city, currency: currency.toUpperCase(), services: normalizedServices, publicBio: moderatedText.publicBio, languages: normalizedLanguages, avatarUrl: null, coverUrl: null, media: [], status: "draft", rejectionReason: "" }], { session });
+        applicationId = application._id;
+        return { id: application._id, actorId: application.userId, media: { avatar: application.avatarUrl, cover: application.coverUrl, media: application.media ?? [] } };
+      },
+      persistMedia: async ({ session, resource, media }) => {
+        const application = await CreatorApplication.findOne({ _id: resource.id, userId: fullUser._id }).session(session).exec();
+        const account = await User.findById(fullUser._id).session(session).exec();
+        if (!application || !account) throw new Error("Creator application account is unavailable");
+        if (account.creatorStatus === "pending" || account.creatorStatus === "approved") throw new Error("Creator application already in progress or approved");
+        application.displayName = displayName; application.primaryCategory = primaryCategory; application.country = country; application.city = city; application.currency = currency.toUpperCase(); application.services = normalizedServices; application.publicBio = moderatedText.publicBio; application.languages = normalizedLanguages;
+        application.avatarUrl = media.avatar ?? null; application.coverUrl = media.cover ?? null; application.media = [...media.media]; application.status = "submitted"; application.rejectionReason = ""; application.submittedForReviewAt = new Date(); account.creatorStatus = "pending";
+        await application.save({ session }); await account.save({ session }); applicationId = application._id;
+        return { applicationId: String(application._id), applicantUserId: String(application.userId), submitted: true };
+      },
     });
-  } catch (error: any) {
-    console.error("🔥 CREATOR APPLY ERROR:", error);
-    console.error("🔥 ERROR MESSAGE:", error?.message);
-    console.error("🔥 ERROR STACK:", error?.stack);
-
-    await session.abortTransaction();
-
-    session.endSession();
-
-    throw new AppError(error?.message || "Application submission failed", 400);
-  }
+    applicationId = persisted.committedOutcome ? new Types.ObjectId(persisted.committedOutcome.applicationId) : applicationId;
+    const application = applicationId ? await CreatorApplication.findById(applicationId) : null;
+    return res.status(201).json({ message: "Creator application submitted", application });
+  } catch (error) { throw new AppError(error instanceof Error ? error.message : "Application submission failed", 400); }
 };
 
 export const getMyCreatorApplication = async (req: Request, res: Response) => {

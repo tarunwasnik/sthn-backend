@@ -10,6 +10,7 @@ import {
   PayoutProviderInitializationIdentity,
 } from "../../../contracts/financial/payoutProvider.types";
 import { PaymentProvider } from "../../../enums/financial/paymentProvider.enum";
+import { assertFinancialSimulatorAllowed } from "../simulatorAccess.service";
 import { PayoutDestinationType } from "../../../enums/financial/payoutDestinationType.enum";
 import { SUPPORTED_CURRENCIES, type SupportedCurrency } from "../../../constants/financial/supportedCurrencies";
 import { PayoutError } from "../../../errors/financial/PayoutError";
@@ -20,10 +21,12 @@ import { payoutDestinationCryptoService } from "../../security/payoutDestination
 
 export class InternalPayoutProvider implements PayoutProviderInterface {
   readonly provider = PaymentProvider.INTERNAL;
+  readonly routingCapabilityProfile = { configurationVersion: "internal-payout-simulator-v1", approvedEnvironments: ["test", "development"], simulator: true, operations: { COLLECTION: "UNSUPPORTED", PAYMENT_RECONCILIATION: "UNSUPPORTED", FULL_REFUND: "UNSUPPORTED", PARTIAL_REFUND: "UNSUPPORTED", REFUND_RECONCILIATION: "UNSUPPORTED", PAYOUT: "SUPPORTED", PAYOUT_RECONCILIATION: "SUPPORTED", FX: "UNSUPPORTED" }, sourceCountries: ["IN"], destinationCountries: ["IN"], sourceCurrencies: ["INR"], destinationCurrencies: ["INR"], fundingRoutes: ["SIMULATOR"], feeEvidenceReference: "internal-payout-simulator-v1", healthyOperations: ["PAYOUT", "PAYOUT_RECONCILIATION"] } as const;
 
   async initializePayout(
     request: InitializePayoutRequest,
   ): Promise<InitializePayoutResponse> {
+    assertFinancialSimulatorAllowed();
     this.validateRequest(request);
     const fingerprint = this.createDestinationFingerprint(request);
     const existing = await ProviderPayoutService.findByIdempotencyKeyForDestinationConsistency(request.idempotencyKey);
@@ -169,6 +172,7 @@ export class InternalPayoutProvider implements PayoutProviderInterface {
   async getPayoutResult(
     request: GetPayoutResultRequest,
   ): Promise<PayoutProviderResult> {
+    assertFinancialSimulatorAllowed();
     const payout = await ProviderPayoutService.findByProviderPayoutId(
       request.providerPayoutId,
     );

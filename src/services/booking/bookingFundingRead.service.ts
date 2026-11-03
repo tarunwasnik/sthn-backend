@@ -19,6 +19,12 @@ import type {
   BookingFundingResponseDto,
   BookingPricingPreviewResponseDto,
 } from "../../dtos/booking/bookingFunding.response.dto";
+import { createBookingCheckoutQuote } from "./bookingCheckoutQuote.service";
+import { FeatureFlagEvaluator } from "../controlPlane/featureFlagEvaluator.service";
+import { PaymentOperation } from "../../models/paymentOperation.model";
+import { TerminationProviderOperation } from "../../models/terminationProviderOperation.model";
+import { PaymentOperationStatus } from "../../enums/financial/paymentOperationStatus.enum";
+import { PaymentStatus } from "../../enums/financial/paymentStatus.enum";
 
 export class BookingFundingReadService {
   private requireObjectId(value: string, label: string): Types.ObjectId {
@@ -85,6 +91,16 @@ export class BookingFundingReadService {
     });
     const wallet = await walletRepository.findByUserAndCurrency(userId, currency);
     const availableAmount = wallet?.availableBalance ?? 0;
+    const checkoutQuote = createBookingCheckoutQuote({
+      customerId: userId.toString(), creatorId: service.creatorId.toString(),
+      serviceId: service._id.toString(), slotIds: slotIds.map(String), currency,
+      serviceAmount: pricing.serviceAmount, customerFeeAmount: pricing.platformFeeAmount,
+      totalAmount: pricing.totalAmount,
+    });
+    const quoteRequired = await FeatureFlagEvaluator.isEnabled(
+      "CHECKOUT_QUOTE_REQUIRED",
+      { userId: userId.toString(), role: user.role },
+    );
     return {
       currency,
       serviceAmount: pricing.serviceAmount,
@@ -92,6 +108,15 @@ export class BookingFundingReadService {
       grossFundingAmount: pricing.totalAmount,
       pricingPolicy: PaymentPricingPolicy.STANDARD_CUSTOMER_FEE_V1,
       pricingVersion: 1,
+      checkoutQuote: {
+        quoteId: checkoutQuote.quote.quoteId, token: checkoutQuote.token,
+        fingerprint: checkoutQuote.quote.fingerprint, issuedAt: checkoutQuote.quote.issuedAt,
+        expiresAt: checkoutQuote.quote.expiresAt,
+        financialPolicyVersion: checkoutQuote.quote.financialPolicyVersion,
+        financialPolicyContentReference: checkoutQuote.quote.financialPolicyContentReference,
+        acceptanceEnforced: false,
+        quoteRequired,
+      },
       walletFunding: {
         currency,
         availableAmount,
@@ -117,6 +142,34 @@ export class BookingFundingReadService {
     const reservation = payment && payment.method === PaymentMethod.WALLET
       ? await bookingFundReservationRepository.findByBooking(booking._id as Types.ObjectId)
       : null;
+    let providerFunding: BookingFundingResponseDto["providerFunding"];
+    if (payment && payment.method !== PaymentMethod.WALLET) {
+      const [operation, termination] = await Promise.all([
+        PaymentOperation.findOne({ paymentId: payment._id }).select("+userId +idempotencyKey").lean(),
+        TerminationProviderOperation.findOne({ bookingId, paymentId: payment._id }).lean(),
+      ]);
+      const paymentMatches = payment.bookingId.equals(bookingId) && payment.userId.equals(booking.userId) &&
+        payment.creatorId.equals(booking.creatorId) && payment.amount === booking.totalAmount &&
+        payment.currency === booking.currency && payment.method === booking.paymentMethod;
+      const operationMatches = operation && paymentMatches && operation.bookingId.equals(bookingId) &&
+        operation.userId.equals(booking.userId) && operation.idempotencyKey === payment.idempotencyKey &&
+        operation.provider === payment.provider && operation.requestedAmount === payment.amount &&
+        operation.requestedCurrency === payment.currency;
+      const terminalMatches = termination && paymentMatches && termination.status === "FINALIZED" &&
+        termination.provider === payment.provider && termination.providerPaymentId === payment.providerPaymentId &&
+        termination.amount === payment.amount && termination.currency === payment.currency;
+      let state: NonNullable<BookingFundingResponseDto["providerFunding"]>["state"] = "UNKNOWN";
+      if (terminalMatches && termination.kind === "REFUND" && !!termination.providerOperationReference && termination.providerStatus === "REFUNDED" && payment.status === PaymentStatus.REFUNDED) state = "REFUNDED";
+      else if (terminalMatches && termination.kind === "CANCEL" && termination.providerStatus === "CANCELLED" && payment.status === PaymentStatus.CANCELLED) state = "CANCELLED";
+      else if (!termination && operationMatches && operation.status === PaymentOperationStatus.CONFIRMED &&
+        payment.status === PaymentStatus.CAPTURED && booking.paymentStatus === "PAID" && booking.isPayable &&
+        !!payment.providerPaymentId && operation.providerPaymentId === payment.providerPaymentId &&
+        operation.verifiedAmount === payment.amount && operation.verifiedCurrency === payment.currency) state = "CONFIRMED";
+      else if (!termination && operationMatches && operation.status === PaymentOperationStatus.FAILED && payment.status === PaymentStatus.FAILED) state = "FAILED";
+      else if (paymentMatches && !termination && (!operation || (operationMatches && operation.status === PaymentOperationStatus.PENDING)) &&
+        [PaymentStatus.CREATED, PaymentStatus.INITIALIZING, PaymentStatus.PENDING, PaymentStatus.AUTHORIZED].includes(payment.status)) state = "PENDING";
+      providerFunding = { state };
+    }
     return {
       booking: { status: booking.status, currency: booking.currency },
       pricing: {
@@ -133,6 +186,7 @@ export class BookingFundingReadService {
         ...(payment.releasedAt ? { releasedAt: payment.releasedAt } : {}),
         ...(payment.capturedAt ? { capturedAt: payment.capturedAt } : {}),
       } : null,
+      ...(providerFunding ? { providerFunding } : {}),
       walletFunding: reservation ? {
         state: reservation.status,
         amount: reservation.amount,

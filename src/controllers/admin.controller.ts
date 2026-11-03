@@ -25,6 +25,8 @@ import { removeSuspensionLifecycle } from "../services/accountGovernance/unsuspe
 import { triggerBanLifecycle } from "../services/accountGovernance/banLifecycle.service";
 import { resetAccountTrust } from "../services/accountGovernance/cooldownLifecycle.service";
 import { toUserTrustAuditSnapshot } from "../dtos/admin/userTrustAuditSnapshot.dto";
+import { creatorEntitlementFinancialAllocationService, FinancialAllocationInput } from "../services/financial/creatorEntitlementFinancialAllocation.service";
+import { CreatorEntitlementFinancialAllocation } from "../models/creatorEntitlementFinancialAllocation.model";
 
 /* ==================== HELPERS ==================== */
 
@@ -366,20 +368,19 @@ export const decideAppeal = async (req: Request, res: Response) => {
   const adminId = req.user!.id;
   const { appealId } = req.params;
   const { action, note } = req.body;
+  const raw = req.body.financialAllocation as Record<string, unknown> | undefined;
+  const requestedAllocation = raw ? { creatorAmount: raw.creatorAmount, customerRefundAmount: raw.customerRefundAmount, platformAmount: raw.platformAmount, reasonReference: raw.reasonReference } as FinancialAllocationInput : undefined;
 
   if (!["REVERSE_DECISION", "CONFIRM_DECISION"].includes(action)) {
     throw new AppError("Invalid appeal decision action", 400);
   }
 
   const session = await mongoose.startSession();
-
+  let replayed = false;
   try {
-    session.startTransaction();
-
+    await session.withTransaction(async () => {
     const appeal = await Appeal.findById(appealId).session(session);
-    if (!appeal || appeal.status !== "OPEN") {
-      throw new AppError("Appeal not found or already decided", 404);
-    }
+    if (!appeal) throw new AppError("Appeal not found", 404);
 
     const dispute = await Dispute.findById(appeal.disputeId).session(session);
     if (!dispute) throw new AppError("Linked dispute not found", 404);
@@ -387,23 +388,37 @@ export const decideAppeal = async (req: Request, res: Response) => {
     const booking = await Booking.findById(dispute.bookingId).session(session);
     if (!booking) throw new AppError("Linked booking not found", 404);
 
+    const prior = await CreatorEntitlementFinancialAllocation.findOne({ authority: "APPEAL_FINAL_DECISION_V1", decisionId: String(appeal._id) }).session(session);
+    if (appeal.status !== "OPEN") {
+      const priorDecision = appeal.decision;
+      const sameDecision = priorDecision?.action === action && (priorDecision?.note ?? "") === (note ?? "");
+      const sameAllocation = !requestedAllocation
+        ? (action === "CONFIRM_DECISION" || !prior)
+        : !!prior && prior.approvedCreatorAmount === requestedAllocation.creatorAmount && prior.approvedCustomerRefundAmount === requestedAllocation.customerRefundAmount && prior.platformAmount === requestedAllocation.platformAmount && prior.reasonReference === requestedAllocation.reasonReference;
+      if (!sameDecision || !sameAllocation) throw new AppError("Appeal decision conflicts with the finalized decision", 409);
+      replayed = true;
+      return;
+    }
     const beforeAppeal = appeal.toObject();
     const beforeDispute = dispute.toObject();
 
-    if (action === "REVERSE_DECISION" && dispute.resolution?.action !== "NO_ACTION") {
-      throw new AppError("Financial dispute reversal is deferred to later Financial Domain phases", 409);
-    }
-
     appeal.status = action === "REVERSE_DECISION" ? "UPHELD" : "REJECTED";
+    const decidedAt = new Date();
     appeal.decision = {
       action,
       note,
       decidedBy: new mongoose.Types.ObjectId(adminId),
-      decidedAt: new Date(),
+      decidedAt,
     };
 
     await booking.save({ session });
     await appeal.save({ session });
+    let allocationInput = requestedAllocation;
+    if (!allocationInput && action === "CONFIRM_DECISION") {
+      const disputeAllocation = await CreatorEntitlementFinancialAllocation.findOne({ authority: "DISPUTE_FINAL_DECISION_V1", decisionId: String(dispute._id) }).session(session);
+      if (disputeAllocation) allocationInput = { creatorAmount: disputeAllocation.approvedCreatorAmount, customerRefundAmount: disputeAllocation.approvedCustomerRefundAmount, platformAmount: disputeAllocation.platformAmount, reasonReference: `Confirmed appeal: ${String(appeal._id)}` };
+    }
+    if (allocationInput) await creatorEntitlementFinancialAllocationService.record({ authority: "APPEAL_FINAL_DECISION_V1", decisionId: String(appeal._id), bookingId: dispute.bookingId, disputeId: dispute._id, appealId: appeal._id, decidedBy: new mongoose.Types.ObjectId(adminId), finalizedAt: decidedAt, allocation: allocationInput }, session);
 
     await createAuditLog({
       actorType: "ADMIN",
@@ -425,12 +440,9 @@ export const decideAppeal = async (req: Request, res: Response) => {
       after: { paymentStatus: booking.paymentStatus },
     });
 
-    await session.commitTransaction();
-    res.json({ message: "Appeal decided successfully" });
-  } catch (err) {
-    await session.abortTransaction();
-    throw err;
+    });
+    res.json({ message: "Appeal decided successfully", replayed });
   } finally {
-    session.endSession();
+    await session.endSession();
   }
 };

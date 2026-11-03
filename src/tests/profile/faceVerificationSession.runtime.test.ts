@@ -10,7 +10,7 @@ import { ProfileVerificationRequest } from "../../models/profileVerificationRequ
 import { UserProfile } from "../../models/userProfile.model";
 import User from "../../models/User";
 import { ImageModerationSurface } from "../../enums/imageModeration.enums";
-import { acceptFaceVerificationCapture, fingerprintAvatarReference, startFaceVerificationSession as startFaceVerificationSessionService } from "../../services/profile/faceVerificationSession.service";
+import { acceptFaceVerificationCapture, fingerprintAvatarReference, requireCompletedFaceSessionForInitialSubmission, startFaceVerificationSession as startFaceVerificationSessionService } from "../../services/profile/faceVerificationSession.service";
 import { bindCompletedFaceSessionToVerificationRequest, cancelFaceVerificationSession, expireFaceVerificationSessions, getOwnedFaceVerificationSession, invalidateFaceSessionsForAvatar } from "../../services/profile/faceVerificationSession.service";
 import { reconcileFaceVerificationEvidenceRetention, scheduleFaceEvidenceRetentionForDecision } from "../../services/profile/faceVerificationEvidenceCleanup.service";
 import { faceVerificationEvidenceRepository } from "../../repositories/faceVerificationEvidence.repository";
@@ -22,7 +22,7 @@ import { setBiometricReferenceAvatarValidationDependenciesForTests } from "../..
 import type { NextFunction, Request, Response } from "express";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
 import { withUserProfileTextAdmission } from "../textModeration/helpers/textModerationTestAdmission";
-import { Types } from "mongoose";
+import mongoose, { Types } from "mongoose";
 
 process.env.NODE_ENV = "test";
 
@@ -312,6 +312,67 @@ test("matching completed sessions replay while expired, terminal, and version-mi
   await cancelFaceVerificationSession({ userId: String(cancelledUser._id), sessionReference: cancelled.sessionReference });
   const afterCancel = await startFaceVerificationSession({ userId: String(cancelledUser._id), avatar: "https://example.test/avatar-cancelled.jpg" });
   assert.notEqual(String(afterCancel._id), String(cancelled._id));
+});
+
+test("expired unbound completed sessions are expired, cannot authorize submission, and are replaced at the same version", async () => {
+  const user = await User.create({ email: "face-expired-complete@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });
+  const avatar = "https://example.test/avatar-expired-complete.jpg";
+  const completed = await startFaceVerificationSession({ userId: String(user._id), avatar });
+  for (let index = 0; index < 5; index += 1) await acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: completed.sessionReference, challengeIndex: String(index), file: file(index) });
+  await FaceVerificationSession.updateOne({ _id: completed._id }, { $set: { expiresAt: new Date(Date.now() - 1) } });
+
+  await assert.rejects(
+    requireCompletedFaceSessionForInitialSubmission({ userId: String(user._id), avatar }),
+    /Complete live face verification/,
+  );
+
+  const profile = await UserProfile.findById(completed.profileId); assert.ok(profile);
+  profile.verificationSubmissionVersion = completed.profileSubmissionVersion; await profile.save();
+  const transaction = await mongoose.startSession();
+  try {
+    await transaction.withTransaction(async () => {
+      const bound = await bindCompletedFaceSessionToVerificationRequest({ profile, requestId: new Types.ObjectId(), session: transaction, actorId: user._id });
+      assert.equal(bound, null);
+    });
+  } finally {
+    await transaction.endSession();
+  }
+  assert.equal((await FaceVerificationSession.findById(completed._id))?.verificationRequestId, undefined);
+  profile.verificationSubmissionVersion = 0; await profile.save();
+
+  const replacement = await startFaceVerificationSession({ userId: String(user._id), avatar });
+  const expired = await FaceVerificationSession.findById(completed._id);
+  assert.notEqual(String(replacement._id), String(completed._id));
+  assert.equal(replacement.profileSubmissionVersion, completed.profileSubmissionVersion);
+  assert.equal(expired?.status, "EXPIRED");
+  assert.equal(expired?.isCurrent, false);
+  assert.ok(expired?.cleanupAfter);
+  assert.equal(await FaceVerificationEvidence.countDocuments({ sessionId: completed._id, status: "STORED", cleanupAfter: { $exists: true } }), 5);
+});
+
+test("expired completed sessions bound to verification requests retain their evidence lifecycle", async () => {
+  const user = await User.create({ email: "face-bound-retention@test.local", password: "test-password", status: "active", governanceState: "ACTIVE" });
+  const avatar = "https://example.test/avatar-bound-retention.jpg";
+  const completed = await startFaceVerificationSession({ userId: String(user._id), avatar });
+  for (let index = 0; index < 5; index += 1) await acceptFaceVerificationCapture({ userId: String(user._id), sessionReference: completed.sessionReference, challengeIndex: String(index), file: file(index) });
+  const profile = await UserProfile.findById(completed.profileId); assert.ok(profile);
+  profile.verificationSubmissionVersion = completed.profileSubmissionVersion; await profile.save();
+  const transaction = await mongoose.startSession();
+  const requestId = new Types.ObjectId();
+  try {
+    await transaction.withTransaction(async () => {
+      const bound = await bindCompletedFaceSessionToVerificationRequest({ profile, requestId, session: transaction, actorId: user._id });
+      assert.ok(bound);
+    });
+  } finally {
+    await transaction.endSession();
+  }
+  await FaceVerificationSession.updateOne({ _id: completed._id }, { $set: { expiresAt: new Date(Date.now() - 1) } });
+  await expireFaceVerificationSessions(new Date());
+  const retained = await FaceVerificationSession.findById(completed._id);
+  assert.equal(retained?.status, "CAPTURE_COMPLETE");
+  assert.equal(String(retained?.verificationRequestId), String(requestId));
+  assert.equal(await FaceVerificationEvidence.countDocuments({ sessionId: completed._id, status: "STORED", cleanupAfter: { $exists: true } }), 0);
 });
 
 test("concurrent starts converge on one compatible current session", async () => {

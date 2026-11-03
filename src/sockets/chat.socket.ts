@@ -149,6 +149,17 @@ export const chatSocket = (io: Server): void => {
 
 export const isUserOnline = (userId: string): boolean => onlineUsers.has(userId);
 export const getOnlineUsers = (): string[] => Array.from(onlineUsers.keys());
+export const getSocketServer = (): Server | null => socketServer;
+
+/** Best-effort post-commit refresh signal for every authenticated session of one creator. */
+export const emitBookingRequestsChanged = (creatorId: string): void => {
+  if (!socketServer || !mongoose.Types.ObjectId.isValid(creatorId)) return;
+  try {
+    socketServer.to(personalRoom(creatorId)).emit("booking:requests-changed", {});
+  } catch (error) {
+    console.warn("[bookingRequests] Socket refresh emission failed", error instanceof Error ? error.message : "unknown error");
+  }
+};
 
 export const emitIdentityChanged = (userId: string, payload: Record<string, unknown> = {}): void => {
   if (!socketServer) return;

@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { BookingTerminationActorType, BookingTerminationType } from "../enums/booking/bookingTerminationType.enum";
 import { bookingFinancialTerminationService } from "../services/financial/bookingFinancialTermination.service";
+import { getProvisionalCancellationReceipt } from "../middlewares/cancellationReceipt.middleware";
 
 export const cancelBookingByUser = async (req: Request, res: Response) => {
   const userId = req.user?.id;
@@ -12,6 +13,7 @@ export const cancelBookingByUser = async (req: Request, res: Response) => {
       actorId: userId,
       actorType: BookingTerminationActorType.CUSTOMER,
       terminationType: BookingTerminationType.CUSTOMER_CANCELLED,
+      receiptAt: getProvisionalCancellationReceipt(req),
       reason: typeof req.body?.reason === "string" ? req.body.reason : undefined,
     });
     return res.status(200).json({ message: "Booking cancelled", ...result });

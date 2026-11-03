@@ -3,7 +3,6 @@
 import { randomUUID } from "crypto";
 import { Types } from "mongoose";
 
-import { paymentRepository } from "../../repositories/payment.repository";
 import { IPayment } from "../../models/payment.model";
 import { PaymentMethod } from "../../enums/financial/paymentMethod.enum";
 import { PaymentProvider } from "../../enums/financial/paymentProvider.enum";
@@ -58,20 +57,13 @@ export class PaymentCreationService {
   async createPayment(input: CreatePaymentInput): Promise<IPayment> {
     const idempotencyKey = input.idempotencyKey ?? randomUUID();
 
-    const existing =
-      await paymentRepository.findByIdempotencyKey(idempotencyKey);
-
-    if (existing) {
-      return existing;
-    }
-
     return paymentService.createPayment({
       bookingId: input.bookingId.toString(),
       userId: input.userId.toString(),
       creatorId: input.creatorId.toString(),
       serviceAmount: { amount: input.serviceAmount, currency: input.currency },
-      provider: input.provider ?? PaymentProvider.INTERNAL,
-      method: input.method ?? PaymentMethod.INTERNAL,
+      provider: input.provider,
+      method: input.method,
       idempotencyKey,
     });
   }

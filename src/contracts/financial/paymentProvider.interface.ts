@@ -1,6 +1,7 @@
 // backend/src/contracts/financial/paymentProvider.interface.ts
 
 import { PaymentProvider } from "../../enums/financial/paymentProvider.enum";
+import { ProviderRoutingCapabilityProfile } from "./providerRouting.types";
 
 import {
   CreatePaymentSessionRequest,
@@ -15,6 +16,8 @@ import {
   CreateRefundResponse,
   VerifyWebhookRequest,
   VerifyWebhookResponse,
+  TerminationEvidenceRequest,
+  TerminationEvidence,
 } from "./paymentProvider.types";
 
 /**
@@ -29,6 +32,11 @@ export interface PaymentProviderInterface {
    * Provider identifier.
    */
   readonly provider: PaymentProvider;
+
+  /** Explicit adapter guarantees for future disposition refunds; absent means unsupported. */
+  readonly dispositionRefundCapabilities?: { fullRefund: boolean; partialRefund: boolean; idempotent: boolean; authenticatedLookup: boolean };
+  /** Static, approved capability evidence for routing only; absence is unknown. */
+  readonly routingCapabilityProfile?: ProviderRoutingCapabilityProfile;
 
   /**
    * Creates a provider payment session/order.
@@ -60,6 +68,9 @@ export interface PaymentProviderInterface {
    * Creates a refund.
    */
   createRefund(request: CreateRefundRequest): Promise<CreateRefundResponse>;
+
+  /** Read-only authenticated evidence; absent capability means unsupported. */
+  getTerminationEvidence?(request: TerminationEvidenceRequest): Promise<TerminationEvidence>;
 
   /**
    * Verifies and normalizes incoming webhooks.

@@ -22,8 +22,10 @@ import payoutDestinationRoutes from "./payoutDestination.routes";
 import bookingRoutes from "./booking.routes";
 import userCancelBookingRoutes from "./userCancelBooking.routes";
 import disputeRoutes from "./dispute.routes";
+import appealRoutes from "./appeal.routes";
 import reviewRoutes from "./review.routes";
 import chatRoutes from "./chat.routes";
+import notificationRoutes from "./notification.routes";
 
 import adminDashboardRoutes from "./admin.dashboard.routes";
 import adminActionsRoutes from "./admin.actions.routes";
@@ -61,6 +63,7 @@ router.use("/bookings/creator", creatorCancelBookingRoutes); // ✅ IMPORTANT
 
 /* ================= DISPUTES ================= */
 router.use("/disputes", disputeRoutes);
+router.use("/appeals", appealRoutes);
 
 /* ================= REVIEWS ================= */
 router.use("/reviews", reviewRoutes);
@@ -68,14 +71,19 @@ router.use("/reviews", reviewRoutes);
 /* ================= CREATORS ================= */
 router.use("/creator-applications", creatorApplicationRoutes);
 router.use("/creator", creatorProfileRoutes);
+// Static booking decision/count paths must precede the parameterized
+// /creator/bookings/:id detail route in creatorSecureRoutes.
+router.use("/creator", creatorBookingDecisionRoutes);
 router.use("/creator", creatorSecureRoutes);
 router.use("/creator", creatorDashboardRoutes);
 router.use("/creator", creatorAvailabilityRoutes);
-router.use("/creator", creatorBookingDecisionRoutes);
 router.use("/creator", payoutDestinationRoutes);
 
 /* ================= CHAT ================= */
 router.use("/chat", chatRoutes);
+
+/* ================= NOTIFICATIONS ================= */
+router.use("/notifications", notificationRoutes);
 
 /* ================= CONTROL PLANE ================= */
 router.use("/control-plane/feature-flags", controlPlaneFeatureFlagsRoutes);

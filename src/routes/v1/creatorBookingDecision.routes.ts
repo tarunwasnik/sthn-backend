@@ -6,6 +6,7 @@ import { requireActiveCreator } from "../../middlewares/creator.middleware";
 import {
   decideBooking,
   getCreatorBookings,
+  getCreatorPendingBookingRequestCount,
 } from "../../controllers/creatorBookingDecision.controller";
 
 const router = Router();
@@ -18,6 +19,13 @@ router.get(
   protect,
   requireActiveCreator,
   getCreatorBookings
+);
+
+router.get(
+  "/bookings/pending-count",
+  protect,
+  requireActiveCreator,
+  getCreatorPendingBookingRequestCount
 );
 
 /**

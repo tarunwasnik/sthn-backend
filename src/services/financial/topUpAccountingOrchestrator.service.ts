@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { assertFinancialSimulatorAllowed } from "./simulatorAccess.service";
 import { Types } from "mongoose";
 
 import { ledgerService } from "./ledger.service";
@@ -392,6 +393,7 @@ export class TopUpAccountingOrchestratorService {
   }
 
   async complete(topUpReference: string): Promise<TopUpAccountingResult> {
+    assertFinancialSimulatorAllowed();
     const request = await walletTopUpRequestRepository.findByReferenceForAccounting(topUpReference);
     if (!request) throw this.error("Top-up request was not found.", "NOT_FOUND", 404);
     if (request.status === WalletTopUpRequestStatus.COMPLETED) {

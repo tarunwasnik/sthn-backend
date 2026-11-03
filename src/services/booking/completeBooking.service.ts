@@ -16,6 +16,13 @@ import { FeatureFlagGuard } from "../controlPlane/featureFlagGuard.service";
 import { bookingWalletReservationCaptureService } from "../financial/bookingWalletReservationCapture.service";
 import { finalizePendingSuspension } from "../accountGovernance/suspensionFinalizer.service";
 import { createBookingCompletionTiming } from "./bookingCompletionTiming.service";
+import { createBookingNotifications, deliverCreatedBookingNotifications } from "../notification/bookingNotification.service";
+import {
+  AuthorizedAllocationDecision,
+  CreatorEntitlementService,
+} from "../financial/creatorEntitlement.service";
+import { marketplacePricingService } from "../financial/marketplacePricing.service";
+import { SUPPORTED_CURRENCIES, SupportedCurrency } from "../../constants/financial/supportedCurrencies";
 
 interface CompleteBookingInput {
   bookingId: string;
@@ -31,6 +38,61 @@ interface CompletionInput {
 }
 
 const operationKey = (bookingId: string) => `booking-completion:${bookingId}`;
+const CREATOR_ENTITLEMENT_COMPLETION_AUTHORITY = "BOOKING_COMPLETION_V1";
+
+const completionEntitlementService = new CreatorEntitlementService({
+  async readAuthorized(authority, decisionId, session): Promise<AuthorizedAllocationDecision | null> {
+    if (authority !== CREATOR_ENTITLEMENT_COMPLETION_AUTHORITY) return null;
+    const bookingId = decisionId.startsWith("booking-completion:")
+      ? decisionId.slice("booking-completion:".length)
+      : "";
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) return null;
+
+    const booking = await bookingRepository.findById(new Types.ObjectId(bookingId), session);
+    if (
+      !booking ||
+      booking.status !== "COMPLETED" ||
+      !booking.completedAt ||
+      booking.completionOperationKey !== decisionId ||
+      !booking.paymentId ||
+      booking.paymentMethod === PaymentMethod.WALLET ||
+      !SUPPORTED_CURRENCIES.includes(booking.currency as SupportedCurrency)
+    ) return null;
+
+    marketplacePricingService.validate({
+      serviceAmount: booking.serviceAmount,
+      platformFeeAmount: booking.platformFeeAmount,
+      commissionAmount: booking.commissionAmount,
+      creatorAmount: booking.creatorAmount,
+      totalAmount: booking.totalAmount,
+      currency: booking.currency as SupportedCurrency,
+    });
+    const platformAmount = booking.platformFeeAmount + booking.commissionAmount;
+    if (!Number.isSafeInteger(platformAmount) || booking.creatorAmount + platformAmount !== booking.totalAmount) {
+      return null;
+    }
+    return {
+      authority,
+      decisionId,
+      bookingId: booking._id,
+      paymentId: booking.paymentId,
+      creatorId: booking.creatorId,
+      currency: booking.currency as SupportedCurrency,
+      totalAmount: booking.totalAmount,
+      creatorAmount: booking.creatorAmount,
+      platformAmount,
+      customerRefundAmount: 0,
+    };
+  },
+});
+
+const recognizeProviderCompletionEntitlement = async (
+  bookingId: Types.ObjectId,
+  session?: mongoose.ClientSession,
+) => completionEntitlementService.recognize({
+  authority: CREATOR_ENTITLEMENT_COMPLETION_AUTHORITY,
+  decisionId: operationKey(String(bookingId)),
+}, session);
 
 const assertAutoTiming = async (
   slotIds: Types.ObjectId[],
@@ -102,7 +164,8 @@ const completeBookingApplication = async (input: CompletionInput) => {
     const payment = initial.paymentId
       ? await paymentRepository.findById(initial.paymentId)
       : null;
-    return { booking: initial, payment, replay: true };
+    const entitlement = await recognizeProviderCompletionEntitlement(initial._id);
+    return { booking: initial, payment, entitlement, replay: true };
   }
 
   const actorId = input.actorId && mongoose.Types.ObjectId.isValid(input.actorId)
@@ -112,6 +175,7 @@ const completeBookingApplication = async (input: CompletionInput) => {
   let result: unknown;
   let affectedUserId: string | null = null;
   let affectedCreatorId: string | null = null;
+  let notificationResults: Awaited<ReturnType<typeof createBookingNotifications>> = [];
   try {
     await session.withTransaction(async () => {
       const booking = await bookingRepository.findById(bookingId, session);
@@ -222,6 +286,7 @@ const completeBookingApplication = async (input: CompletionInput) => {
       }
       affectedUserId = completed.userId.toString();
       affectedCreatorId = completed.creatorId.toString();
+      notificationResults = await createBookingNotifications(completed, "COMPLETED", [{ id: String(completed.userId), actor: "user" }, { id: String(completed.creatorId), actor: "creator" }], session);
 
       if (payment.method === PaymentMethod.WALLET) {
         result = await bookingWalletReservationCaptureService.capture({
@@ -232,7 +297,8 @@ const completeBookingApplication = async (input: CompletionInput) => {
           session,
         });
       } else {
-        result = { booking: completed, payment, replay: false };
+        const entitlement = await recognizeProviderCompletionEntitlement(completed._id, session);
+        result = { booking: completed, payment, entitlement, replay: false };
       }
     });
   } catch (error) {
@@ -253,12 +319,14 @@ const completeBookingApplication = async (input: CompletionInput) => {
       const payment = winner.paymentId
         ? await paymentRepository.findById(winner.paymentId)
         : null;
-      return { booking: winner, payment, replay: true };
+      const entitlement = await recognizeProviderCompletionEntitlement(winner._id);
+      return { booking: winner, payment, entitlement, replay: true };
     }
     throw error;
   } finally {
     await session.endSession();
   }
+  deliverCreatedBookingNotifications(notificationResults);
 
   if (input.actorType === BookingCompletionActorType.CREATOR) {
     if (affectedUserId) await finalizePendingSuspension({ userId: affectedUserId });

@@ -1,4 +1,5 @@
 import mongoose, { ClientSession, Types } from "mongoose";
+import { assertFinancialSimulatorAllowed } from "./simulatorAccess.service";
 
 import { toWalletConversionAccountingResponseDto } from
   "../../dtos/wallet/walletConversionAccounting.response.dto";
@@ -615,6 +616,7 @@ export class WalletConversionAccountingService {
   }
 
   async account(reference: string) {
+    assertFinancialSimulatorAllowed();
     const normalized = this.normalize(reference);
     let request = await this.loadRequest(normalized);
     if ([WalletConversionRequestStatus.COMPLETED,

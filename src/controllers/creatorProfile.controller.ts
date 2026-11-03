@@ -1,12 +1,12 @@
 //backend/src/controllers/creatorProfile.controller.ts
 
 import { Request, Response } from "express";
-import mongoose from "mongoose";
+import mongoose, { Types } from "mongoose";
 import { CreatorProfile } from "../models/creatorProfile.model";
+import { creatorMediaAdmissionPersistenceService } from "../services/creator/creatorMediaAdmissionPersistence.service";
+import { parseCreatorMediaClaims } from "../services/creator/creatorMediaAdmissionContract";
 import { catchAsync } from "../utils/catchAsync";
 import { AppError } from "../utils/AppError";
-import { v2 as cloudinary } from "cloudinary";
-import { extractPublicId } from "../utils/extractPublicId";
 
 /* ================= GET CREATOR PROFILE ================= */
 
@@ -28,89 +28,43 @@ export const getMyCreatorProfile = catchAsync(
 
 export const updateMyCreatorProfile = catchAsync(
   async (req: Request, res: Response) => {
-    const userId = new mongoose.Types.ObjectId(req.user!.id);
-
-    const {
-      displayName,
-      avatarUrl,
-      coverUrl,
-      bio,
-      languages,
-      categories,
-      city,
-      country,
-      media,
-    } = req.body;
-
-    const profile = await CreatorProfile.findOne({ userId });
-
-    if (!profile) {
-      throw new AppError("Creator profile not found", 404);
+    const actorId = new Types.ObjectId(req.user!.id);
+    if (req.body.avatarUrl !== undefined || req.body.coverUrl !== undefined) {
+      throw new AppError("Creator profile media must use image admission claims", 400);
     }
-
-    /* 🔥 CLOUDINARY CLEANUP */
-
-    if (
-      avatarUrl !== undefined &&
-      profile.avatarUrl &&
-      avatarUrl !== profile.avatarUrl
-    ) {
-      try {
-        const publicId = extractPublicId(profile.avatarUrl);
-        if (publicId) await cloudinary.uploader.destroy(publicId);
-      } catch (e) {
-        console.error("Avatar delete failed:", e);
-      }
+    let claims;
+    try {
+      claims = parseCreatorMediaClaims({ avatar: req.body.avatar, cover: req.body.cover, media: req.body.media });
+    } catch (error) {
+      throw new AppError(error instanceof Error ? error.message : "Invalid creator profile media claims", 400);
     }
-
-    if (
-      coverUrl !== undefined &&
-      profile.coverUrl &&
-      coverUrl !== profile.coverUrl
-    ) {
-      try {
-        const publicId = extractPublicId(profile.coverUrl);
-        if (publicId) await cloudinary.uploader.destroy(publicId);
-      } catch (e) {
-        console.error("Cover delete failed:", e);
-      }
+    const profileId = (await CreatorProfile.findOne({ userId: actorId }).select("_id").lean())?._id;
+    if (!profileId) throw new AppError("Creator profile not found", 404);
+    try {
+      await creatorMediaAdmissionPersistenceService.persist({
+        actorId, kind: "CREATOR_PROFILE", claims,
+        loadOwnedResource: async (session) => {
+          const profile = await CreatorProfile.findOne({ _id: profileId, userId: actorId }).session(session).exec();
+          return profile ? { id: profile._id, actorId: profile.userId, media: { avatar: profile.avatarUrl, cover: profile.coverUrl, media: profile.media ?? [] } } : null;
+        },
+        persistMedia: async ({ session, resource, media }) => {
+          const profile = await CreatorProfile.findOne({ _id: resource.id, userId: actorId }).session(session).exec();
+          if (!profile) throw new Error("Creator profile not found");
+          const { displayName, bio, languages, categories, city, country } = req.body;
+          if (displayName !== undefined) profile.displayName = displayName;
+          if (bio !== undefined) profile.bio = bio;
+          if (languages !== undefined) profile.languages = languages;
+          if (categories !== undefined) profile.categories = categories;
+          if (city !== undefined) profile.city = city;
+          if (country !== undefined) profile.country = country;
+          profile.avatarUrl = media.avatar ?? null; profile.coverUrl = media.cover ?? null; profile.media = [...media.media];
+          await profile.save({ session });
+        },
+      });
+    } catch (error) {
+      throw new AppError(error instanceof Error ? error.message : "Creator profile update failed", 400);
     }
-
-     // 🔥 MEDIA (STRICT SAME AS SERVICES)
-    if (media !== undefined) {
-      const oldMedia = profile.media || [];
-      const newMedia = Array.isArray(media) ? media : [];
-
-      const removedMedia = oldMedia.filter(
-        (oldUrl) => !newMedia.includes(oldUrl)
-      );
-
-      for (const url of removedMedia) {
-        try {
-          const publicId = extractPublicId(url);
-          if (publicId) {
-            await cloudinary.uploader.destroy(publicId);
-          }
-        } catch (err) {
-          console.error("Media delete failed:", err);
-        }
-      }
-    }
-
-
-    /* ================= UPDATE ================= */
-
-    if (displayName !== undefined) profile.displayName = displayName;
-    if (avatarUrl !== undefined) profile.avatarUrl = avatarUrl;
-    if (coverUrl !== undefined) profile.coverUrl = coverUrl;
-    if (bio !== undefined) profile.bio = bio;
-    if (languages !== undefined) profile.languages = languages;
-    if (categories !== undefined) profile.categories = categories;
-    if (city !== undefined) profile.city = city;
-    if (country !== undefined) profile.country = country;
-    if (media !== undefined) profile.media = media;
-
-    await profile.save();
+    const profile = await CreatorProfile.findOne({ _id: profileId, userId: actorId });
 
     res.status(200).json({
       message: "Creator profile updated",

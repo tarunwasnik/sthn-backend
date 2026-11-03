@@ -19,6 +19,7 @@ import {
   getControlById,
   createControl,
   expireControl,
+  previewControlDecision,
 } from "../../controllers/adminActions/adminControls.controller";
 
 const router = Router();
@@ -83,6 +84,13 @@ router.get(
   protect,
   authorizeRoles("admin"),
   getControlById
+);
+
+router.post(
+  "/controls/preview",
+  protect,
+  authorizeRoles("admin"),
+  previewControlDecision,
 );
 
 router.post(

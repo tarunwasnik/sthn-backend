@@ -1,4 +1,5 @@
 import mongoose, { ClientSession, Types } from "mongoose";
+import { assertFinancialSimulatorAllowed } from "./simulatorAccess.service";
 
 import { AuditAction } from "../../enums/financial/auditAction.enum";
 import { CreatorWithdrawalFinalizationOutcome } from
@@ -885,6 +886,7 @@ export class CreatorWithdrawalFinalizationService {
   }
 
   async finalize(withdrawalReference: string) {
+    assertFinancialSimulatorAllowed();
     if (typeof withdrawalReference !== "string" ||
       !withdrawalReference.trim()) {
       this.fail(

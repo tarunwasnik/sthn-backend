@@ -12,6 +12,13 @@ import { BookingTerminationActorType, BookingTerminationType } from "../enums/bo
 import { bookingFinancialTerminationService } from "../services/financial/bookingFinancialTermination.service";
 import User from "../models/User";
 import { resolveAccountGovernance } from "../services/accountGovernance/accountGovernanceResolver.service";
+import { createBookingNotifications, deliverCreatedBookingNotifications } from "../services/notification/bookingNotification.service";
+import { emitBookingRequestsChanged } from "../sockets/chat.socket";
+import { Payment } from "../models/payment.model";
+import { PaymentOperation } from "../models/paymentOperation.model";
+import { PaymentMethod } from "../enums/financial/paymentMethod.enum";
+import { PaymentStatus } from "../enums/financial/paymentStatus.enum";
+import { PaymentOperationStatus } from "../enums/financial/paymentOperationStatus.enum";
 
 /* =========================================================
    GET CREATOR BOOKINGS (EXTENDED WITH USER + SLOTS)
@@ -157,6 +164,21 @@ const enrichedBookings = bookings.map((b: any) => {
   }
 };
 
+export const getCreatorPendingBookingRequestCount = async (req: Request, res: Response) => {
+  if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+
+  try {
+    const pendingRequestCount = await Booking.countDocuments({
+      creatorId: req.user.id,
+      status: "REQUESTED",
+      expiresAt: { $gt: new Date() },
+    });
+    return res.status(200).json({ pendingRequestCount });
+  } catch (err: any) {
+    return res.status(500).json({ message: err.message || "Failed to count booking requests" });
+  }
+};
+
 /* =========================================================
    DECIDE BOOKING (UNCHANGED)
 ========================================================= */
@@ -212,6 +234,7 @@ export const decideBooking = async (req: Request, res: Response) => {
         actorType: BookingTerminationActorType.CREATOR,
         terminationType: BookingTerminationType.CREATOR_REJECTED,
       });
+      if (!result.replay) emitBookingRequestsChanged(user.id);
       return res.status(200).json({ message: "Booking rejected successfully", ...result });
     } catch (error: any) {
       return res.status(error.statusCode ?? 400).json({ code: error.code, message: error.message });
@@ -242,6 +265,7 @@ export const decideBooking = async (req: Request, res: Response) => {
   }
 
   const session = await mongoose.startSession();
+  let notificationResults: Awaited<ReturnType<typeof createBookingNotifications>> = [];
 
   try {
     session.startTransaction();
@@ -250,6 +274,7 @@ export const decideBooking = async (req: Request, res: Response) => {
       _id: bookingId,
       creatorId: user.id,
       status: "REQUESTED",
+      "terminationClaim.status": { $ne: "ACTIVE" },
     }).session(session);
 
     if (!booking) {
@@ -279,6 +304,23 @@ export const decideBooking = async (req: Request, res: Response) => {
     }
 
     if (decision === "ACCEPT") {
+      if (booking.paymentMethod && booking.paymentMethod !== PaymentMethod.WALLET) {
+        const payment = booking.paymentId ? await Payment.findById(booking.paymentId).session(session) : null;
+        const operation = payment ? await PaymentOperation.findOne({ paymentId: payment._id }).select("+userId +idempotencyKey").session(session) : null;
+        if (!payment || payment.status !== PaymentStatus.CAPTURED ||
+            booking.paymentStatus !== "PAID" || !booking.isPayable ||
+            !payment.bookingId.equals(booking._id) || !payment.userId.equals(booking.userId) ||
+            !payment.creatorId.equals(booking.creatorId) || payment.amount !== booking.totalAmount ||
+            payment.currency !== booking.currency || payment.method !== booking.paymentMethod ||
+            !operation || operation.status !== PaymentOperationStatus.CONFIRMED || !payment.providerPaymentId ||
+            !operation.paymentId.equals(payment._id) || !operation.bookingId.equals(booking._id) ||
+            !operation.userId.equals(booking.userId) || operation.idempotencyKey !== payment.idempotencyKey ||
+            operation.provider !== payment.provider || operation.providerPaymentId !== payment.providerPaymentId ||
+            operation.requestedAmount !== payment.amount || operation.requestedCurrency !== payment.currency ||
+            operation.verifiedAmount !== payment.amount || operation.verifiedCurrency !== payment.currency) {
+          throw new Error("Provider payment is not verified for this booking.");
+        }
+      }
       const hasNonLocked = slots.some(
         (slot) => slot.status !== "LOCKED"
       );
@@ -301,14 +343,18 @@ export const decideBooking = async (req: Request, res: Response) => {
       }
 
       booking.status = "CONFIRMED";
+      booking.creatorAcceptedAt = new Date();
     } else {
       throw new Error("Creator rejection must be processed by the Financial termination service.");
     }
 
     await booking.save({ session });
+    notificationResults = await createBookingNotifications(booking, "CONFIRMED", [{ id: String(booking.userId), actor: "user" }], session);
 
     await session.commitTransaction();
     session.endSession();
+    deliverCreatedBookingNotifications(notificationResults);
+    emitBookingRequestsChanged(String(booking.creatorId));
 
     return res.status(200).json({
       message: `Booking ${decision.toLowerCase()} successfully`,

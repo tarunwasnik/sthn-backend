@@ -230,7 +230,7 @@ RefundSchema.index({ status: 1, createdAt: -1 });
 
 RefundSchema.index({ provider: 1, status: 1 });
 
-RefundSchema.index({ providerRefundId: 1 });
+RefundSchema.index({ providerRefundId: 1 }, { unique: true, partialFilterExpression: { providerRefundId: { $type: "string" } } });
 
 RefundSchema.index({ settlementId: 1 });
 

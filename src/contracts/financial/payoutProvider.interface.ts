@@ -1,4 +1,5 @@
 import { PaymentProvider } from "../../enums/financial/paymentProvider.enum";
+import { ProviderRoutingCapabilityProfile } from "./providerRouting.types";
 import {
   InitializePayoutRequest,
   InitializePayoutResponse,
@@ -6,6 +7,7 @@ import {
 
 export interface PayoutProviderInterface {
   readonly provider: PaymentProvider;
+  readonly routingCapabilityProfile?: ProviderRoutingCapabilityProfile;
 
   initializePayout(
     request: InitializePayoutRequest,

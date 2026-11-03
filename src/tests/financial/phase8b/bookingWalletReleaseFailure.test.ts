@@ -19,6 +19,7 @@ import { PaymentMethod } from "../../../enums/financial/paymentMethod.enum";
 import { PaymentStatus } from "../../../enums/financial/paymentStatus.enum";
 import { BookingWalletReservationReleaseError } from "../../../errors/financial/BookingWalletReservationReleaseError";
 import { bookingFinancialTerminationService } from "../../../services/financial/bookingFinancialTermination.service";
+import { bookingRepository } from "../../../repositories/booking.repository";
 import { walletProjectionService } from "../../../services/wallet/walletProjection.service";
 import {
   createActiveWalletBooking,
@@ -56,6 +57,7 @@ const assertNoReleaseMutation = async (
     Slot.find({ _id: { $in: slotIds } }),
   ]);
   assert.equal(booking.status, "REQUESTED");
+  assert.equal((await Booking.findById(bookingId).select("+terminationEvidence").orFail()).terminationEvidence, undefined);
   assert.equal(payment.status, PaymentStatus.AUTHORIZED);
   assert.equal(reservation.status, BookingFundReservationStatus.ACTIVE);
   assert.ok(slots.every((slot) => slot.status === "LOCKED"));
@@ -69,6 +71,21 @@ const assertNoReleaseMutation = async (
 };
 
 export const registerBookingWalletReleaseFailureTests = () => {
+  test("evidence finalization failure rolls back wallet release and booking", async (context) => {
+    const server = await startReleaseHttpServer();
+    try {
+      const { fixture, booking } = await createActiveWalletBooking(server.baseUrl, { walletAmount: 1_000, slotAmounts: [400] });
+      const original = bookingRepository.writeFinalTerminationEvidence.bind(bookingRepository);
+      context.mock.method(bookingRepository, "writeFinalTerminationEvidence", async (...args: Parameters<typeof original>) => {
+        await original(...args);
+        throw new Error("injected evidence failure");
+      });
+      await assert.rejects(() => reject(String(booking._id), String(fixture.actors.creatorId)), /injected evidence failure/);
+      await assertNoReleaseMutation(String(booking._id), booking.paymentId as Types.ObjectId, booking.slotIds);
+      const wallet = await Wallet.findById(fixture.actors.wallet._id).orFail();
+      assert.equal(wallet.reservedBalance, 420);
+    } finally { await server.close(); }
+  });
   test("phase8b insufficient reserved balance fails closed and rolls back lifecycle changes", async () => {
     const server = await startReleaseHttpServer();
     try {

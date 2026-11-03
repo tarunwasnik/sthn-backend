@@ -15,6 +15,7 @@ export interface ApplyPayoutDestinationVerificationDecisionInput {
   rejectionCode?: string;
   rejectionReason?: string;
   note?: string;
+  verifiedCountry?: string;
 }
 
 export interface PayoutDestinationVerificationDecisionResult {
@@ -174,13 +175,14 @@ export class PayoutDestinationVerificationService {
 
     const note = this.normalizeOptionalText(input.note, "note");
     if (input.action === PayoutDestinationVerificationAction.VERIFY) {
+      if (!input.verifiedCountry || !/^[A-Za-z]{2}$/.test(input.verifiedCountry)) throw new PayoutDestinationError("Verified destination country is required.", "INVALID_PAYOUT_DESTINATION_VERIFICATION_INPUT");
       if (input.rejectionCode !== undefined || input.rejectionReason !== undefined) {
         throw new PayoutDestinationError(
           "Verification decisions cannot include rejection details.",
           "INVALID_PAYOUT_DESTINATION_VERIFICATION_INPUT",
         );
       }
-      return { ...input, note };
+      return { ...input, note, verifiedCountry: input.verifiedCountry.toUpperCase() };
     }
 
     const rejectionCode = this.normalizeRejectionCode(input.rejectionCode);
@@ -228,6 +230,7 @@ export class PayoutDestinationVerificationService {
           verificationStatus: PayoutDestinationVerificationStatus.VERIFIED,
           verifiedAt: decisionAt,
           verifiedBy: new mongoose.Types.ObjectId(input.adminActorId),
+          verifiedCountry: input.verifiedCountry,
           ...(input.note ? { verificationNote: input.note } : {}),
         },
         $unset: {

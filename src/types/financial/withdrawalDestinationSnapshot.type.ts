@@ -17,6 +17,10 @@ export interface IWithdrawalDestinationSnapshot {
   ifscDisplay?: string;
   verificationStatus: PayoutDestinationVerificationStatus.VERIFIED;
   verifiedAt: Date;
+  /** Optional for historical snapshots created before destination-country authority. */
+  declaredCountry?: string;
+  /** Optional for historical snapshots; absence is never treated as verification evidence. */
+  verifiedCountry?: string;
   snapshotCreatedAt: Date;
   encryptedPayload: EncryptedWithdrawalDestinationSnapshotPayload;
 }

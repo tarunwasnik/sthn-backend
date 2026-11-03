@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { BookingTerminationActorType, BookingTerminationType } from "../enums/booking/bookingTerminationType.enum";
 import { bookingFinancialTerminationService } from "../services/financial/bookingFinancialTermination.service";
+import { getProvisionalCancellationReceipt } from "../middlewares/cancellationReceipt.middleware";
 
 export const cancelBookingByCreator = async (req: Request, res: Response) => {
   if (!req.user?.id) return res.status(401).json({ message: "Unauthorized" });
@@ -10,6 +11,7 @@ export const cancelBookingByCreator = async (req: Request, res: Response) => {
       actorId: req.user.id,
       actorType: BookingTerminationActorType.CREATOR,
       terminationType: BookingTerminationType.CREATOR_CANCELLED,
+      receiptAt: getProvisionalCancellationReceipt(req),
       reason: typeof req.body.reason === "string" ? req.body.reason : undefined,
     });
     return res.status(200).json({ message: "Booking cancelled by creator", ...result });

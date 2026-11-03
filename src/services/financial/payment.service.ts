@@ -21,6 +21,7 @@ import { PaymentStatus } from "../../enums/financial/paymentStatus.enum";
 import { PaymentMethod } from "../../enums/financial/paymentMethod.enum";
 
 import { PaymentProvider } from "../../enums/financial/paymentProvider.enum";
+import { paymentProviderRegistry } from "./paymentProviderRegistry.service";
 
 import { PaymentFailureReason } from "../../enums/financial/paymentFailureReason.enum";
 import { PaymentPricingSnapshot, paymentPricingService } from "./paymentPricing.service";
@@ -55,6 +56,13 @@ export interface CreatePaymentInput {
 
   attributes?: Record<string, unknown>;
   pricingSnapshot?: PaymentPricingSnapshot;
+  checkoutContext?: {
+    quoteId: string;
+    quoteFingerprint: string;
+    financialPolicyVersion: string;
+    financialPolicyContentReference: string | null;
+    financialPolicyAcceptedAt?: Date;
+  };
 
   /**
    * Allows callers that already coordinate a MongoDB transaction to persist
@@ -111,6 +119,11 @@ export class PaymentService {
   /* -------------------------------------------------------------------------- */
 
   async createPayment(input: CreatePaymentInput): Promise<IPayment> {
+    if (!input.method) throw new PaymentError("Payment method is required.", "PAYMENT_PROVIDER_UNAVAILABLE");
+    if (input.method !== PaymentMethod.WALLET) {
+      if (!input.provider) throw new PaymentError("Payment provider is required.", "PAYMENT_PROVIDER_UNAVAILABLE");
+      paymentProviderRegistry.select({ provider: input.provider, currency: input.serviceAmount.currency, operation: "PAYMENT", requiredCapabilities: ["session", "verify", "status"] });
+    }
     this.validateObjectId(input.bookingId, "booking id");
 
     this.validateObjectId(input.userId, "user id");
@@ -133,6 +146,9 @@ export class PaymentService {
       );
 
       if (existing) {
+        if (input.method !== PaymentMethod.WALLET && (existing.provider !== input.provider || existing.method !== input.method)) {
+          throw new PaymentError("Payment replay provider identity conflicts with the existing payment.", "PAYMENT_PROVIDER_LINK_CONFLICT");
+        }
         return existing;
       }
     }
@@ -157,6 +173,13 @@ export class PaymentService {
       pricingPolicy: pricing.pricingPolicy,
       pricingVersion: pricing.pricingVersion,
       pricingCalculatedAt: new Date(),
+      ...(input.checkoutContext ? {
+        checkoutQuoteId: input.checkoutContext.quoteId,
+        checkoutQuoteFingerprint: input.checkoutContext.quoteFingerprint,
+        financialPolicyVersion: input.checkoutContext.financialPolicyVersion,
+        ...(input.checkoutContext.financialPolicyContentReference ? { financialPolicyContentReference: input.checkoutContext.financialPolicyContentReference } : {}),
+        ...(input.checkoutContext.financialPolicyAcceptedAt ? { financialPolicyAcceptedAt: input.checkoutContext.financialPolicyAcceptedAt } : {}),
+      } : {}),
 
       provider: input.provider ?? PaymentProvider.INTERNAL,
 

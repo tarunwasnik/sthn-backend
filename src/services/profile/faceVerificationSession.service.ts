@@ -27,7 +27,9 @@ const challengeSequence = (): FaceVerificationChallenge[] => {
 };
 
 const expireIfNeeded = async (session: FaceVerificationSessionDocument) => {
-  if (["CREATED", "CAPTURING"].includes(session.status) && session.expiresAt.getTime() <= Date.now()) {
+  const canExpire = ["CREATED", "CAPTURING"].includes(session.status)
+    || (session.status === "CAPTURE_COMPLETE" && !session.verificationRequestId);
+  if (canExpire && session.expiresAt.getTime() <= Date.now()) {
     const transitioned = await faceVerificationSessionRepository.expire(session._id, new Date(), cleanAt());
     if (transitioned) {
       await faceVerificationEvidenceRepository.setCleanupForSession(transitioned._id, transitioned.cleanupAfter!);
@@ -44,7 +46,7 @@ const isSameSubmission = (session: FaceVerificationSessionDocument, input: Sessi
   session.isCurrent && String(session.userId) === String(input.userId) && session.avatarFingerprint === input.avatarFingerprint && session.profileSubmissionVersion === input.targetVersion && faceVerificationAvatarCandidateMatches(session.avatarCandidate, input.avatarCandidate);
 const isReusableCurrentSession = (session: FaceVerificationSessionDocument, input: SessionAuthority) => {
   if (!isSameSubmission(session, input) || !hasValidChallengeSequence(session)) return false;
-  if (["CREATED", "CAPTURING"].includes(session.status) && session.expiresAt.getTime() <= Date.now()) return false;
+  if (session.expiresAt.getTime() <= Date.now()) return false;
   if (session.status === "CREATED") return session.acceptedCaptureCount === 0;
   if (session.status === "CAPTURE_COMPLETE") return session.acceptedCaptureCount === session.requiredCaptureCount;
   return false;
@@ -251,7 +253,7 @@ export const requireCompletedFaceSessionForInitialSubmission = async (input: { u
   }
   const expectedVersion = Math.max(1, (profile.verificationSubmissionVersion ?? 0) + 1);
   const session = await faceVerificationSessionRepository.findCurrentCompletedForInitialSubmission({ profileId: profile._id, userId, version: expectedVersion, avatarFingerprint: fingerprintAvatarReference(input.avatar) });
-  if (!session) throw new AppError("Complete live face verification for the current avatar before submitting.", 409);
+  if (!session || session.expiresAt.getTime() <= Date.now()) throw new AppError("Complete live face verification for the current avatar before submitting.", 409);
   await requireBiometricReferenceAvatar({ profileId: String(profile._id), userId: String(userId), avatarFingerprint: fingerprintAvatarReference(input.avatar) });
   return session;
 };

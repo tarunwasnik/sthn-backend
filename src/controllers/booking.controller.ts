@@ -19,6 +19,11 @@ import { BookingTerminationActorType, BookingTerminationType } from "../enums/bo
 import User from "../models/User";
 import { resolveAccountGovernance } from "../services/accountGovernance/accountGovernanceResolver.service";
 import { PaymentMethod } from "../enums/financial/paymentMethod.enum";
+import { PaymentProvider } from "../enums/financial/paymentProvider.enum";
+import { paymentProviderRegistry } from "../services/financial/paymentProviderRegistry.service";
+import { PaymentError } from "../errors/financial/PaymentError";
+import { assertFinancialSimulatorAllowed } from "../services/financial/simulatorAccess.service";
+import { createBookingNotifications, deliverCreatedBookingNotifications } from "../services/notification/bookingNotification.service";
 import { PaymentPricingPolicy } from "../enums/financial/paymentPricingPolicy.enum";
 import { PaymentStatus } from "../enums/financial/paymentStatus.enum";
 import { BookingFundReservationStatus } from "../enums/financial/bookingFundReservationStatus.enum";
@@ -29,6 +34,10 @@ import { IPayment, Payment } from "../models/payment.model";
 import {
   deriveBookingRequestIdentity,
 } from "../utils/financial/bookingWalletReservationIdentity.util";
+import { verifyBookingCheckoutQuote } from "../services/booking/bookingCheckoutQuote.service";
+import { FeatureFlagEvaluator } from "../services/controlPlane/featureFlagEvaluator.service";
+import { bookingFundingAdmissionService, BookingFundingAdmissionError } from "../services/booking/bookingFundingAdmission.service";
+import { paymentOperationService } from "../services/financial/paymentOperation.service";
 
 /* =========================================================
    CLEANUP EXPIRED BOOKINGS
@@ -278,17 +287,32 @@ export const requestBooking = async (
 ): Promise<Response> => {
   const user = req.user;
   const { serviceId, slotIds } = req.body;
-  const requestedMethod = req.body.paymentMethod ?? PaymentMethod.INTERNAL;
+  const checkoutQuoteToken = req.body.checkoutQuote;
+  const financialPolicyAccepted = req.body.financialPolicyAccepted === true;
+  const requestedMethod = req.body.paymentMethod;
+  const razorpaySandboxRequested =
+    requestedMethod === PaymentMethod.CARD &&
+    req.body.paymentProvider === PaymentProvider.RAZORPAY &&
+    req.body.sandbox === true;
   const paymentMethod =
     requestedMethod === PaymentMethod.WALLET
       ? PaymentMethod.WALLET
       : requestedMethod === PaymentMethod.INTERNAL
         ? PaymentMethod.INTERNAL
+        : razorpaySandboxRequested
+          ? PaymentMethod.CARD
         : null;
+  const providerPayment = paymentMethod === PaymentMethod.INTERNAL || razorpaySandboxRequested;
+  const provider = razorpaySandboxRequested ? PaymentProvider.RAZORPAY : PaymentProvider.INTERNAL;
 
   if (!user) {
     return res.status(401).json({ message: "Unauthorized" });
   }
+
+  const checkoutQuoteRequired = await FeatureFlagEvaluator.isEnabled(
+    "CHECKOUT_QUOTE_REQUIRED",
+    { userId: user.id, role: user.role },
+  );
 
   if (user.status !== "active") {
     return res.status(403).json({ message: "Account is not active." });
@@ -296,8 +320,28 @@ export const requestBooking = async (
 
   if (!paymentMethod) {
     return res.status(422).json({
-      message: "paymentMethod must be WALLET or INTERNAL.",
+      message: "paymentMethod must be WALLET, INTERNAL, or the explicitly gated Razorpay sandbox CARD method.",
     });
+  }
+
+  if (paymentMethod === PaymentMethod.INTERNAL) {
+    try { assertFinancialSimulatorAllowed(); }
+    catch { return res.status(503).json({ message: "Payment provider is unavailable.", code: "FINANCIAL_SIMULATOR_UNAVAILABLE" }); }
+  }
+  if (razorpaySandboxRequested && !["test", "development"].includes(process.env.NODE_ENV ?? "")) {
+    return res.status(404).json({ message: "Not found" });
+  }
+
+  if (financialPolicyAccepted) {
+    return res.status(422).json({
+      message: "Financial policy acceptance is unavailable until the authoritative policy is published.",
+    });
+  }
+  if (checkoutQuoteToken !== undefined && (typeof checkoutQuoteToken !== "string" || checkoutQuoteToken.length > 10_000)) {
+    return res.status(422).json({ message: "checkoutQuote is invalid." });
+  }
+  if (checkoutQuoteRequired && checkoutQuoteToken === undefined) {
+    return res.status(422).json({ message: "A current checkout quote is required." });
   }
 
   if (!mongoose.Types.ObjectId.isValid(serviceId)) {
@@ -319,10 +363,10 @@ export const requestBooking = async (
         ? req.header("Idempotency-Key")!.trim()
         : "";
 
-  if (paymentMethod === PaymentMethod.WALLET) {
+  if (paymentMethod === PaymentMethod.WALLET || providerPayment) {
     if (!suppliedIdempotencyKey || suppliedIdempotencyKey.length > 200) {
       return res.status(422).json({
-        message: "A bounded idempotencyKey is required for Wallet booking.",
+        message: "A bounded idempotencyKey is required for booking.",
       });
     }
     const clientFinancialFields = ["userId", "walletId", "amount", "currency"]
@@ -343,6 +387,28 @@ export const requestBooking = async (
         idempotencyKey: suppliedIdempotencyKey,
       })
     : null;
+
+  const providerService = providerPayment
+    ? await CreatorService.findById(serviceId).select("creatorId")
+    : null;
+  if (providerPayment) {
+    if (!providerService) return res.status(404).json({ message: "Service not found" });
+    if (!checkoutQuoteToken) return res.status(422).json({ message: "A current checkout quote is required for provider booking." });
+    try {
+      const providerAdmission = await bookingFundingAdmissionService.admit({
+        authenticatedCustomerId: user.id, creatorId: String(providerService.creatorId), serviceId, slotIds, checkoutQuote: checkoutQuoteToken,
+        requestKey: suppliedIdempotencyKey, method: paymentMethod, provider,
+      });
+      if (providerAdmission.bookingId && providerAdmission.paymentId) {
+        const [booking, payment] = await Promise.all([Booking.findById(providerAdmission.bookingId), Payment.findById(providerAdmission.paymentId)]);
+        if (!booking || !payment) throw new BookingFundingAdmissionError("Committed booking funding evidence is unavailable.", "INTEGRITY");
+        return res.status(200).json({ message: "Booking request replayed", booking, payment });
+      }
+    } catch (error) {
+      if (error instanceof BookingFundingAdmissionError) return res.status(error.code === "CONFLICT" ? 409 : 422).json({ message: error.message, code: error.code });
+      return res.status(500).json({ message: "Failed to admit provider booking funding." });
+    }
+  }
 
   const loadWalletReplay = async () => {
     if (!requestIdentity) return null;
@@ -548,10 +614,21 @@ export const requestBooking = async (
     if (!paymentCurrency) {
       throw new Error("Creator currency is not supported for payments");
     }
+    if (providerPayment) {
+      paymentProviderRegistry.select({ provider, currency: paymentCurrency, operation: "PAYMENT", requiredCapabilities: ["session", "verify", "status"] });
+    }
     const pricing = marketplacePricingService.calculate({
       serviceAmount: totalPrice,
       currency: paymentCurrency,
     });
+    const checkoutQuote = checkoutQuoteToken === undefined
+      ? null
+      : verifyBookingCheckoutQuote(checkoutQuoteToken, {
+        customerId: user.id, creatorId: creatorId.toString(), serviceId: service._id.toString(),
+        slotIds: slotIds.map(String), currency: paymentCurrency,
+        serviceAmount: pricing.serviceAmount, customerFeeAmount: pricing.platformFeeAmount,
+        totalAmount: pricing.totalAmount,
+      });
 
     const expiresAt = new Date(Date.now() + 180 * 60 * 1000);
 
@@ -559,6 +636,7 @@ export const requestBooking = async (
       [
         {
           slotIds,
+          purchasedScheduledStart: new Date(Math.min(...slots.map((slot) => slot.startTime.getTime()))),
           userId: user.id,
           creatorId,
           serviceId: service._id,
@@ -583,13 +661,21 @@ export const requestBooking = async (
           status: "REQUESTED",
           paymentStatus: "PENDING",
           expiresAt,
+          ...(checkoutQuote ? {
+            checkoutQuoteId: checkoutQuote.quoteId,
+            checkoutQuoteFingerprint: checkoutQuote.fingerprint,
+            checkoutQuoteIssuedAt: new Date(checkoutQuote.issuedAt),
+            checkoutQuoteExpiresAt: new Date(checkoutQuote.expiresAt),
+            financialPolicyVersion: checkoutQuote.financialPolicyVersion,
+            ...(checkoutQuote.financialPolicyContentReference ? { financialPolicyContentReference: checkoutQuote.financialPolicyContentReference } : {}),
+          } : {}),
           ...(requestIdentity ? {
             bookingReference: requestIdentity.bookingReference,
             paymentMethod: PaymentMethod.WALLET,
             bookingRequestKey: requestIdentity.bookingRequestKey,
             bookingRequestFingerprint: requestIdentity.bookingRequestFingerprint,
           } : {
-            paymentMethod: PaymentMethod.INTERNAL,
+            paymentMethod,
           }),
         },
       ],
@@ -597,6 +683,7 @@ export const requestBooking = async (
     );
 
     const createdBooking = booking[0];
+    const notificationResults = await createBookingNotifications(createdBooking, "REQUESTED", [{ id: String(creatorId), actor: "creator" }], session);
 
     const payment = await paymentService.createPayment({
       bookingId: createdBooking._id.toString(),
@@ -608,6 +695,15 @@ export const requestBooking = async (
       },
       idempotencyKey: `booking-payment:${createdBooking._id.toString()}`,
       method: paymentMethod,
+      ...(providerPayment ? { provider } : {}),
+      ...(checkoutQuote ? {
+        checkoutContext: {
+          quoteId: checkoutQuote.quoteId,
+          quoteFingerprint: checkoutQuote.fingerprint,
+          financialPolicyVersion: checkoutQuote.financialPolicyVersion,
+          financialPolicyContentReference: checkoutQuote.financialPolicyContentReference,
+        },
+      } : {}),
       ...(paymentMethod === PaymentMethod.WALLET ? {
         idempotencyKey: `booking-payment:${requestIdentity!.bookingReference}`,
         pricingSnapshot: {
@@ -627,6 +723,14 @@ export const requestBooking = async (
     createdBooking.paymentReference = payment.paymentReference;
     await createdBooking.save({ session });
 
+    if (providerPayment) {
+      const operation = await paymentOperationService.prepare(payment, session);
+      await bookingFundingAdmissionService.bind({
+        authenticatedCustomerId: user.id, requestKey: suppliedIdempotencyKey,
+        bookingId: String(createdBooking._id), paymentId: String(payment._id), operationId: String(operation._id), session,
+      });
+    }
+
     let walletReservation:
       | Awaited<ReturnType<typeof bookingWalletReservationService.authorize>>
       | null = null;
@@ -641,6 +745,7 @@ export const requestBooking = async (
     }
 
     await session.commitTransaction();
+    deliverCreatedBookingNotifications(notificationResults);
 
     if (walletReservation) {
       payment.status = PaymentStatus.AUTHORIZED;
@@ -680,6 +785,29 @@ export const requestBooking = async (
       await session.abortTransaction();
     }
 
+    // A concurrent identical provider request may lose the slot conditional
+    // write after the winning transaction commits. Resolve only its durable
+    // admitted identity; never create another Booking or provider session.
+    if (providerPayment && providerService && checkoutQuoteToken) {
+      try {
+        // The loser can observe the intent before the winner commits its
+        // binding. Poll only the same immutable request identity, briefly and
+        // boundedly; a missing binding is never reported as a success.
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          const replay = await bookingFundingAdmissionService.admit({
+            authenticatedCustomerId: user.id, creatorId: String(providerService.creatorId), serviceId, slotIds,
+            checkoutQuote: checkoutQuoteToken, requestKey: suppliedIdempotencyKey,
+            method: paymentMethod, provider,
+          });
+          if (replay.bookingId && replay.paymentId) {
+            const [booking, payment] = await Promise.all([Booking.findById(replay.bookingId), Payment.findById(replay.paymentId)]);
+            if (booking && payment) return res.status(200).json({ message: "Booking request replayed", booking, payment });
+          }
+          if (attempt < 4) await new Promise<void>((resolve) => setTimeout(resolve, 25));
+        }
+      } catch { /* preserve the original failure when no committed replay exists */ }
+    }
+
     if (paymentMethod === PaymentMethod.WALLET) {
       try {
         const replay = await loadWalletReplay();
@@ -717,6 +845,9 @@ export const requestBooking = async (
       }
     }
 
+    if (err instanceof PaymentError && err.code === "PAYMENT_PROVIDER_UNAVAILABLE") {
+      return res.status(503).json({ message: err.message, code: err.code });
+    }
     if (err instanceof BookingWalletReservationError) {
       return res.status(err.statusCode).json({
         message: err.message,

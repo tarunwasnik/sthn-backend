@@ -19,6 +19,7 @@ export interface CreatePayoutDestinationInput {
   accountNumber?: unknown;
   ifsc?: unknown;
   upiId?: unknown;
+  destinationCountry?: unknown;
   idempotencyKey: unknown;
 }
 
@@ -31,6 +32,8 @@ export interface PayoutDestinationResponse {
   accountNumberLast4?: string;
   ifscDisplay?: string;
   verifiedAt?: Date;
+  declaredCountry?: string;
+  verifiedCountry?: string;
   rejectedAt?: Date;
   rejectionReason?: string;
   deactivatedAt?: Date;
@@ -48,6 +51,7 @@ interface NormalizedDestination {
   maskedIdentifier: string;
   accountNumberLast4?: string;
   ifscDisplay?: string;
+  declaredCountry?: string;
 }
 
 export interface CreateWithdrawalBindingSnapshotInput {
@@ -106,6 +110,7 @@ export class PayoutDestinationService {
         maskedIdentifier: normalized.maskedIdentifier,
         accountNumberLast4: normalized.accountNumberLast4,
         ifscDisplay: normalized.ifscDisplay,
+        declaredCountry: normalized.declaredCountry,
       });
 
       return { destination, created: true };
@@ -160,6 +165,8 @@ export class PayoutDestinationService {
       ifscDisplay: destination.ifscDisplay,
       verificationStatus: PayoutDestinationVerificationStatus.VERIFIED,
       verifiedAt: destination.verifiedAt,
+      declaredCountry: destination.declaredCountry,
+      verifiedCountry: destination.verifiedCountry,
       snapshotCreatedAt,
       encryptedPayload: payoutDestinationCryptoService.encryptWithdrawalDestinationSnapshotPayload(
         normalized.type === PayoutDestinationType.BANK_ACCOUNT
@@ -250,6 +257,8 @@ export class PayoutDestinationService {
       accountNumberLast4: destination.accountNumberLast4,
       ifscDisplay: destination.ifscDisplay,
       verifiedAt: destination.verifiedAt,
+      declaredCountry: destination.declaredCountry,
+      verifiedCountry: destination.verifiedCountry,
       rejectedAt: destination.rejectedAt,
       rejectionReason: destination.rejectionReason,
       deactivatedAt: destination.deactivatedAt,
@@ -268,6 +277,7 @@ export class PayoutDestinationService {
     }
 
     const type = input.type as PayoutDestinationType;
+    const declaredCountry = input.destinationCountry === undefined ? undefined : this.normalizeCountry(input.destinationCountry);
     const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey);
     if (type === PayoutDestinationType.BANK_ACCOUNT) {
       if (input.upiId !== undefined) {
@@ -284,12 +294,13 @@ export class PayoutDestinationService {
           `BANK_ACCOUNT:${accountNumber}:${ifsc}`,
         ),
         requestFingerprint: payoutDestinationCryptoService.createRequestFingerprint(
-          `BANK_ACCOUNT:${accountHolderName}:${accountNumber}:${ifsc}`,
+          `BANK_ACCOUNT:${accountHolderName}:${accountNumber}:${ifsc}:${declaredCountry ?? ""}`,
         ),
         encryptedPayload: { accountHolderName, accountNumber, ifsc },
         maskedIdentifier: `••••${last4}`,
         accountNumberLast4: last4,
         ifscDisplay: ifsc,
+        declaredCountry,
       };
     }
 
@@ -305,11 +316,13 @@ export class PayoutDestinationService {
       type,
       idempotencyKey,
       destinationFingerprint: payoutDestinationCryptoService.createDestinationFingerprint(`UPI:${upiId}`),
-      requestFingerprint: payoutDestinationCryptoService.createRequestFingerprint(`UPI:${upiId}`),
+      requestFingerprint: payoutDestinationCryptoService.createRequestFingerprint(`UPI:${upiId}:${declaredCountry ?? ""}`),
       encryptedPayload: { upiId },
       maskedIdentifier: this.maskUpiId(upiId),
+      declaredCountry,
     };
   }
+  private normalizeCountry(value: unknown): string { if (typeof value !== "string" || !/^[A-Za-z]{2}$/.test(value.trim())) throw new PayoutDestinationError("Invalid destination country.", "INVALID_PAYOUT_DESTINATION_INPUT"); return value.trim().toUpperCase(); }
 
   private validateBindingPayload(
     destination: IPayoutDestination,

@@ -14,6 +14,7 @@ import { LedgerAccount } from "../../enums/financial/ledgerAccount.enum";
 import { LedgerEntryType } from "../../enums/financial/ledgerEntryType.enum";
 import { LedgerSource } from "../../enums/financial/ledgerSource.enum";
 import { PaymentProvider } from "../../enums/financial/paymentProvider.enum";
+import { PaymentMethod } from "../../enums/financial/paymentMethod.enum";
 import { generateFinancialReference } from "../../utils/financial/reference.util";
 import { SettlementError } from "../../errors/financial/SettlementError";
 import { createFinancialAudit } from "../auditLog.service";
@@ -28,6 +29,7 @@ export class BookingFinancialSettlementService {
       if (await Dispute.exists({ bookingId: booking._id, status: "OPEN" }).session(session)) throw new SettlementError("Open dispute blocks settlement.", "SETTLEMENT_NOT_ELIGIBLE");
       if (!booking.paymentId) throw new SettlementError("Booking payment is missing.", "ESCROW_NOT_FOUND");
       const payment = await paymentRepository.findById(booking.paymentId, session);
+      if (payment && payment.method !== PaymentMethod.WALLET) throw new SettlementError("Provider-funded booking settlement is not enabled.", "SETTLEMENT_NOT_ELIGIBLE");
       if (!payment || payment.status !== PaymentStatus.CAPTURED || payment.automaticSettlementBlocked) throw new SettlementError("Payment is not eligible for settlement.", "SETTLEMENT_NOT_ELIGIBLE");
       const calculation = calculateSettlement({ serviceAmount: payment.serviceAmount!, customerFeeAmount: payment.customerFeeAmount!, grossEscrowAmount: payment.grossEscrowAmount!, currency: payment.currency, pricingPolicy: payment.pricingPolicy!, pricingVersion: payment.pricingVersion!, paymentAmount: payment.amount });
       const { currency: _calculationCurrency, ...calculationFields } = calculation;

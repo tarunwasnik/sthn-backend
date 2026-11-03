@@ -17,6 +17,15 @@ export interface IPayout extends Document {
   payoutReference: string;
   sourceType: PayoutSourceType;
   withdrawalId?: mongoose.Types.ObjectId;
+  /**
+   * Immutable allocation backing an entitlement-authorized payout.
+   */
+  entitlementId?: mongoose.Types.ObjectId;
+
+  /**
+   * Creator-owned destination selected for an entitlement-authorized payout.
+   */
+  payoutDestinationId?: mongoose.Types.ObjectId;
 
   /**
    * Creator receiving the payout.
@@ -124,6 +133,17 @@ const PayoutSchema = new Schema<IPayout>(
       type: Schema.Types.ObjectId,
       ref: "Withdrawal",
       index: true,
+    },
+    entitlementId: {
+      type: Schema.Types.ObjectId,
+      ref: "CreatorEntitlement",
+      immutable: true,
+    },
+    payoutDestinationId: {
+      type: Schema.Types.ObjectId,
+      ref: "PayoutDestination",
+      index: true,
+      immutable: true,
     },
 
     creatorId: {
@@ -241,6 +261,24 @@ PayoutSchema.pre("validate", function () {
     return;
   }
 
+  if (this.sourceType === PayoutSourceType.ENTITLEMENT) {
+    if (!this.entitlementId || !this.payoutDestinationId || !this.bookingId || !this.paymentId) {
+      this.invalidate(
+        "sourceType",
+        "Entitlement payout requires entitlement, destination, booking, and payment references.",
+      );
+    }
+
+    if (this.withdrawalId || this.settlementId) {
+      this.invalidate(
+        "sourceType",
+        "Entitlement payout cannot reference withdrawal or settlement.",
+      );
+    }
+
+    return;
+  }
+
   if (!this.settlementId || !this.bookingId || !this.paymentId) {
     this.invalidate(
       "sourceType",
@@ -261,6 +299,17 @@ PayoutSchema.index(
     partialFilterExpression: {
       sourceType: PayoutSourceType.WITHDRAWAL,
       withdrawalId: { $exists: true },
+    },
+  },
+);
+
+PayoutSchema.index(
+  { entitlementId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      sourceType: PayoutSourceType.ENTITLEMENT,
+      entitlementId: { $exists: true },
     },
   },
 );

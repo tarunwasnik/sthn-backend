@@ -43,10 +43,17 @@ export const registerBookingWalletReleaseCancellationTests = () => {
     try {
       const { fixture, booking } = await createActiveWalletBooking(server.baseUrl, { walletAmount: 1_000, slotAmounts: [400] });
       await Booking.updateOne({ _id: booking._id }, { $set: { hasInteracted: true } });
+      const beforeRequest = Date.now();
       const response = await postUserCancellation(server.baseUrl, booking._id.toString(), fixture);
+      const afterRequest = Date.now();
       assert.equal(response.status, 200, JSON.stringify(response.body));
       await assertCancelledRelease(booking._id.toString(), fixture.actors.wallet._id, BookingWalletReleaseCause.USER_CANCELLED);
       assert.equal((await Booking.findById(booking._id).orFail()).hasInteracted, true);
+      const evidence = (await Booking.findById(booking._id).select("+terminationEvidence").orFail()).terminationEvidence;
+      assert.equal(evidence?.status, "FINALIZED");
+      assert.ok(evidence?.receiptAt instanceof Date);
+      assert.ok(evidence.receiptAt.getTime() >= beforeRequest && evidence.receiptAt.getTime() <= afterRequest);
+      assert.equal(evidence?.actorType, "CUSTOMER");
     } finally { await server.close(); }
   });
 

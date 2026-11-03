@@ -10,6 +10,8 @@ import {
 
 export interface IBooking extends Document {
   slotIds: mongoose.Types.ObjectId[];
+  /** Earliest purchased slot start captured within the booking transaction. */
+  purchasedScheduledStart?: Date;
   userId: mongoose.Types.ObjectId;
   creatorId: mongoose.Types.ObjectId;
 
@@ -34,6 +36,13 @@ export interface IBooking extends Document {
   fundsReservedAt?: Date;
   bookingRequestKey?: string;
   bookingRequestFingerprint?: string;
+  checkoutQuoteId?: string;
+  checkoutQuoteFingerprint?: string;
+  checkoutQuoteIssuedAt?: Date;
+  checkoutQuoteExpiresAt?: Date;
+  financialPolicyVersion?: string;
+  financialPolicyContentReference?: string;
+  financialPolicyAcceptedAt?: Date;
 
   serviceTitle: string;
   durationMinutes: number;
@@ -64,6 +73,15 @@ export interface IBooking extends Document {
 
   expiresAt: Date;
 
+  /** Server time recorded by the successful Creator acceptance transaction. */
+  creatorAcceptedAt?: Date;
+
+  cancellationEvidence?: ICancellationEvidence;
+  terminationEvidence?: ITerminationEvidence;
+  cancellationDisposition?: ICancellationDisposition;
+  /** Separately admitted decision; never indicates a financial execution. */
+  authoritativeDisposition?: IAuthoritativeCancellationDisposition;
+
   hasInteracted: boolean;
   interactionStartedAt?: Date;
 
@@ -86,11 +104,89 @@ export interface IBooking extends Document {
   terminatedById?: mongoose.Types.ObjectId;
   terminationReason?: string;
   terminationOperationKey?: string;
+  terminationClaim?: ITerminationClaim;
   terminatedAt?: Date;
   lifecycleVersion: number;
 
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** Private coordination only; not a booking lifecycle status. */
+export interface ITerminationClaim {
+  operationKey: string;
+  status: "ACTIVE" | "RELEASED" | "FINALIZED";
+  intent: BookingTerminationType;
+  actorType: BookingTerminationActorType;
+  actorId?: mongoose.Types.ObjectId;
+  paymentId?: mongoose.Types.ObjectId;
+  /** Provisional ingress time bound atomically to the first claim. */
+  evidenceReceiptAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  version: number;
+}
+
+export interface ICancellationEvidence {
+  operationKey: string;
+  actorId: mongoose.Types.ObjectId;
+  actorType: "CUSTOMER" | "CREATOR";
+  intent: "CUSTOMER_CANCELLED" | "CREATOR_CANCELLED";
+  receiptAt: Date;
+  receiptOrder: "UNVERIFIED";
+  eligibility: "PARTICIPANT_STATE_ONLY";
+  version: "CANCELLATION_EVIDENCE_V1" | "CANCELLATION_EVIDENCE_V2";
+  outcome: "QUALIFIED" | "NOT_QUALIFIED" | "INSUFFICIENT_EVIDENCE";
+  reason: "MISSING_ACCEPTANCE" | "UNVERIFIED_RECEIPT_AND_MESSAGE_ORDER" | "TWO_WAY_MESSAGES" | "NO_TWO_WAY_MESSAGES" | "UNRELIABLE_MESSAGE_TIMESTAMP";
+  candidateMessageIds: mongoose.Types.ObjectId[];
+  recordedAt: Date;
+}
+
+/** Separate from legacy participant-only snapshots, which are never promoted. */
+export interface ITerminationEvidence {
+  version: "TERMINATION_EVIDENCE_V1";
+  status: "PENDING" | "FINALIZED";
+  operationKey: string;
+  actorType: BookingTerminationActorType;
+  actorId?: mongoose.Types.ObjectId;
+  intent: BookingTerminationType;
+  receiptAt?: Date;
+  receiptOrder: "UNVERIFIED";
+  outcome: "QUALIFIED" | "NOT_QUALIFIED" | "INSUFFICIENT_EVIDENCE";
+  reason: string;
+  candidateMessageIds: mongoose.Types.ObjectId[];
+  recordedAt: Date;
+  finalizedAt?: Date;
+}
+
+/** Non-executing financial decision, not a refund or ledger authority. */
+export interface ICancellationDisposition {
+  version: "CANCELLATION_DISPOSITION_V1";
+  status: "CALCULATED" | "PENDING";
+  executionStatus: "NOT_EXECUTED";
+  operationKey: string;
+  actorType: BookingTerminationActorType;
+  actorId?: mongoose.Types.ObjectId;
+  intent: BookingTerminationType;
+  scenario?: string;
+  reason?: string;
+  policyVersion?: string;
+  calculationVersion: string;
+  interactionOutcome: ITerminationEvidence["outcome"];
+  receiptAt?: Date;
+  scheduledStart?: Date;
+  currency: string;
+  currencyMinorUnits?: number;
+  serviceAmount: number;
+  customerPlatformFee: number;
+  originalChargeTotal: number;
+  breakdown?: import("../services/financial/cancellationPolicyCalculation.service").CancellationPolicyResult;
+  recordedAt: Date;
+}
+
+export interface IAuthoritativeCancellationDisposition extends ICancellationDisposition {
+  authorityId: string;
+  guardVersion: number;
 }
 
 export interface IBookingServiceSnapshot {
@@ -126,6 +222,8 @@ const BookingSchema = new Schema<IBooking>(
         required: true,
       },
     ],
+
+    purchasedScheduledStart: { type: Date, immutable: true, select: false },
 
     userId: {
       type: Schema.Types.ObjectId,
@@ -165,6 +263,13 @@ const BookingSchema = new Schema<IBooking>(
     fundsReservedAt: { type: Date },
     bookingRequestKey: { type: String, trim: true, immutable: true, select: false },
     bookingRequestFingerprint: { type: String, trim: true, immutable: true, select: false },
+    checkoutQuoteId: { type: String, trim: true, immutable: true, index: true },
+    checkoutQuoteFingerprint: { type: String, trim: true, immutable: true, select: false },
+    checkoutQuoteIssuedAt: { type: Date, immutable: true },
+    checkoutQuoteExpiresAt: { type: Date, immutable: true },
+    financialPolicyVersion: { type: String, trim: true, immutable: true },
+    financialPolicyContentReference: { type: String, trim: true, immutable: true },
+    financialPolicyAcceptedAt: { type: Date, immutable: true },
 
     serviceTitle: {
       type: String,
@@ -236,6 +341,101 @@ const BookingSchema = new Schema<IBooking>(
       type: Date,
       required: true,
       index: true,
+    },
+
+    creatorAcceptedAt: Date,
+    terminationClaim: {
+      type: new Schema<ITerminationClaim>({
+        operationKey: { type: String, required: true },
+        status: { type: String, enum: ["ACTIVE", "RELEASED", "FINALIZED"], required: true },
+        intent: { type: String, enum: Object.values(BookingTerminationType), required: true },
+        actorType: { type: String, enum: Object.values(BookingTerminationActorType), required: true },
+        actorId: Schema.Types.ObjectId,
+        paymentId: Schema.Types.ObjectId,
+        evidenceReceiptAt: Date,
+        createdAt: { type: Date, required: true },
+        updatedAt: { type: Date, required: true },
+        version: { type: Number, required: true, min: 1 },
+      }, { _id: false }),
+      select: false,
+    },
+    cancellationEvidence: {
+      type: new Schema<ICancellationEvidence>({
+        operationKey: { type: String, required: true },
+        actorId: { type: Schema.Types.ObjectId, required: true },
+        actorType: { type: String, enum: ["CUSTOMER", "CREATOR"], required: true },
+        intent: { type: String, enum: ["CUSTOMER_CANCELLED", "CREATOR_CANCELLED"], required: true },
+        receiptAt: { type: Date, required: true },
+        receiptOrder: { type: String, enum: ["UNVERIFIED"], required: true },
+        eligibility: { type: String, enum: ["PARTICIPANT_STATE_ONLY"], required: true },
+        version: { type: String, enum: ["CANCELLATION_EVIDENCE_V1", "CANCELLATION_EVIDENCE_V2"], required: true },
+        outcome: { type: String, enum: ["QUALIFIED", "NOT_QUALIFIED", "INSUFFICIENT_EVIDENCE"], required: true },
+        reason: { type: String, enum: ["MISSING_ACCEPTANCE", "UNVERIFIED_RECEIPT_AND_MESSAGE_ORDER", "TWO_WAY_MESSAGES", "NO_TWO_WAY_MESSAGES", "UNRELIABLE_MESSAGE_TIMESTAMP"], required: true },
+        candidateMessageIds: [{ type: Schema.Types.ObjectId, ref: "Chat" }],
+        recordedAt: { type: Date, required: true },
+      }, { _id: false }),
+      select: false,
+    },
+    terminationEvidence: {
+      type: new Schema<ITerminationEvidence>({
+        version: { type: String, enum: ["TERMINATION_EVIDENCE_V1"], required: true },
+        status: { type: String, enum: ["PENDING", "FINALIZED"], required: true },
+        operationKey: { type: String, required: true },
+        actorType: { type: String, enum: Object.values(BookingTerminationActorType), required: true },
+        actorId: Schema.Types.ObjectId,
+        intent: { type: String, enum: Object.values(BookingTerminationType), required: true },
+        receiptAt: Date,
+        receiptOrder: { type: String, enum: ["UNVERIFIED"], required: true },
+        outcome: { type: String, enum: ["QUALIFIED", "NOT_QUALIFIED", "INSUFFICIENT_EVIDENCE"], required: true },
+        reason: { type: String, required: true },
+        candidateMessageIds: [{ type: Schema.Types.ObjectId, ref: "Chat" }],
+        recordedAt: { type: Date, required: true },
+        finalizedAt: Date,
+      }, { _id: false }),
+      select: false,
+    },
+    cancellationDisposition: {
+      type: new Schema<ICancellationDisposition>({
+        version: { type: String, enum: ["CANCELLATION_DISPOSITION_V1"], required: true },
+        status: { type: String, enum: ["CALCULATED", "PENDING"], required: true },
+        executionStatus: { type: String, enum: ["NOT_EXECUTED"], required: true },
+        operationKey: { type: String, required: true },
+        actorType: { type: String, enum: Object.values(BookingTerminationActorType), required: true },
+        actorId: Schema.Types.ObjectId,
+        intent: { type: String, enum: Object.values(BookingTerminationType), required: true },
+        scenario: String, reason: String, policyVersion: String,
+        calculationVersion: { type: String, required: true },
+        interactionOutcome: { type: String, enum: ["QUALIFIED", "NOT_QUALIFIED", "INSUFFICIENT_EVIDENCE"], required: true },
+        receiptAt: Date, scheduledStart: Date,
+        currency: { type: String, required: true }, currencyMinorUnits: Number,
+        serviceAmount: { type: Number, required: true },
+        customerPlatformFee: { type: Number, required: true },
+        originalChargeTotal: { type: Number, required: true },
+        breakdown: Schema.Types.Mixed,
+        recordedAt: { type: Date, required: true },
+      }, { _id: false }),
+      select: false,
+    },
+    authoritativeDisposition: {
+      type: new Schema<IAuthoritativeCancellationDisposition>({
+        version: { type: String, enum: ["CANCELLATION_DISPOSITION_V1"], required: true },
+        status: { type: String, enum: ["CALCULATED"], required: true },
+        executionStatus: { type: String, enum: ["NOT_EXECUTED"], required: true },
+        operationKey: { type: String, required: true },
+        actorType: { type: String, enum: Object.values(BookingTerminationActorType), required: true },
+        actorId: Schema.Types.ObjectId,
+        intent: { type: String, enum: Object.values(BookingTerminationType), required: true },
+        scenario: { type: String, required: true }, policyVersion: { type: String, required: true },
+        calculationVersion: { type: String, required: true },
+        interactionOutcome: { type: String, enum: ["QUALIFIED", "NOT_QUALIFIED", "INSUFFICIENT_EVIDENCE"], required: true },
+        receiptAt: { type: Date, required: true }, scheduledStart: { type: Date, required: true },
+        currency: { type: String, required: true }, currencyMinorUnits: { type: Number, required: true },
+        serviceAmount: { type: Number, required: true }, customerPlatformFee: { type: Number, required: true },
+        originalChargeTotal: { type: Number, required: true }, breakdown: { type: Schema.Types.Mixed, required: true },
+        authorityId: { type: String, required: true }, guardVersion: { type: Number, required: true, min: 0 },
+        recordedAt: { type: Date, required: true },
+      }, { _id: false }),
+      select: false,
     },
 
     hasInteracted: {

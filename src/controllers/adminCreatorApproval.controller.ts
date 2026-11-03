@@ -10,6 +10,8 @@ import { ROLES } from "../constants/roles";
 import { AppError } from "../utils/AppError";
 import { generateUniqueCreatorSlug } from "../utils/generateCreatorSlug";
 import { emitIdentityChanged } from "../sockets/chat.socket";
+import { notificationService } from "../services/notification/notification.service";
+import { notificationDeliveryService } from "../services/notification/notificationDelivery.service";
 
 /* =====================================================
    LIST CREATOR APPLICATIONS
@@ -47,6 +49,7 @@ export const approveCreatorApplication = async (
   const { applicationId } = req.params;
 
   const session = await mongoose.startSession();
+  let approvalNotification: Awaited<ReturnType<typeof notificationService.createWithOutcome>> | null = null;
 
   try {
     session.startTransaction();
@@ -141,6 +144,18 @@ export const approveCreatorApplication = async (
 
     await application.save({ session });
 
+    approvalNotification = await notificationService.createWithOutcome({
+      recipientId: String(application.userId),
+      category: "CREATOR_APPLICATION",
+      type: "CREATOR_APPLICATION_UPDATE",
+      title: "Creator Application Approved",
+      body: "Your Creator Application has been approved. You can now access your Creator Dashboard.",
+      navigationPath: "/dashboard/creator",
+      metadata: { entityType: "CREATOR_APPLICATION", entityId: String(application._id) },
+      idempotencyKey: `creator-application:${application._id}:approved:${application.userId}`,
+      session,
+    });
+
     /* ✅ COMMIT TRANSACTION */
 
     await session.commitTransaction();
@@ -150,6 +165,7 @@ export const approveCreatorApplication = async (
     /* 🔔 NOTIFY CONNECTED USER */
 
     emitIdentityChanged(user._id.toString());
+    if (approvalNotification?.created) notificationDeliveryService.deliverPersisted(approvalNotification.notification, { postCommit: true });
 
     res.status(200).json({
       message: "Creator approved successfully",

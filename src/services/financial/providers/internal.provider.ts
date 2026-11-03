@@ -18,22 +18,50 @@ import {
   CreateRefundResponse,
   VerifyWebhookRequest,
   VerifyWebhookResponse,
+  TerminationEvidenceRequest,
+  TerminationEvidence,
 } from "../../../contracts/financial/paymentProvider.types";
 
 import { PaymentProvider } from "../../../enums/financial/paymentProvider.enum";
+import { assertFinancialSimulatorAllowed } from "../simulatorAccess.service";
 
 import {
   ProviderSimulationMode,
   ProviderStatus,
+  ProviderOperation,
 } from "../../../constants/internalProvider";
 
 import ProviderPaymentService from "../../internalProvider/payments/providerPayment.service";
 import ProviderRefundService from "../../internalProvider/refunds/providerRefund.service";
+import ProviderEventService from "../../internalProvider/events/providerEvent.service";
 import ProviderWebhookService from "../../internalProvider/webhooks/providerWebhook.service";
 import { ProviderSimulatorError } from "../../../errors/internalProvider/ProviderSimulatorError";
 
 export class InternalPaymentProvider implements PaymentProviderInterface {
   public readonly provider = PaymentProvider.INTERNAL;
+  /** Simulator currently has verified full-refund support only. */
+  public readonly dispositionRefundCapabilities = { fullRefund: true, partialRefund: false, idempotent: true, authenticatedLookup: true } as const;
+  public readonly routingCapabilityProfile = { configurationVersion: "internal-simulator-v1", approvedEnvironments: ["test", "development"], simulator: true, operations: { COLLECTION: "SUPPORTED", PAYMENT_RECONCILIATION: "SUPPORTED", FULL_REFUND: "SUPPORTED", PARTIAL_REFUND: "UNSUPPORTED", REFUND_RECONCILIATION: "SUPPORTED", PAYOUT: "UNSUPPORTED", PAYOUT_RECONCILIATION: "UNSUPPORTED", FX: "UNSUPPORTED" }, sourceCountries: ["IN"], destinationCountries: ["IN"], sourceCurrencies: ["INR"], destinationCurrencies: ["INR"], fundingRoutes: ["SIMULATOR"], feeEvidenceReference: "internal-simulator-v1", healthyOperations: ["COLLECTION", "PAYMENT_RECONCILIATION", "FULL_REFUND", "REFUND_RECONCILIATION"] } as const;
+
+  async getTerminationEvidence(request: TerminationEvidenceRequest): Promise<TerminationEvidence> {
+    assertFinancialSimulatorAllowed();
+    if (request.kind === "REFUND" && !request.providerOperationReference) return { outcome: "UNSUPPORTED" };
+    const payment = await ProviderPaymentService.findByProviderPaymentId(request.providerPaymentId);
+    if (!payment) return { outcome: "UNKNOWN" };
+    if (payment.paymentId.toString() !== request.paymentId || payment.amount !== request.amount.amount || payment.currency !== request.amount.currency) return { outcome: "IDENTITY_MISMATCH" };
+    const base = { paymentId: payment.paymentId.toString(), providerPaymentId: payment.providerPaymentId, amount: { amount: payment.amount, currency: payment.currency } };
+    if (request.kind === "PAYMENT") return { outcome: "VERIFIED", kind: "PAYMENT", ...base, providerStatus: payment.status, result: "PENDING" };
+    if (request.kind === "CANCEL") {
+      const events = await ProviderEventService.getPaymentTimeline(payment.providerPaymentId);
+      if (payment.status !== ProviderStatus.CANCELLED || !events.some((event) => event.operation === ProviderOperation.CANCEL_PAYMENT)) return { outcome: "UNKNOWN" };
+      return { outcome: "VERIFIED", kind: "CANCEL", ...base, providerStatus: payment.status, result: "SUCCESS" };
+    }
+    const refund = await ProviderRefundService.findByProviderRefundId(request.providerOperationReference!);
+    if (!refund) return { outcome: "UNKNOWN" };
+    if (!request.refundId || refund.refundId.toString() !== request.refundId || refund.providerPaymentId !== request.providerPaymentId || refund.amount !== request.amount.amount || refund.currency !== request.amount.currency) return { outcome: "IDENTITY_MISMATCH" };
+    if (refund.status !== "REFUNDED") return { outcome: "UNKNOWN" };
+    return { outcome: "VERIFIED", kind: "REFUND", ...base, providerStatus: refund.status, result: "SUCCESS", refundId: refund.refundId.toString(), providerOperationReference: refund.providerRefundId };
+  }
 
   /* -------------------------------------------------------------------------- */
   /* Helpers                                                                     */
@@ -197,6 +225,7 @@ export class InternalPaymentProvider implements PaymentProviderInterface {
   async createPaymentSession(
     request: CreatePaymentSessionRequest,
   ): Promise<CreatePaymentSessionResponse> {
+    assertFinancialSimulatorAllowed();
     const requestFingerprint = this.getPaymentSessionFingerprint(request);
     const existing = await ProviderPaymentService.findByIdempotencyKeyForReplay(
       request.idempotencyKey,
@@ -260,6 +289,7 @@ export class InternalPaymentProvider implements PaymentProviderInterface {
   async verifyPayment(
     request: VerifyPaymentRequest,
   ): Promise<VerifyPaymentResponse> {
+    assertFinancialSimulatorAllowed();
     const payment = await ProviderPaymentService.findByProviderPaymentId(
       request.providerPaymentId,
     );
@@ -312,6 +342,7 @@ export class InternalPaymentProvider implements PaymentProviderInterface {
   async getPaymentStatus(
     request: GetPaymentStatusRequest,
   ): Promise<GetPaymentStatusResponse> {
+    assertFinancialSimulatorAllowed();
     const payment = await ProviderPaymentService.findByProviderPaymentId(
       request.providerPaymentId,
     );
@@ -326,6 +357,8 @@ export class InternalPaymentProvider implements PaymentProviderInterface {
       providerTransactionId: payment.providerTransactionId,
 
       providerStatus: payment.status,
+
+      amount: { amount: payment.amount, currency: payment.currency },
 
       payload: {
         paymentId: payment.paymentId.toString(),
@@ -342,6 +375,7 @@ export class InternalPaymentProvider implements PaymentProviderInterface {
   /* Cancellation / authorization void                                          */
   /* -------------------------------------------------------------------------- */
   async cancelPayment(request: CancelPaymentRequest): Promise<CancelPaymentResponse> {
+    assertFinancialSimulatorAllowed();
     const payment = await ProviderPaymentService.findByProviderPaymentId(request.providerPaymentId);
     if (!payment) throw new ProviderSimulatorError("Provider payment not found.", "PROVIDER_PAYMENT_NOT_FOUND", 404);
     const cancelled = payment.status === ProviderStatus.CANCELLED
@@ -360,6 +394,7 @@ export class InternalPaymentProvider implements PaymentProviderInterface {
   async createRefund(
     request: CreateRefundRequest,
   ): Promise<CreateRefundResponse> {
+    assertFinancialSimulatorAllowed();
     const payment = await ProviderPaymentService.findByProviderPaymentId(
       request.providerPaymentId,
     );
@@ -442,6 +477,7 @@ export class InternalPaymentProvider implements PaymentProviderInterface {
   async verifyWebhook(
     request: VerifyWebhookRequest,
   ): Promise<VerifyWebhookResponse> {
+    assertFinancialSimulatorAllowed();
     const providerWebhookId = this.generateWebhookId();
 
     const eventId = this.generateEventId();

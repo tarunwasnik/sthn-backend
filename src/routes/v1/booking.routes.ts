@@ -2,6 +2,7 @@
 
 import { Router } from "express";
 import { protect } from "../../middlewares/auth.middleware";
+import { captureCancellationReceipt } from "../../middlewares/cancellationReceipt.middleware";
 
 import {
   requestBooking,
@@ -15,8 +16,10 @@ import {
 } from "../../controllers/bookingFunding.controller";
 
 import { cancelBookingByUser } from "../../controllers/userCancelBooking.controller";
+import { getCustomerBookingDetails } from "../../controllers/customerBookingDetails.controller";
 
 import { markBookingInteracted } from "../../controllers/bookingInteraction.controller";
+import { confirmRazorpaySandboxPayment } from "../../controllers/razorpaySandboxConfirmation.controller";
 
 import {
   completeBookingByCreator,
@@ -36,6 +39,8 @@ router.get("/user", protect, getUserBookings);
 ========================================================= */
 router.post("/pricing-preview", protect, previewBookingFunding);
 router.get("/:bookingId/funding", protect, getBookingFunding);
+router.get("/:bookingId", protect, getCustomerBookingDetails);
+router.post("/:bookingId/razorpay-sandbox-confirm", protect, confirmRazorpaySandboxPayment);
 
 /* =========================================================
    CREATOR JOURNEY ELIGIBILITY
@@ -71,7 +76,7 @@ router.post("/:bookingId/complete/user", protect, completeBookingByUser);
    BOOKING CANCELLATION
 ========================================================= */
 
-router.post("/:bookingId/cancel", protect, cancelBookingByUser);
+router.post("/:bookingId/cancel", captureCancellationReceipt, protect, cancelBookingByUser);
 
 /* =========================================================
    REFUND LIFECYCLE

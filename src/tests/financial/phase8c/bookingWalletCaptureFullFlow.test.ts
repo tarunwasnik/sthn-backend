@@ -24,6 +24,8 @@ import { LedgerSource } from "../../../enums/financial/ledgerSource.enum";
 import { MoneyDirection } from "../../../enums/financial/moneyDirection.enum";
 import { PaymentStatus } from "../../../enums/financial/paymentStatus.enum";
 import { completeBookingsJob } from "../../../jobs/completeBookings.job";
+import { bookingRepository } from "../../../repositories/booking.repository";
+import { BookingTerminationActorType, BookingTerminationType } from "../../../enums/booking/bookingTerminationType.enum";
 import {
   createAcceptedWalletBooking,
   makeBookingAutoCompletionEligible,
@@ -98,6 +100,30 @@ const assertCaptureGraph = async (
 };
 
 export const registerBookingWalletCaptureFullFlowTests = () => {
+  test("phase8c active termination claim blocks manual and automatic completion without financial changes", async () => {
+    const server = await startCaptureHttpServer();
+    try {
+      const { booking, creatorToken, fixture } = await createAcceptedWalletBooking(server.baseUrl, { walletAmount: 1_000, slotAmounts: [400] });
+      await makeBookingAutoCompletionEligible(booking._id.toString());
+      const before = await Wallet.findById(fixture.actors.wallet._id).orFail();
+      const now = new Date();
+      const claimed = await bookingRepository.acquireTerminationClaim({ bookingId: booking._id, claim: {
+        operationKey: `booking-termination:${booking._id}`, status: "ACTIVE", intent: BookingTerminationType.CREATOR_CANCELLED,
+        actorType: BookingTerminationActorType.CREATOR, actorId: booking.creatorId, paymentId: booking.paymentId,
+        createdAt: now, updatedAt: now, version: 1,
+      } });
+      assert.ok(claimed);
+      const manual = await postCreatorCompletion(server.baseUrl, booking._id.toString(), creatorToken);
+      assert.notEqual(manual.status, 200);
+      const automatic = await completeBookingsJob();
+      assert.equal(automatic.completed, 0);
+      assert.equal(automatic.blocked, 1);
+      const after = await Wallet.findById(fixture.actors.wallet._id).orFail();
+      assert.deepEqual([after.availableBalance, after.reservedBalance, after.currentBalance], [before.availableBalance, before.reservedBalance, before.currentBalance]);
+      assert.equal((await Booking.findById(booking._id).orFail()).status, "CONFIRMED");
+      assert.equal(await LedgerEntry.countDocuments({ bookingId: booking._id, source: LedgerSource.BOOKING_WALLET_CAPTURE }), 0);
+    } finally { await server.close(); }
+  });
   test("phase8c full flow: Creator completion captures reserved Wallet funds into platform escrow", async () => {
     const server = await startCaptureHttpServer();
     try {

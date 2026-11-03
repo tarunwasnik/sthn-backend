@@ -1,7 +1,5 @@
 // backend/src/routes/v1/user.routes.ts
 
-console.log("🔥 user.routes.ts loaded");
-
 import { Router } from "express";
 import { getUsers, getUserPublicProfile } from "../../controllers/user.controller";
 import { protect } from "../../middlewares/auth.middleware";

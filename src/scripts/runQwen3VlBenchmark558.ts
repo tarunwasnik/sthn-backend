@@ -1,0 +1,23 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { Qwen3VlLlamaCppRuntime } from "../evaluation/imageModeration/qwen3VlLlamaCppRuntime";
+import { Qwen3VlOfflineEvaluationAdapter } from "../evaluation/imageModeration/qwen3VlOfflineEvaluation";
+import { QWEN3_VL_558_CONFIG, createQwen3VlBenchmark558Run, executeQwen3VlBenchmark558, loadQwen3VlBenchmark558Fixtures, qwen3VlBenchmark558OutputDirectory } from "../evaluation/imageModeration/qwen3VlBenchmark558";
+
+const root = process.cwd(); const config = QWEN3_VL_558_CONFIG; const revision = config.revision;
+const modelPath = path.join(root, "evaluation-cache", "image-moderation", "qwen3-vl-2b-instruct-gguf", revision, config.modelFilename);
+const projectorPath = path.join(root, "evaluation-cache", "image-moderation", "qwen3-vl-2b-instruct-gguf", revision, config.projectorFilename);
+const executablePath = path.join(root, "evaluation-cache", "image-moderation", "llama.cpp", config.runtime.build, "bin", config.runtime.executable);
+const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+void (async () => {
+  if (process.env.NODE_ENV !== "development") throw new Error("Qwen 558 benchmark may run only with NODE_ENV=development");
+  const fixtures = await loadQwen3VlBenchmark558Fixtures(path.join(root, "evaluation-cache", "image-moderation", "benchmark"));
+  await createQwen3VlBenchmark558Run(qwen3VlBenchmark558OutputDirectory(), fixtures);
+  const [model, projector] = await Promise.all([readFile(modelPath), readFile(projectorPath)]);
+  if (digest(model) !== config.modelSha256 || digest(projector) !== config.projectorSha256) throw new Error("Qwen 558 pinned model artifact checksum mismatch");
+  const runtime = new Qwen3VlLlamaCppRuntime({ executablePath, buildId: config.runtime.build, commandTimeoutMs: config.runtime.timeoutMs, contextSize: config.runtime.contextSize });
+  const adapter = new Qwen3VlOfflineEvaluationAdapter({ model: { path: modelPath, sha256: config.modelSha256 }, multimodalProjector: { path: projectorPath, sha256: config.projectorSha256 }, modelId: config.modelId, revision, maxOutputTokens: config.runtime.maxOutputTokens }, runtime);
+  await executeQwen3VlBenchmark558(adapter, fixtures, qwen3VlBenchmark558OutputDirectory(), []);
+  console.log(JSON.stringify({ runId: config.runId, completed: fixtures.length, outputDirectory: qwen3VlBenchmark558OutputDirectory() }, null, 2));
+})().catch((error) => { console.error(error instanceof Error ? error.stack ?? error.message : String(error)); process.exitCode = 1; });

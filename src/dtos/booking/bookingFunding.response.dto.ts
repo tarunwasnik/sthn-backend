@@ -10,6 +10,17 @@ export interface BookingPricingPreviewResponseDto {
   grossFundingAmount: number;
   pricingPolicy: PaymentPricingPolicy;
   pricingVersion: number;
+  checkoutQuote: {
+    quoteId: string;
+    token: string;
+    fingerprint: string;
+    issuedAt: string;
+    expiresAt: string;
+    financialPolicyVersion: string;
+    financialPolicyContentReference: string | null;
+    acceptanceEnforced: boolean;
+    quoteRequired: boolean;
+  };
   walletFunding: {
     currency: string;
     availableAmount: number;
@@ -40,6 +51,9 @@ export interface BookingFundingResponseDto {
     releasedAt?: Date;
     capturedAt?: Date;
   } | null;
+  providerFunding?: {
+    state: "PENDING" | "CONFIRMED" | "FAILED" | "UNKNOWN" | "CANCELLED" | "REFUNDED";
+  };
   walletFunding: {
     state: BookingFundingState;
     amount?: number;

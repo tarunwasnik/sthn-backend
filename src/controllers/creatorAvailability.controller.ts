@@ -92,16 +92,6 @@ const availabilityStartDateTime =
     }
   );
 
-console.log(
-  "CREATOR NOW:",
-  creatorNow.toISO()
-);
-
-console.log(
-  "AVAILABILITY START:",
-  availabilityStartDateTime.toISO()
-);
-
 if (
   availabilityStartDateTime <= creatorNow
 ) {
@@ -119,33 +109,12 @@ if (
 const newStart = toMinutes(startTime);
 const newEnd = toMinutes(endTime);
 
-console.log("NEW AVAILABILITY REQUEST");
-console.log({
-  creatorId: user.id,
-  date: availabilityDate,
-  startTime,
-  endTime,
-  serviceId,
-  timezone,
-});
-
 const existingAvailabilities = await Availability.find({
   creatorId: user.id,
   serviceId,
   date: availabilityDate,
   status: "ACTIVE",
 });
-
-console.log(
-  "MATCHING ACTIVE AVAILABILITIES:",
-  existingAvailabilities.map(a => ({
-    id: a._id,
-    date: a.date,
-    startTime: a.startTime,
-    endTime: a.endTime,
-    status: a.status,
-  }))
-);
 
 for (const existing of existingAvailabilities) {
   const existingStart = toMinutes(existing.startTime);
@@ -358,11 +327,6 @@ export const deleteAvailability = async (
     if (!availability) {
       throw new Error("Availability not found");
     }
-
-    console.log(
-      "DELETE AVAILABILITY STATUS:",
-      availability.status
-    );
 
     const availabilityDate = new Date(
       availability.date

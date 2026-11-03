@@ -6,6 +6,34 @@ import { assertFaceVerificationImageBuffer } from "../services/profile/faceVerif
 
 const storage = multer.memoryStorage();
 
+type MultipartLimits = NonNullable<multer.Options["limits"]> & {
+  fieldNestingDepth: number;
+  fieldArrayIndexLimit: number;
+};
+
+// Multipart endpoints currently accept only small control payloads: replyTo,
+// audience, note, or surface. Keep headroom for future optional metadata while
+// bounding parser work independently of the file-size contracts below.
+const multipartLimits = (fileSize: number, files: number, parts: number): MultipartLimits => ({
+  fileSize,
+  files,
+  fields: 10,
+  parts,
+  fieldNestingDepth: 4,
+  fieldArrayIndexLimit: 20,
+});
+
+const unsupportedUploadType = (message: string) => {
+  const error = new Error(message) as Error & {
+    code: string;
+    statusCode: number;
+  };
+
+  error.code = "UNSUPPORTED_FILE_TYPE";
+  error.statusCode = 400;
+  return error;
+};
+
 /* ======================================================
    DOCUMENT MIME TYPES
 ====================================================== */
@@ -154,9 +182,7 @@ const documentFileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
     return cb(null, true);
   }
 
-  return cb(
-    new Error(`Unsupported document type (${extension || file.mimetype}).`),
-  );
+  return cb(unsupportedUploadType(`Unsupported document type (${extension || file.mimetype}).`));
 };
 
 /* ======================================================
@@ -174,9 +200,7 @@ const imageFileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
     return cb(null, true);
   }
 
-  return cb(
-    new Error(`Unsupported image type (${extension || file.mimetype}).`),
-  );
+  return cb(unsupportedUploadType(`Unsupported image type (${extension || file.mimetype}).`));
 };
 
 /* ======================================================
@@ -185,9 +209,7 @@ const imageFileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
 
 export const upload = multer({
   storage,
-  limits: {
-    fileSize: 5 * 1024 * 1024,
-  },
+  limits: multipartLimits(5 * 1024 * 1024, 1, 12),
 });
 
 /* ======================================================
@@ -199,10 +221,7 @@ export const chatDocumentUpload = multer({
 
   fileFilter: documentFileFilter,
 
-  limits: {
-    fileSize: 10 * 1024 * 1024,
-    files: 20,
-  },
+  limits: multipartLimits(10 * 1024 * 1024, 20, 24),
 });
 
 /* ======================================================
@@ -214,21 +233,18 @@ export const chatImageUpload = multer({
 
   fileFilter: imageFileFilter,
 
-  limits: {
-    fileSize: 10 * 1024 * 1024,
-    files: 20,
-  },
+  limits: multipartLimits(10 * 1024 * 1024, 20, 24),
 });
 
 const faceEvidenceMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export const faceVerificationCaptureUpload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  limits: multipartLimits(5 * 1024 * 1024, 1, 4),
   fileFilter: (_req, file, cb) => cb(null, faceEvidenceMimeTypes.has(file.mimetype)),
 });
 
-export const imageModerationUpload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
+export const imageModerationUpload = multer({ storage, limits: multipartLimits(10 * 1024 * 1024, 1, 4) });
 
 export const assertFaceVerificationImageBytes = (file: Express.Multer.File) => {
   assertFaceVerificationImageBuffer(file.buffer);

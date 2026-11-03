@@ -17,8 +17,7 @@ import { profileVerificationRequestRepository } from "../repositories/profileVer
 import { profileVerificationJobRepository } from "../repositories/profileVerificationJob.repository";
 import { profileVerificationInferenceResultRepository } from "../repositories/profileVerificationInferenceResult.repository";
 import { deriveProfileVerificationLifecycleStage } from "../services/profile/profileVerificationLifecycle.service";
-import { fingerprintTextModerationPayload, normalizeUserProfileModerationPayload } from "../services/textModeration/textModerationNormalization.service";
-import { requireTextModerationAdmission } from "../services/textModeration/textModerationAdmission.service";
+import { normalizeUserProfileModerationPayload } from "../services/textModeration/textModerationNormalization.service";
 import { Types } from "mongoose";
 import { parseProfileMediaAdmissionRequest } from "../services/profile/profileImageAdmissionContract";
 import { ProfileMediaAdmissionPersistenceError, profileMediaAdmissionPersistenceService } from "../services/profile/profileMediaAdmissionPersistence.service";
@@ -89,12 +88,19 @@ const persistProfileVerificationTransaction = async (input: {
   createsVerificationAuthority: boolean;
   avatarCandidate?: FaceVerificationAvatarCandidate;
 }) => {
+  let committedVerificationOutcome: { requestId: string; userId: string; profileSubmissionVersion: number; created: boolean } | undefined;
   if (input.createsVerificationAuthority) {
     const expectedVersion = ((input.previousProfile?.verificationSubmissionVersion as number | undefined) ?? 0) + 1;
     if (input.profile.profileStatus !== "pending_verification" || input.profile.verificationSubmissionVersion !== expectedVersion) {
       throw new AppError("Profile submission lifecycle is stale", 409);
     }
     const verificationRequest = await ensureActiveProfileVerificationRequest(input.profile, input.session);
+    committedVerificationOutcome = {
+      requestId: String(verificationRequest.request._id),
+      userId: String(verificationRequest.request.userId),
+      profileSubmissionVersion: verificationRequest.request.profileSubmissionVersion,
+      created: verificationRequest.created,
+    };
     await ensureProfileVerificationJob(verificationRequest.request, input.session);
     const bound = await bindCompletedFaceSessionToVerificationRequest({ profile: input.profile, requestId: verificationRequest.request._id, session: input.session, actorId: input.actorId, avatarCandidate: input.avatarCandidate, previousAvatar: input.previousProfile?.avatar as string | undefined });
     if (!bound) throw new AppError("Completed face verification session is no longer eligible", 409);
@@ -103,6 +109,7 @@ const persistProfileVerificationTransaction = async (input: {
   }
   await invalidateFaceSessionsForAvatar(input.profile, input.session);
   await profileSubmissionAccountPersistenceService.persist({ session: input.session, actorId: input.actorId, action: input.action });
+  return committedVerificationOutcome;
 };
 
 /**
@@ -196,12 +203,6 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
   }
 
   const moderatedText = normalizeUserProfileModerationPayload({ bio, interests });
-  requireTextModerationAdmission({
-    token: req.body.textModerationAdmission,
-    domain: moderatedText.domain,
-    userId,
-    fingerprint: fingerprintTextModerationPayload(moderatedText),
-  });
 
   let media;
   try {
@@ -457,15 +458,6 @@ export const updateMyProfile = catchAsync(
         interests: interests === undefined ? profile.interests : interests,
       })
       : null;
-    if (moderatedText) {
-      requireTextModerationAdmission({
-        token: req.body.textModerationAdmission,
-        domain: moderatedText.domain,
-        userId,
-        fingerprint: fingerprintTextModerationPayload(moderatedText),
-      });
-    }
-
     if (usesAdmissionBackedPersistence) {
       let media;
       try {

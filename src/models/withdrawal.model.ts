@@ -54,6 +54,8 @@ const WithdrawalDestinationSnapshotSchema = new Schema(
     ifscDisplay: { type: String, immutable: true, uppercase: true },
     verificationStatus: { type: String, enum: [PayoutDestinationVerificationStatus.VERIFIED], required: true, immutable: true },
     verifiedAt: { type: Date, required: true, immutable: true },
+    declaredCountry: { type: String, immutable: true, uppercase: true, match: /^[A-Z]{2}$/ },
+    verifiedCountry: { type: String, immutable: true, uppercase: true, match: /^[A-Z]{2}$/ },
     snapshotCreatedAt: { type: Date, required: true, immutable: true },
     encryptedPayload: { type: EncryptedWithdrawalDestinationSnapshotPayloadSchema, required: true, immutable: true, select: false },
   },

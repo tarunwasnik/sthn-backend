@@ -23,6 +23,7 @@ import {
 } from "../../../contracts/financial/paymentProvider.types";
 
 import { internalPaymentProvider } from "../../financial/providers/internal.provider";
+import { assertFinancialSimulatorAllowed } from "../../financial/simulatorAccess.service";
 
 export interface PaymentProviderResult {
   success: boolean;
@@ -59,6 +60,7 @@ export class PaymentProviderService {
   }
 
   private resolveProvider(provider: PaymentProvider): PaymentProviderInterface {
+    if (provider === PaymentProvider.INTERNAL) assertFinancialSimulatorAllowed();
     const implementation = this.providers.get(provider);
 
     if (!implementation) {

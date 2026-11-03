@@ -2,7 +2,7 @@
 
 
 import { Router } from "express";
-import { raiseAppeal } from "../../controllers/appeal.controller";
+import { getMyAppealForDispute, raiseAppeal } from "../../controllers/appeal.controller";
 import { protect } from "../../middlewares/auth.middleware";
 
 const router = Router();
@@ -17,5 +17,6 @@ router.use(protect);
  * POST /api/appeals/:disputeId
  */
 router.post("/:disputeId", raiseAppeal);
+router.get("/:disputeId", getMyAppealForDispute);
 
 export default router;

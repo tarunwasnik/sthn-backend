@@ -1,4 +1,5 @@
 import mongoose, { ClientSession, Types } from "mongoose";
+import { assertFinancialSimulatorAllowed } from "./simulatorAccess.service";
 
 import {
   ProviderEntityType,
@@ -727,6 +728,7 @@ export class WithdrawalProviderExecutionService {
   }
 
   async execute(input: ExecuteWithdrawalProviderInput) {
+    assertFinancialSimulatorAllowed();
     this.validateInput(input);
     const normalized = {
       ...input,

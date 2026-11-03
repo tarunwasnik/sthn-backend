@@ -39,7 +39,7 @@ export type ProfileMediaPersistenceTransactionContext = Readonly<{
   previousProfile?: Readonly<Record<string, unknown>>;
 }>;
 
-export type PersistProfileMediaAdmissionsInput = Readonly<{
+export type PersistProfileMediaAdmissionsInput<TCommittedOutcome = undefined> = Readonly<{
   actorId: Types.ObjectId;
   media: ProfileMediaAdmissionRequest;
   /** A server-held profile snapshot version; never accept this from a client. */
@@ -59,15 +59,16 @@ export type PersistProfileMediaAdmissionsInput = Readonly<{
    * be retried by MongoDB; callbacks must use the supplied session and remain
    * idempotent. External or irreversible side effects are forbidden here.
    */
-  withinTransaction?: (context: ProfileMediaPersistenceTransactionContext) => Promise<void>;
+  withinTransaction?: (context: ProfileMediaPersistenceTransactionContext) => Promise<TCommittedOutcome | void>;
 }>;
 
-export type ProfileMediaPersistenceResult = Readonly<{
+export type ProfileMediaPersistenceResult<TCommittedOutcome = undefined> = Readonly<{
   profileId: Types.ObjectId;
   avatar: string;
   cover: string;
   profilePhotos: readonly string[];
   cleanup: Readonly<{ replacedAuthoritativeReferences: readonly string[] }>;
+  committedOutcome?: TCommittedOutcome;
 }>;
 
 export class ProfileMediaAdmissionPersistenceError extends Error {
@@ -109,14 +110,14 @@ const previousSnapshot = (profile: UserProfileDocument) => Object.freeze({
 });
 
 export class ProfileMediaAdmissionPersistenceService {
-  async persist(input: PersistProfileMediaAdmissionsInput): Promise<ProfileMediaPersistenceResult> {
+  async persist<TCommittedOutcome = undefined>(input: PersistProfileMediaAdmissionsInput<TCommittedOutcome>): Promise<ProfileMediaPersistenceResult<TCommittedOutcome>> {
     if (input.expectedProfileVersion !== undefined && (!Number.isInteger(input.expectedProfileVersion) || input.expectedProfileVersion < 0)) {
       throw new ProfileMediaAdmissionPersistenceError("PROFILE_MEDIA_INVALID_VERSION");
     }
 
     const session = await mongoose.startSession();
     try {
-      let result: ProfileMediaPersistenceResult | undefined;
+      let result: ProfileMediaPersistenceResult<TCommittedOutcome> | undefined;
       await session.withTransaction(async () => {
         let profile = await userProfileRepository.findByUserId(input.actorId, session);
         const existedAtTransactionStart = Boolean(profile);
@@ -312,9 +313,9 @@ export class ProfileMediaAdmissionPersistenceService {
             session,
           });
         }
-        if (input.withinTransaction) {
-          await input.withinTransaction({ session, actorId: input.actorId, profile: persisted, previousProfile });
-        }
+        const committedOutcome = input.withinTransaction
+          ? await input.withinTransaction({ session, actorId: input.actorId, profile: persisted, previousProfile })
+          : undefined;
         result = {
           profileId: persisted._id,
           avatar: persisted.avatar,
@@ -323,6 +324,7 @@ export class ProfileMediaAdmissionPersistenceService {
           cleanup: {
             replacedAuthoritativeReferences: replaced,
           },
+          ...(committedOutcome === undefined ? {} : { committedOutcome }),
         };
       });
       if (!result) throw new Error("Profile media transaction did not produce a result");

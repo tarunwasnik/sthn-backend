@@ -22,6 +22,8 @@ import { profileVerificationInferenceResultRepository } from "../../repositories
 import { deriveProfileVerificationLifecycleStage } from "./profileVerificationLifecycle.service";
 import { createProfileVerificationSubmittedMediaSnapshot } from "./profileVerificationSubmittedMedia.service";
 import { selectNewProfileVerificationPolicy } from "./profileVerificationPolicy.service";
+import { notificationService } from "../notification/notification.service";
+import { notificationDeliveryService } from "../notification/notificationDelivery.service";
 
 const adminReviewReasonCodes = new Set<ProfileVerificationAdminReviewReasonCode>([
   "FACE_MATCH_UNCERTAIN", "LIVENESS_UNCERTAIN", "TEXT_MODERATION_UNCERTAIN",
@@ -223,6 +225,9 @@ export const decideProfileVerificationRequest = async (input: {
 
   const profileObjectId = new mongoose.Types.ObjectId(input.profileId);
   const session = await mongoose.startSession();
+  const decisionDelivery = {
+    notification: null as Awaited<ReturnType<typeof notificationService.createWithOutcome>> | null,
+  };
   try {
     let outcome: { request: ProfileVerificationRequestDocument; replayed: boolean } | null = null;
     await session.withTransaction(async () => {
@@ -286,10 +291,21 @@ export const decideProfileVerificationRequest = async (input: {
         },
         session,
       });
+      decisionDelivery.notification = await notificationService.createWithOutcome({
+        recipientId: String(updated.userId),
+        category: "PROFILE_VERIFICATION",
+        type: "PROFILE_VERIFICATION_UPDATE",
+        title: input.decision === "APPROVE" ? "Profile Verification Approved" : "Profile Verification Requires Corrections",
+        body: input.decision === "APPROVE" ? "Your profile verification has been approved." : "Your profile verification could not be approved. Review the required corrections and resubmit.",
+        metadata: { entityType: "PROFILE_VERIFICATION", entityId: String(updated._id), reference: updated.verificationReference },
+        idempotencyKey: `profile-verification:${updated._id}:${input.decision === "APPROVE" ? "approved" : "rejected"}:v${updated.profileSubmissionVersion}:${updated.userId}`,
+        session,
+      });
       outcome = { request: updated, replayed: false };
     });
     if (!outcome) throw new AppError("Profile verification decision did not complete", 500);
     const resolvedOutcome = outcome as { request: ProfileVerificationRequestDocument; replayed: boolean };
+    if (decisionDelivery.notification?.created) notificationDeliveryService.deliverPersisted(decisionDelivery.notification.notification, { postCommit: true });
     if (!resolvedOutcome.replayed) await scheduleFaceEvidenceRetentionForDecision(resolvedOutcome.request._id, input.decision, resolvedOutcome.request.decidedAt ?? new Date());
     return resolvedOutcome;
   } finally {

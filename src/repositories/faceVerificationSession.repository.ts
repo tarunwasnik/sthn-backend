@@ -42,9 +42,26 @@ export class FaceVerificationSessionRepository {
   create(input: Pick<FaceVerificationSessionDocument, "sessionReference" | "userId" | "profileId" | "profileSubmissionVersion" | "avatarFingerprint" | "challenges" | "expiresAt" | "avatarCandidate">) {
     return FaceVerificationSession.create({ ...input, status: "CREATED", isCurrent: true, requiredCaptureCount: 5, acceptedCaptureCount: 0, startedAt: new Date() });
   }
-  listExpiredCurrent(now: Date) { return FaceVerificationSession.find({ isCurrent: true, status: { $in: ["CREATED", "CAPTURING"] }, expiresAt: { $lte: now } }).exec(); }
+  listExpiredCurrent(now: Date) {
+    return FaceVerificationSession.find({
+      isCurrent: true,
+      expiresAt: { $lte: now },
+      $or: [
+        { status: { $in: ["CREATED", "CAPTURING"] } },
+        { status: "CAPTURE_COMPLETE", verificationRequestId: { $exists: false } },
+      ],
+    }).exec();
+  }
   expire(sessionId: Types.ObjectId, now: Date, cleanupAfter: Date) {
-    return FaceVerificationSession.findOneAndUpdate({ _id: sessionId, isCurrent: true, status: { $in: ["CREATED", "CAPTURING"] }, expiresAt: { $lte: now } }, { $set: { status: "EXPIRED", isCurrent: false, cleanupAfter } }, { new: true }).exec();
+    return FaceVerificationSession.findOneAndUpdate({
+      _id: sessionId,
+      isCurrent: true,
+      expiresAt: { $lte: now },
+      $or: [
+        { status: { $in: ["CREATED", "CAPTURING"] } },
+        { status: "CAPTURE_COMPLETE", verificationRequestId: { $exists: false } },
+      ],
+    }, { $set: { status: "EXPIRED", isCurrent: false, cleanupAfter } }, { new: true }).exec();
   }
   retireCurrent(input: { sessionId: Types.ObjectId; status: "CANCELLED" | "INVALIDATED"; cleanupAfter: Date; invalidationCode?: string }) {
     const terminalFields = input.status === "CANCELLED"
@@ -67,7 +84,7 @@ export class FaceVerificationSessionRepository {
     ).exec();
   }
   bindCompletedToRequest(input: { profileId: Types.ObjectId; requestId: Types.ObjectId; version: number; avatarFingerprint: string; avatarCandidate?: FaceVerificationAvatarCandidate; session?: ClientSession }) {
-    return FaceVerificationSession.findOneAndUpdate({ profileId: input.profileId, isCurrent: true, status: "CAPTURE_COMPLETE", profileSubmissionVersion: input.version, avatarFingerprint: input.avatarFingerprint, verificationRequestId: { $exists: false }, ...(input.avatarCandidate ? candidateFilter(input.avatarCandidate) : {}) }, { $set: { verificationRequestId: input.requestId } }, { new: true, session: input.session }).exec();
+    return FaceVerificationSession.findOneAndUpdate({ profileId: input.profileId, isCurrent: true, status: "CAPTURE_COMPLETE", expiresAt: { $gt: new Date() }, profileSubmissionVersion: input.version, avatarFingerprint: input.avatarFingerprint, verificationRequestId: { $exists: false }, ...(input.avatarCandidate ? candidateFilter(input.avatarCandidate) : {}) }, { $set: { verificationRequestId: input.requestId } }, { new: true, session: input.session }).exec();
   }
   findCurrentCompletedForInitialSubmission(input: { profileId: Types.ObjectId; userId: Types.ObjectId; version: number; avatarFingerprint: string; session?: ClientSession }) {
     return FaceVerificationSession.findOne({ profileId: input.profileId, userId: input.userId, isCurrent: true, status: "CAPTURE_COMPLETE", profileSubmissionVersion: input.version, avatarFingerprint: input.avatarFingerprint }).session(input.session ?? null).exec();

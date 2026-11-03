@@ -18,3 +18,9 @@ dataset-research/text-moderation/
 # Local evaluation tooling and API artifacts
 evaluation-cache/uv-cache/
 evaluation-cache/marqo-api.json
+
+# Local, pinned Image AI runtime artifact; provisioned outside Git.
+models/adamcodd-v2/model_int8.onnx
+
+# Historical local development smoke logs; not source or test fixtures.
+.codex-phase6c-smoke/

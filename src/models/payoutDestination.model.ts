@@ -8,6 +8,8 @@ export interface IPayoutDestination extends Document {
   destinationReference: string;
   creatorId: mongoose.Types.ObjectId;
   type: PayoutDestinationType;
+  declaredCountry?: string;
+  verifiedCountry?: string;
   verificationStatus: PayoutDestinationVerificationStatus;
   isActive: boolean;
   idempotencyKey: string;
@@ -52,6 +54,8 @@ const PayoutDestinationSchema = new Schema<IPayoutDestination>(
     type: {
       type: String, enum: Object.values(PayoutDestinationType), required: true, immutable: true, index: true,
     },
+    declaredCountry: { type: String, uppercase: true, match: /^[A-Z]{2}$/ },
+    verifiedCountry: { type: String, immutable: true, uppercase: true, match: /^[A-Z]{2}$/ },
     verificationStatus: {
       type: String,
       enum: Object.values(PayoutDestinationVerificationStatus),

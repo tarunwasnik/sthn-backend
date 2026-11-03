@@ -15,7 +15,6 @@ export const getAdminOverview = adminAsyncHandler(
   res: Response
 ) => {
 
-  console.log("✅ NEW ADMIN OVERVIEW CONTROLLER HIT");
   const overview = await getAdminOverviewService();
   res.json(
   adminResponse({

@@ -84,3 +84,35 @@ export const raiseAppeal = async (
     appeal,
   });
 };
+
+/** Participant-safe appeal status read. Admin decision notes remain private. */
+export const getMyAppealForDispute = async (req: Request, res: Response) => {
+  const user = req.user;
+  const { disputeId } = req.params;
+  if (!user) return res.status(401).json({ message: "Unauthorized" });
+  if (!mongoose.Types.ObjectId.isValid(disputeId)) return res.status(400).json({ message: "Invalid disputeId" });
+
+  const appeal = await Appeal.findOne({ disputeId }).lean();
+  if (!appeal) return res.status(404).json({ message: "Appeal not found" });
+  if (String(appeal.raisedBy) !== user.id) return res.status(403).json({ message: "Access denied" });
+
+  const dispute = await Dispute.findById(appeal.disputeId).select("bookingId").lean();
+  if (!dispute) return res.status(404).json({ message: "Linked dispute not found" });
+  const booking = await Booking.findOne({ _id: dispute.bookingId, $or: [{ userId: user.id }, { creatorId: user.id }] }).select("_id").lean();
+  if (!booking) return res.status(403).json({ message: "Access denied" });
+
+  return res.status(200).json({
+    appeal: {
+      appealId: String(appeal._id),
+      disputeId: String(appeal.disputeId),
+      bookingId: String(dispute.bookingId),
+      raisedByRole: appeal.raisedByRole,
+      status: appeal.status,
+      reason: appeal.reason,
+      evidence: appeal.evidence ?? [],
+      createdAt: appeal.createdAt,
+      updatedAt: appeal.updatedAt,
+      decision: appeal.decision ? { action: appeal.decision.action, decidedAt: appeal.decision.decidedAt } : null,
+    },
+  });
+};

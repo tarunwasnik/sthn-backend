@@ -21,6 +21,7 @@ import {
 } from "../../constants/internalProvider";
 
 import { paymentProviderService } from "../payment/provider/paymentProvider.service";
+import { assertFinancialSimulatorAllowed } from "../financial/simulatorAccess.service";
 import ProviderPayoutService, {
   SimulateProviderPayoutTransitionResult,
 } from "../internalProvider/payouts/providerPayout.service";
@@ -75,6 +76,7 @@ export class ProviderSimulatorService {
   simulateWalletConversionProvider(
     input: SimulateWalletConversionProviderInput,
   ): SimulateWalletConversionProviderResult {
+    assertFinancialSimulatorAllowed();
     if (!/^IWCPR-[A-F0-9]{20}$/.test(input.providerRequestReference) ||
       !/^IWCXE-[A-F0-9]{20}$/.test(input.providerExecutionReference) ||
       !/^WCV-/.test(input.conversionReference) ||
@@ -126,6 +128,7 @@ export class ProviderSimulatorService {
   simulateWithdrawalProvider(
     input: SimulateWithdrawalProviderInput,
   ): SimulateWithdrawalProviderResult {
+    assertFinancialSimulatorAllowed();
     if (
       !/^IWPR-[A-F0-9]{20}$/.test(input.providerRequestReference) ||
       !/^INTERNAL-WD-[A-F0-9]{24}$/.test(input.providerReference) ||
@@ -275,6 +278,7 @@ export class ProviderSimulatorService {
   async simulatePayout(
     input: SimulatePayoutInput,
   ): Promise<SimulateProviderPayoutTransitionResult> {
+    assertFinancialSimulatorAllowed();
     this.validatePayoutSimulationInput(input);
 
     return ProviderPayoutService.simulatePayoutTransition({

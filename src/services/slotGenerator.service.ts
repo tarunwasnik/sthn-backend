@@ -77,21 +77,6 @@ const [endHour, endMinute] = endTime
   .split(":")
   .map(Number);
 
-console.log("timezone:", timezone);
-console.log("date:", date);
-
-console.log(
-  "fromJSDate:",
-  DateTime.fromJSDate(date).toISO()
-);
-
-console.log(
-  "setZone:",
-  DateTime.fromJSDate(date)
-    .setZone(timezone)
-    .toISO()
-);
-
 let currentSlotStart = DateTime.fromObject(
   {
     year: availabilityDate.year,

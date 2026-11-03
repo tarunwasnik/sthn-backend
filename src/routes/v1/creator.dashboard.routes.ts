@@ -1,9 +1,10 @@
 //backend/src/routes/v1/creator.dashboard.routes.ts
 
 import { Router } from "express";
-import { protect } from "../../middlewares/auth.middleware";
+import { protect, protectRestrictedRead } from "../../middlewares/auth.middleware";
 import { requireRole } from "../../middlewares/role.middleware";
 import { getCreatorDashboard } from "../../controllers/creatorDashboard.controller";
+import { getCreatorEntitlements, getCreatorSelfStatus } from "../../controllers/creatorFinancialRead.controller";
 
 const router = Router();
 
@@ -16,5 +17,7 @@ router.get(
   requireRole("creator"),
   getCreatorDashboard
 );
+router.get("/self-status", protectRestrictedRead, requireRole("creator"), getCreatorSelfStatus);
+router.get("/entitlements", protectRestrictedRead, requireRole("creator"), getCreatorEntitlements);
 
 export default router;

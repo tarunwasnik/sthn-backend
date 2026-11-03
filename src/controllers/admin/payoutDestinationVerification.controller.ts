@@ -10,6 +10,7 @@ const ALLOWED_FIELDS = new Set([
   "rejectionCode",
   "rejectionReason",
   "note",
+  "verifiedCountry",
 ]);
 
 export const applyPayoutDestinationVerificationDecision = asyncHandler(
@@ -36,7 +37,7 @@ export const applyPayoutDestinationVerificationDecision = asyncHandler(
       );
     }
 
-    const { action, rejectionCode, rejectionReason, note } = body;
+    const { action, rejectionCode, rejectionReason, note, verifiedCountry } = body;
     for (const [field, value] of Object.entries({ rejectionCode, rejectionReason, note })) {
       if (value !== undefined && typeof value !== "string") {
         throw new PayoutDestinationError(
@@ -64,6 +65,7 @@ export const applyPayoutDestinationVerificationDecision = asyncHandler(
       rejectionCode: typeof rejectionCode === "string" ? rejectionCode : undefined,
       rejectionReason: typeof rejectionReason === "string" ? rejectionReason : undefined,
       note: typeof note === "string" ? note : undefined,
+      verifiedCountry: typeof verifiedCountry === "string" ? verifiedCountry : undefined,
     });
 
     const isVerify = action === PayoutDestinationVerificationAction.VERIFY;
