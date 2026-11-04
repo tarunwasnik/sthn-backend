@@ -12,6 +12,7 @@ import { generateUniqueCreatorSlug } from "../utils/generateCreatorSlug";
 import { emitIdentityChanged } from "../sockets/chat.socket";
 import { notificationService } from "../services/notification/notification.service";
 import { notificationDeliveryService } from "../services/notification/notificationDelivery.service";
+import { createAuditLog } from "../services/auditLog.service";
 
 /* =====================================================
    LIST CREATOR APPLICATIONS
@@ -144,6 +145,24 @@ export const approveCreatorApplication = async (
 
     await application.save({ session });
 
+    await createAuditLog({
+      actorType: "ADMIN",
+      actorId: new mongoose.Types.ObjectId(req.user!.id),
+      action: "CREATOR_APPLICATION_APPROVED",
+      entityType: "CREATOR_APPLICATION",
+      entityId: application._id,
+      before: {
+        status: "submitted",
+        creatorStatus: "pending",
+      },
+      after: {
+        status: application.status,
+        creatorStatus: user.creatorStatus,
+        creatorProfileId: String(creatorProfile._id),
+      },
+      session,
+    });
+
     approvalNotification = await notificationService.createWithOutcome({
       recipientId: String(application.userId),
       category: "CREATOR_APPLICATION",
@@ -194,6 +213,7 @@ export const rejectCreatorApplication = async (req: Request, res: Response) => {
   const { reason } = req.body;
 
   const session = await mongoose.startSession();
+  let rejectionNotification: Awaited<ReturnType<typeof notificationService.createWithOutcome>> | null = null;
 
   try {
     session.startTransaction();
@@ -228,9 +248,41 @@ export const rejectCreatorApplication = async (req: Request, res: Response) => {
 
     await user.save({ session });
 
+    await createAuditLog({
+      actorType: "ADMIN",
+      actorId: new mongoose.Types.ObjectId(req.user!.id),
+      action: "CREATOR_APPLICATION_REJECTED",
+      entityType: "CREATOR_APPLICATION",
+      entityId: application._id,
+      before: {
+        status: "submitted",
+        creatorStatus: "pending",
+      },
+      after: {
+        status: application.status,
+        creatorStatus: user.creatorStatus,
+        rejectionReason: application.rejectionReason,
+      },
+      session,
+    });
+
+    rejectionNotification = await notificationService.createWithOutcome({
+      recipientId: String(application.userId),
+      category: "CREATOR_APPLICATION",
+      type: "CREATOR_APPLICATION_UPDATE",
+      title: "Creator Application Needs Updates",
+      body: "Your Creator Application was not approved. Review the feedback and resubmit when you are ready.",
+      navigationPath: "/creator-application",
+      metadata: { entityType: "CREATOR_APPLICATION", entityId: String(application._id) },
+      idempotencyKey: `creator-application:${application._id}:rejected:${application.userId}`,
+      session,
+    });
+
     await session.commitTransaction();
 
     session.endSession();
+
+    if (rejectionNotification?.created) notificationDeliveryService.deliverPersisted(rejectionNotification.notification, { postCommit: true });
 
     res.status(200).json({
       message: "Creator application rejected",
@@ -257,6 +309,10 @@ export const deleteCreatorApplication = async (req: Request, res: Response) => {
 
   if (!application) {
     throw new AppError("Application not found", 404);
+  }
+
+  if (application.status !== "draft") {
+    throw new AppError("Only unsubmitted creator application drafts can be deleted", 409);
   }
 
   await CreatorApplication.findByIdAndDelete(applicationId);

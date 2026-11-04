@@ -297,6 +297,7 @@ export const decideProfileVerificationRequest = async (input: {
         type: "PROFILE_VERIFICATION_UPDATE",
         title: input.decision === "APPROVE" ? "Profile Verification Approved" : "Profile Verification Requires Corrections",
         body: input.decision === "APPROVE" ? "Your profile verification has been approved." : "Your profile verification could not be approved. Review the required corrections and resubmit.",
+        navigationPath: "/onboarding",
         metadata: { entityType: "PROFILE_VERIFICATION", entityId: String(updated._id), reference: updated.verificationReference },
         idempotencyKey: `profile-verification:${updated._id}:${input.decision === "APPROVE" ? "approved" : "rejected"}:v${updated.profileSubmissionVersion}:${updated.userId}`,
         session,

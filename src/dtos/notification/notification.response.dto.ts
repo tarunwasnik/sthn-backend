@@ -11,8 +11,6 @@ export interface NotificationResponseDto {
     entityType?: string;
     entityId?: string;
     reference?: string;
-    amount?: number;
-    currency?: string;
   };
   readAt: Date | null;
   createdAt: Date;
@@ -32,8 +30,6 @@ export const serializeNotification = (notification: INotification): Notification
       ...(notification.metadata.entityType ? { entityType: notification.metadata.entityType } : {}),
       ...(notification.metadata.entityId ? { entityId: String(notification.metadata.entityId) } : {}),
       ...(notification.metadata.reference ? { reference: notification.metadata.reference } : {}),
-      ...(notification.metadata.amount !== undefined ? { amount: notification.metadata.amount } : {}),
-      ...(notification.metadata.currency ? { currency: notification.metadata.currency } : {}),
     },
   } : {}),
   readAt: notification.readAt ?? null,

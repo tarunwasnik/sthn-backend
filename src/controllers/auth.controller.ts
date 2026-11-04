@@ -8,23 +8,31 @@ import { generateToken } from "../utils/jwt";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+const normalizeEmail = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+
+  const email = value.trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+};
+
 /* ================= REGISTER ================= */
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const email = normalizeEmail(req.body.email);
+    const { password } = req.body;
 
-    if (!email || !password) {
+    if (!email || typeof password !== "string" || !password) {
       return res.status(400).json({
-        message: "Email and password are required",
+        message: "A valid email and password are required",
       });
     }
 
     const existingUser = await User.findOne({ email });
 
     if (existingUser) {
-      return res.status(400).json({
-        message: "User already exists",
+      return res.status(409).json({
+        message: "Unable to create an account with those details",
       });
     }
 
@@ -60,9 +68,10 @@ export const register = async (req: Request, res: Response) => {
 
 export const login = async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const email = normalizeEmail(req.body.email);
+    const { password } = req.body;
 
-    if (!email || !password) {
+    if (!email || typeof password !== "string" || !password) {
       return res.status(400).json({
         message: "Email and password are required",
       });
@@ -150,7 +159,15 @@ export const googleLogin = async (req: Request, res: Response) => {
       });
     }
 
-    const { email, sub } = payload;
+    const email = normalizeEmail(payload.email);
+
+    if (!email || payload.email_verified !== true) {
+      return res.status(400).json({
+        message: "Google account email must be verified",
+      });
+    }
+
+    const { sub } = payload;
 
     let user = await User.findOne({ email });
 

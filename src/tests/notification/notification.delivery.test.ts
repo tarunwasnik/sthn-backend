@@ -34,6 +34,8 @@ test("delivery emits only the persisted recipient's personal room with the REST-
   assert.equal(io.emitted.length, 1); assert.equal(io.emitted[0].room, personalRoom(recipientId)); assert.equal(io.emitted[0].event, "notification:created");
   assert.equal(io.emitted[0].payload.recipientId, undefined); assert.equal(io.emitted[0].payload.idempotencyKey, undefined); assert.equal(io.emitted[0].payload._id, undefined);
   assert.equal(io.emitted[0].payload.id, String(record._id));
+  assert.equal((io.emitted[0].payload.metadata as Record<string, unknown>).amount, undefined);
+  assert.equal((io.emitted[0].payload.metadata as Record<string, unknown>).currency, undefined);
 });
 
 test("delivery never emits before post-commit or when a transaction session is supplied", () => {

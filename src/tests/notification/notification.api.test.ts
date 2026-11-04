@@ -38,6 +38,8 @@ test("history is authenticated, recipient-scoped, paginated, and safely serializ
   await handlers.getHistory({ query: {}, user: { id: recipient } } as any, authenticated.res as any);
   const body = authenticated.result().payload as { notifications: Array<Record<string, unknown>>; nextCursor: string; hasMore: boolean };
   assert.equal(receivedRecipient, recipient); assert.equal(receivedLimit, 20); assert.equal(body.notifications[0].recipientId, undefined); assert.equal(body.notifications[0].idempotencyKey, undefined); assert.equal(body.hasMore, true); assert.equal(typeof body.nextCursor, "string");
+  assert.equal((body.notifications[0].metadata as Record<string, unknown>).amount, undefined);
+  assert.equal((body.notifications[0].metadata as Record<string, unknown>).currency, undefined);
 });
 
 test("history rejects malformed cursors and unbounded page sizes", async () => {

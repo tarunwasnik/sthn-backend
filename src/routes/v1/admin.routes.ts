@@ -41,6 +41,7 @@ import { getAdminGovernanceTargetController } from "../../controllers/adminGover
 import { addAdminDisputeFinding, createAdminDisputeRequest, finalizeAdminDispute, getAdminDispute, getAdminDisputeInvestigation, listAdminDisputes, setAdminDisputeInputAccess, shareAdminDisputeSubmission } from "../../controllers/adminDispute.controller";
 import { chatDocumentUpload, chatImageUpload } from "../../middlewares/upload.middleware";
 import { uploadAdminDocument, uploadAdminImage } from "../../controllers/disputeDirectEvidence.controller";
+import { getAdminAppeal, listAdminAppeals } from "../../controllers/adminAppeal.controller";
 
 const router = Router();
 
@@ -211,6 +212,9 @@ router.get(
 router.get("/disputes/:disputeId", protect, authorizeRoles("admin"), getAdminDispute);
 
 /* ================= APPEALS ================= */
+
+router.get("/appeals", protect, authorizeRoles("admin"), listAdminAppeals);
+router.get("/appeals/:appealId", protect, authorizeRoles("admin"), getAdminAppeal);
 
 router.post(
   "/appeals/:appealId/decide",
