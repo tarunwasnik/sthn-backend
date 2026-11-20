@@ -35,16 +35,23 @@ test("below-threshold and absent-threshold results require Admin review and neve
 test("an inference/request authority mismatch cannot approve or persist an AI snapshot", async () => { const { profile, request } = await setup("mismatch"); await applyProfileVerificationAiDecision({ request, result: await result(request, { similarity: 0.95, threshold: 0.9, conclusion: "LIKELY_MATCH", mismatch: true }) }); const stored = await ProfileVerificationRequest.findById(request._id); assert.equal(stored?.status, "ADMIN_REVIEW_REQUIRED"); assert.equal(stored?.aiDecisionSnapshot, undefined); assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification"); });
 test("a persisted gated request never enters the legacy .90 approval authority", async () => { const previousThreshold = process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD; process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD = "0.90"; try { const { profile, request } = await setup("gated-high", true); delete process.env.STHN_PROFILE_VERIFICATION_POLICY; await applyProfileVerificationAiDecision({ request, result: await result(request, { similarity: 0.99, threshold: 0.9, conclusion: "LIKELY_MATCH" }) }); const stored = await ProfileVerificationRequest.findById(request._id); assert.equal(stored?.verificationPolicy?.key, "GATED_MULTI_MEDIA"); assert.equal(stored?.verificationPolicy?.version, "V1"); assert.equal(stored?.status, "ADMIN_REVIEW_REQUIRED"); assert.equal(stored?.decision, undefined); assert.equal(stored?.aiDecisionSnapshot, undefined); assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification"); } finally { if (previousThreshold === undefined) delete process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD; else process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD = previousThreshold; } });
 test("AI cannot directly finalize while Admin approval and rejection remain authoritative", async () => {
-  const approval = await setup("admin-approval");
-  await assert.rejects(() => decideProfileVerificationRequest({ profileId: String(approval.profile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: { source: "AI", model: { identifier: "test", version: "1" }, similarity: .99, threshold: .9, decidedAt: new Date() } }), /not eligible for automatic decisions/);
-  assert.equal((await ProfileVerificationRequest.findById(approval.request._id))?.status, "PENDING");
-  assert.equal((await UserProfile.findById(approval.profile._id))?.profileStatus, "pending_verification");
-  const admin = await User.create({ email: "ai-decision-admin@test.local", password: "test-password", role: "admin", status: "active", governanceState: "ACTIVE" });
-  const approved = await decideProfileVerificationRequest({ profileId: String(approval.profile._id), decision: "APPROVE", authority: "ADMIN", decidedBy: String(admin._id) });
-  assert.equal(approved.request.decisionAuthority, "ADMIN");
-  assert.equal((await UserProfile.findById(approval.profile._id))?.profileStatus, "verified");
-  const rejection = await setup("admin-rejection");
-  const rejected = await decideProfileVerificationRequest({ profileId: String(rejection.profile._id), decision: "REJECT", authority: "ADMIN", decidedBy: String(admin._id), reason: "Please correct the profile." });
-  assert.equal(rejected.request.decisionAuthority, "ADMIN");
-  assert.equal((await UserProfile.findById(rejection.profile._id))?.profileStatus, "rejected");
+  const previousAutomaticVerification = process.env.STHN_USER_PROFILE_AUTOMATIC_VERIFICATION_ENABLED;
+  process.env.STHN_USER_PROFILE_AUTOMATIC_VERIFICATION_ENABLED = "false";
+  try {
+    const approval = await setup("admin-approval");
+    await assert.rejects(() => decideProfileVerificationRequest({ profileId: String(approval.profile._id), decision: "APPROVE", authority: "AI", aiDecisionSnapshot: { source: "AI", model: { identifier: "test", version: "1" }, similarity: .99, threshold: .9, decidedAt: new Date() } }), /automatic profile verification is disabled/);
+    assert.equal((await ProfileVerificationRequest.findById(approval.request._id))?.status, "PENDING");
+    assert.equal((await UserProfile.findById(approval.profile._id))?.profileStatus, "pending_verification");
+    const admin = await User.create({ email: "ai-decision-admin@test.local", password: "test-password", role: "admin", status: "active", governanceState: "ACTIVE" });
+    const approved = await decideProfileVerificationRequest({ profileId: String(approval.profile._id), decision: "APPROVE", authority: "ADMIN", decidedBy: String(admin._id) });
+    assert.equal(approved.request.decisionAuthority, "ADMIN");
+    assert.equal((await UserProfile.findById(approval.profile._id))?.profileStatus, "verified");
+    const rejection = await setup("admin-rejection");
+    const rejected = await decideProfileVerificationRequest({ profileId: String(rejection.profile._id), decision: "REJECT", authority: "ADMIN", decidedBy: String(admin._id), reason: "Please correct the profile." });
+    assert.equal(rejected.request.decisionAuthority, "ADMIN");
+    assert.equal((await UserProfile.findById(rejection.profile._id))?.profileStatus, "rejected");
+  } finally {
+    if (previousAutomaticVerification === undefined) delete process.env.STHN_USER_PROFILE_AUTOMATIC_VERIFICATION_ENABLED;
+    else process.env.STHN_USER_PROFILE_AUTOMATIC_VERIFICATION_ENABLED = previousAutomaticVerification;
+  }
 });
