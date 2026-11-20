@@ -4,8 +4,27 @@ import {
   ProfileVerificationJob,
   ProfileVerificationJobDocument,
 } from "../models/profileVerificationJob.model";
+import { ProfileVerificationRequest } from "../models/profileVerificationRequest.model";
+import { VerificationTarget } from "../services/creator/creatorVerificationTarget";
 
 export class ProfileVerificationJobRepository {
+  async createForTarget(input: Omit<Pick<ProfileVerificationJobDocument, "jobReference" | "verificationRequestId" | "nextAttemptAt">, "profileId" | "userId" | "profileSubmissionVersion"> & Pick<VerificationTarget, "targetType" | "targetId" | "ownerUserId" | "verificationRevision">, session?: ClientSession) {
+    const request = await ProfileVerificationRequest.exists({
+      _id: input.verificationRequestId,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      ownerUserId: input.ownerUserId,
+      verificationRevision: input.verificationRevision,
+    }).session(session ?? null);
+    if (!request) throw new Error("Verification job target does not match its request");
+    const { targetType, targetId, ownerUserId, verificationRevision, ...jobInput } = input;
+    const [job] = await ProfileVerificationJob.create([{
+      ...jobInput, userId: ownerUserId, targetType, targetId, ownerUserId, ...(targetType === "USER_PROFILE" ? { profileId: targetId } : {}),
+      verificationRevision, profileSubmissionVersion: verificationRevision,
+      jobType: "PROFILE_VERIFICATION_PROCESSING", status: "PENDING", attemptCount: 0, maxRetryCount: 3,
+    }], session ? { session } : undefined);
+    return job;
+  }
   findById(jobId: Types.ObjectId) {
     return ProfileVerificationJob.findById(jobId).exec();
   }
@@ -19,14 +38,22 @@ export class ProfileVerificationJobRepository {
   }
 
   async create(input: Pick<ProfileVerificationJobDocument, "jobReference" | "verificationRequestId" | "profileId" | "userId" | "profileSubmissionVersion" | "nextAttemptAt">, session?: ClientSession) {
-    const [job] = await ProfileVerificationJob.create([{ ...input, jobType: "PROFILE_VERIFICATION_PROCESSING", status: "PENDING", attemptCount: 0, maxRetryCount: 3 }], session ? { session } : undefined);
+    const [job] = await ProfileVerificationJob.create([{
+      ...input,
+      targetType: "USER_PROFILE",
+      targetId: input.profileId,
+      ownerUserId: input.userId,
+      verificationRevision: input.profileSubmissionVersion,
+      jobType: "PROFILE_VERIFICATION_PROCESSING", status: "PENDING", attemptCount: 0, maxRetryCount: 3,
+    }], session ? { session } : undefined);
     return job;
   }
 
-  claimNext(workerId: string, now: Date, leaseExpiresAt: Date) {
+  claimNext(workerId: string, now: Date, leaseExpiresAt: Date, creatorUpgradeIds: Types.ObjectId[] = []) {
     return ProfileVerificationJob.findOneAndUpdate(
       {
         status: { $in: ["PENDING", "RETRY_WAIT"] },
+        $or: [{ targetType: { $ne: "CREATOR_APPLICATION" } }, { targetType: "CREATOR_APPLICATION", targetId: { $in: creatorUpgradeIds } }],
         nextAttemptAt: { $lte: now },
         $expr: { $lt: ["$attemptCount", "$maxRetryCount"] },
       },
@@ -38,9 +65,9 @@ export class ProfileVerificationJobRepository {
     ).exec();
   }
 
-  recoverExpiredLeasesBelowAttemptLimit(now: Date) {
+  recoverExpiredLeasesBelowAttemptLimit(now: Date, creatorUpgradeIds: Types.ObjectId[] = []) {
     return ProfileVerificationJob.updateMany(
-      { status: "RUNNING", leaseExpiresAt: { $lte: now }, $expr: { $lt: ["$attemptCount", "$maxRetryCount"] } },
+      { status: "RUNNING", $or: [{ targetType: { $ne: "CREATOR_APPLICATION" } }, { targetType: "CREATOR_APPLICATION", targetId: { $in: creatorUpgradeIds } }], leaseExpiresAt: { $lte: now }, $expr: { $lt: ["$attemptCount", "$maxRetryCount"] } },
       {
         $set: { status: "RETRY_WAIT", nextAttemptAt: now },
         $unset: { workerId: 1, claimedAt: 1, leaseExpiresAt: 1 },
@@ -49,9 +76,9 @@ export class ProfileVerificationJobRepository {
   }
 
   /** Atomically terminalizes one abandoned claim whose existing attempt budget is exhausted. */
-  failOneExpiredLeaseAtAttemptLimit(now: Date) {
+  failOneExpiredLeaseAtAttemptLimit(now: Date, creatorUpgradeIds: Types.ObjectId[] = []) {
     return ProfileVerificationJob.findOneAndUpdate(
-      { status: "RUNNING", leaseExpiresAt: { $lte: now }, $expr: { $gte: ["$attemptCount", "$maxRetryCount"] } },
+      { status: "RUNNING", $or: [{ targetType: { $ne: "CREATOR_APPLICATION" } }, { targetType: "CREATOR_APPLICATION", targetId: { $in: creatorUpgradeIds } }], leaseExpiresAt: { $lte: now }, $expr: { $gte: ["$attemptCount", "$maxRetryCount"] } },
       {
         $set: {
           status: "FAILED",
@@ -93,6 +120,10 @@ export class ProfileVerificationJobRepository {
       { $set: { status: "COMPLETED", completedAt: input.now }, $unset: { claimedAt: 1, leaseExpiresAt: 1, workerId: 1 } },
       { new: true, runValidators: true },
     ).exec();
+  }
+
+  failInactiveCreatorRequest(jobId: Types.ObjectId, now: Date) {
+    return ProfileVerificationJob.findOneAndUpdate({ _id: jobId, targetType: "CREATOR_APPLICATION", status: { $in: ["PENDING", "RUNNING", "RETRY_WAIT"] } }, { $set: { status: "FAILED", failedAt: now, lastErrorCode: "REQUEST_INACTIVE" }, $unset: { claimedAt: 1, leaseExpiresAt: 1, workerId: 1 } }, { new: true, runValidators: true }).exec();
   }
 
   listNonTerminal() {

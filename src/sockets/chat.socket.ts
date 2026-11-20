@@ -5,20 +5,26 @@ import { Server, Socket } from "socket.io";
 import User from "../models/User";
 import { Booking } from "../models/booking.model";
 import { Chat } from "../models/chat.model";
+import { validAuthSession } from "../services/authSession.service";
 
-interface SocketJwtPayload { id: string; }
+interface SocketJwtPayload { id: string; sid?: string; }
 type SocketAcknowledgement = (result: { ok: boolean; code?: string }) => void;
 
 const onlineUsers = new Map<string, Set<string>>();
 let socketServer: Server | null = null;
 const bookingRoom = (bookingId: string) => `booking:${bookingId}`;
 export const personalRoom = (userId: string) => `user:${userId}`;
+export const disconnectAuthSession = (sessionId: string): void => {
+  if (!socketServer) return;
+  for (const socket of socketServer.sockets.sockets.values()) if (socket.data.sessionId === sessionId) socket.disconnect(true);
+};
 
 const acknowledge = (callback: unknown, result: { ok: boolean; code?: string }) => {
   if (typeof callback === "function") (callback as SocketAcknowledgement)(result);
 };
 
-const isCurrentUserAllowed = async (userId: string): Promise<boolean> => {
+const isCurrentUserAllowed = async (userId: string, sessionId?: string): Promise<boolean> => {
+  if (!sessionId || !(await validAuthSession(sessionId, userId))) return false;
   const user = await User.findById(userId).select("status").lean();
   return Boolean(user && user.status !== "suspended" && user.status !== "banned");
 };
@@ -36,7 +42,8 @@ const canUseBookingRoom = async (
   options: { requireJoinedRoom?: boolean; rejectTerminal?: boolean } = {},
 ) => {
   const userId = socket.data.userId as string | undefined;
-  if (!userId || !(await isCurrentUserAllowed(userId))) return null;
+  const sessionId = socket.data.sessionId as string | undefined;
+  if (!userId || !(await isCurrentUserAllowed(userId, sessionId))) return null;
   const booking = await participantBooking(userId, bookingId);
   if (!booking) return null;
   const id = String(booking._id);
@@ -65,9 +72,11 @@ export const chatSocket = (io: Server): void => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as SocketJwtPayload;
       if (!decoded.id || !mongoose.Types.ObjectId.isValid(decoded.id)) return next(new Error("Unauthorized"));
+      if (!decoded.sid || !(await validAuthSession(decoded.sid, decoded.id))) return next(new Error("Unauthorized"));
       const user = await User.findById(decoded.id).select("_id status").lean();
       if (!user || user.status === "suspended" || user.status === "banned") return next(new Error("Unauthorized"));
       socket.data.userId = String(user._id);
+      socket.data.sessionId = decoded.sid;
       next();
     } catch {
       next(new Error("Unauthorized"));
@@ -86,7 +95,7 @@ export const chatSocket = (io: Server): void => {
     if (becameOnline) void emitPresenceForUser(io, userId, true);
 
     socket.on("presence:get", async () => {
-      if (!(await isCurrentUserAllowed(userId))) return;
+      if (!(await isCurrentUserAllowed(userId, socket.data.sessionId as string | undefined))) return socket.disconnect(true);
       const bookings = await participantBookings(userId);
       const visibleOnlineUsers = new Set<string>();
       for (const booking of bookings) {

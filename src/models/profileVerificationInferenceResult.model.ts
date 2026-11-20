@@ -35,6 +35,10 @@ export interface ProfileVerificationInferenceResultDocument extends Document {
   verificationRequestId: mongoose.Types.ObjectId;
   profileId: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
+  targetType?: "USER_PROFILE" | "CREATOR_APPLICATION";
+  targetId?: mongoose.Types.ObjectId;
+  ownerUserId?: mongoose.Types.ObjectId;
+  verificationRevision?: number;
   profileSubmissionVersion: number;
   faceVerificationSessionId: mongoose.Types.ObjectId;
   evidenceSetFingerprint: string;
@@ -104,7 +108,7 @@ const profileMediaShadowAnalysisSchema = new Schema({
   model: { identifier: { type: String, required: true, immutable: true, trim: true, maxlength: 120 }, version: { type: String, required: true, immutable: true, trim: true, maxlength: 120 } },
   summary: { submittedMediaCount: { type: Number, required: true, immutable: true, min: 0, max: 8 }, processedMediaCount: { type: Number, required: true, immutable: true, min: 0, max: 8 }, mediaWithNoFaceCount: { type: Number, required: true, immutable: true, min: 0, max: 8 }, mediaWithUsableFacesCount: { type: Number, required: true, immutable: true, min: 0, max: 8 }, multiFaceMediaCount: { type: Number, required: true, immutable: true, min: 0, max: 8 }, failedMediaCount: { type: Number, required: true, immutable: true, min: 0, max: 8 } },
   live: { usableCaptureCount: { type: Number, required: true, immutable: true, min: 0, max: 5 }, pairwiseComparisonCount: { type: Number, required: true, immutable: true, min: 0, max: 10 }, minimumSimilarity: { type: Number, immutable: true, min: -1, max: 1 }, maximumSimilarity: { type: Number, immutable: true, min: -1, max: 1 }, meanSimilarity: { type: Number, immutable: true, min: -1, max: 1 }, medianSimilarity: { type: Number, immutable: true, min: -1, max: 1 } },
-  media: [{ _id: false, role: { type: String, required: true, immutable: true, enum: ["AVATAR", "COVER", "PROFILE_PHOTO"] }, profilePhotoIndex: { type: Number, immutable: true, min: 0, max: 5 }, status: { type: String, required: true, immutable: true, enum: ["NO_FACE", "NO_USABLE_FACE", "FACE_CANDIDATES_AVAILABLE", "MEDIA_READ_FAILED"] }, detectedFaceCount: { type: Number, required: true, immutable: true, min: 0, max: 50 }, usableFaceCount: { type: Number, required: true, immutable: true, min: 0, max: 50 }, candidateCount: { type: Number, required: true, immutable: true, min: 0, max: 50 }, bestCandidate: { type: profileMediaCandidateSchema, immutable: true }, secondBestMedianSimilarity: { type: Number, immutable: true, min: -1, max: 1 }, bestVsSecondMargin: { type: Number, immutable: true, min: -1, max: 1 } }],
+  media: [{ _id: false, role: { type: String, required: true, immutable: true, enum: ["AVATAR", "COVER", "PROFILE_PHOTO"] }, profilePhotoIndex: { type: Number, immutable: true, min: 0, max: 5 }, status: { type: String, required: true, immutable: true, enum: ["NO_FACE", "NO_USABLE_FACE", "FACE_CANDIDATES_AVAILABLE", "MEDIA_READ_FAILED"] }, detectedFaceCount: { type: Number, required: true, immutable: true, min: 0, max: 50 }, usableFaceCount: { type: Number, required: true, immutable: true, min: 0, max: 50 }, candidateCount: { type: Number, required: true, immutable: true, min: 0, max: 50 }, bestCandidate: { type: profileMediaCandidateSchema, immutable: true }, secondBestMedianSimilarity: { type: Number, immutable: true, min: -1, max: 1 }, bestVsSecondMargin: { type: Number, immutable: true, min: 0, max: 2, validate: { validator: (value: number) => Number.isFinite(value), message: "Comparison margin must be a finite number" } } }],
 }, { _id: false, strict: "throw" });
 const policySchema = new Schema({ key: { type: String, required: true, enum: ["LEGACY_AVATAR_ONLY", "GATED_MULTI_MEDIA"] }, version: { type: String, required: true, trim: true, maxlength: 40 } }, { _id: false, strict: "throw" });
 const gatedPolicyAnalysisSchema = new Schema({
@@ -131,8 +135,12 @@ const schema = new Schema<ProfileVerificationInferenceResultDocument>({
   inferenceReference: { type: String, required: true, unique: true, immutable: true, index: true, trim: true, maxlength: 96 },
   inferenceRunFingerprint: { type: String, required: true, unique: true, immutable: true, index: true, lowercase: true, match: /^[a-f0-9]{64}$/ },
   verificationRequestId: { type: Schema.Types.ObjectId, ref: "ProfileVerificationRequest", required: true, immutable: true, index: true },
-  profileId: { type: Schema.Types.ObjectId, ref: "UserProfile", required: true, immutable: true, index: true },
+  profileId: { type: Schema.Types.ObjectId, ref: "UserProfile", required: function (this: ProfileVerificationInferenceResultDocument) { return this.targetType !== "CREATOR_APPLICATION"; }, immutable: true, index: true },
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true, immutable: true, index: true },
+  targetType: { type: String, enum: ["USER_PROFILE", "CREATOR_APPLICATION"], immutable: true, index: true },
+  targetId: { type: Schema.Types.ObjectId, immutable: true, index: true, required: function (this: ProfileVerificationInferenceResultDocument) { return this.targetType === "CREATOR_APPLICATION"; } },
+  ownerUserId: { type: Schema.Types.ObjectId, ref: "User", immutable: true, index: true, required: function (this: ProfileVerificationInferenceResultDocument) { return this.targetType === "CREATOR_APPLICATION"; } },
+  verificationRevision: { type: Number, immutable: true, min: 1, required: function (this: ProfileVerificationInferenceResultDocument) { return this.targetType === "CREATOR_APPLICATION"; } },
   profileSubmissionVersion: { type: Number, required: true, immutable: true, min: 1, index: true },
   faceVerificationSessionId: { type: Schema.Types.ObjectId, ref: "FaceVerificationSession", required: true, immutable: true, index: true },
   evidenceSetFingerprint: { type: String, required: true, immutable: true, lowercase: true, match: /^[a-f0-9]{64}$/ },

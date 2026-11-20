@@ -6,6 +6,7 @@ import jwt, { SignOptions } from "jsonwebtoken";
 export interface AuthTokenPayload {
   id: string;
   role: "user" | "creator" | "admin";
+  sid: string;
 }
 
 export const generateToken = (payload: AuthTokenPayload): string => {

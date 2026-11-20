@@ -59,7 +59,7 @@ test("public user profile returns only its allowlisted DTO and derives age", asy
     avatar: "https://example.test/avatar.jpg",
     cover: "https://example.test/private-cover.jpg",
     profilePhotos: ["https://example.test/photo-1.jpg", "https://example.test/photo-2.jpg"],
-    profileStatus: "rejected",
+    profileStatus: "verified",
     rejectionReason: "Private review feedback",
     verificationSubmittedAt: new Date("2024-01-01T00:00:00.000Z"),
   });
@@ -77,7 +77,7 @@ test("public user profile returns only its allowlisted DTO and derives age", asy
     "age", "avatar", "bio", "city", "country", "cover", "id", "interests",
     "languages", "profilePhotos", "username",
   ]);
-  assert.equal(body.profile.id, String(profile._id));
+  assert.equal(body.profile.id, String(user._id));
   assert.equal(body.profile.username, profile.username);
   assert.equal(body.profile.avatar, profile.avatar);
   assert.equal(body.profile.cover, profile.cover);
@@ -104,4 +104,29 @@ test("public user profile returns bounded errors for unknown and malformed ident
   const malformed = await invokePublicProfile("not-an-object-id");
   assert.equal(malformed.statusCode, 400);
   assert.deepEqual(malformed.body, { message: "Invalid userId" });
+});
+
+test("public user profile hides non-verified profiles with the same not-found response", async () => {
+  for (const profileStatus of ["incomplete", "pending_verification", "rejected"] as const) {
+    const user = await User.create({
+      email: `non-public-${profileStatus}-${new Types.ObjectId()}@test.local`,
+      password: "test",
+      status: "active",
+      governanceState: "ACTIVE",
+    });
+    await UserProfile.create({
+      userId: user._id,
+      username: `non-public-${new Types.ObjectId()}`,
+      dateOfBirth: new Date("1990-01-01T00:00:00.000Z"),
+      bio: "Private profile",
+      avatar: "https://example.test/avatar.jpg",
+      cover: "https://example.test/cover.jpg",
+      profilePhotos: ["https://example.test/photo-1.jpg", "https://example.test/photo-2.jpg"],
+      profileStatus,
+    });
+
+    const result = await invokePublicProfile(String(user._id));
+    assert.equal(result.statusCode, 404);
+    assert.deepEqual(result.body, { message: "Profile not found" });
+  }
 });

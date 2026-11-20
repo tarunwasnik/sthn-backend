@@ -45,6 +45,12 @@ const normalizeStringArray = (value: unknown, field: string, maxItems: number): 
   return [...new Set(normalized)];
 };
 
+const normalizeRequiredStringArray = (value: unknown, field: string, maxItems: number): string[] => {
+  const normalized = normalizeStringArray(value, field, maxItems);
+  if (normalized.length === 0) throw new AppError(`At least one ${field} is required`, 400);
+  return normalized;
+};
+
 const parseDateOfBirth = (value: unknown): Date => {
   if (typeof value !== "string" || !value.trim()) throw new AppError("Invalid date of birth", 400);
   const dateOfBirth = new Date(value);
@@ -74,7 +80,7 @@ const normalizeOnboardingDraft = (body: Record<string, unknown>) => ({
   mobileNumber: normalizeMobileNumber(body.mobileNumber),
   country: requireText(body.country, "country", 100),
   city: requireText(body.city, "city", 100),
-  languages: normalizeStringArray(body.languages, "languages", 12),
+  languages: normalizeRequiredStringArray(body.languages, "languages", 12),
   interests: normalizeStringArray(body.interests ?? [], "interests", 20),
   bio: requireText(body.bio, "bio", 2000),
 });
@@ -125,8 +131,8 @@ export const saveMyOnboardingDraft = catchAsync(async (req: Request, res: Respon
   } catch (error) {
     throw new AppError(error instanceof Error ? error.message : "Invalid image admission request", 400);
   }
-  if (!media.avatar || !media.cover || !media.profilePhotos) {
-    throw new AppError("Onboarding draft requires avatar, cover, and profilePhotos admission claims", 400);
+  if (!media.avatar || !media.profilePhotos) {
+    throw new AppError("Onboarding draft requires avatar and profilePhotos admission claims", 400);
   }
   if (!Types.ObjectId.isValid(userId)) throw new AppError("Invalid authenticated user", 401);
   const actorId = new Types.ObjectId(userId);
@@ -258,7 +264,7 @@ export const upsertProfile = catchAsync(async (req: Request, res: Response) => {
     const normalizedMobileNumber = normalizeMobileNumber(mobileNumber);
     const normalizedCountry = requireText(country, "country", 100);
     const normalizedCity = requireText(city, "city", 100);
-    const normalizedLanguages = normalizeStringArray(languages, "languages", 12);
+    const normalizedLanguages = normalizeRequiredStringArray(languages, "languages", 12);
     const normalizedBio = requireText(bio, "bio", 2000);
 
     const existingUsername = await UserProfile.findOne({

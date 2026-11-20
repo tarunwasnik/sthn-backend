@@ -22,10 +22,18 @@ export interface IUser extends Document {
 
   email: string;
   password?: string | null;
+  passwordChangeFailures?: number;
+  passwordChangeCooldownUntil?: Date | null;
+  loginFailureCount?: number;
+  loginCooldownUntil?: Date | null;
   authProvider: "local" | "google";
   googleId?: string | null;
   mobileCountryCode?: string | null;
   mobileNumber?: string | null;
+  /** Private account identity for a profile-less direct Creator applicant. */
+  realName?: string | null;
+  dateOfBirth?: Date | null;
+  creatorOnboardingIntent: "none" | "direct_creator";
 
   role: Role;
 
@@ -108,6 +116,10 @@ const UserSchema = new Schema<IUser>(
       type: String,
       default: null,
     },
+    passwordChangeFailures: { type: Number, default: 0, min: 0 },
+    passwordChangeCooldownUntil: { type: Date, default: null },
+    loginFailureCount: { type: Number, default: 0, min: 0 },
+    loginCooldownUntil: { type: Date, default: null },
 
     authProvider: {
       type: String,
@@ -134,6 +146,15 @@ const UserSchema = new Schema<IUser>(
       default: null,
       trim: true,
       maxlength: 15,
+    },
+
+    realName: { type: String, default: null, trim: true, maxlength: 120 },
+    dateOfBirth: { type: Date, default: null },
+    creatorOnboardingIntent: {
+      type: String,
+      enum: ["none", "direct_creator"],
+      default: "none",
+      index: true,
     },
 
     role: {

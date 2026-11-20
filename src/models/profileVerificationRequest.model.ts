@@ -44,6 +44,10 @@ export interface ProfileVerificationRequestDocument extends Document {
   verificationReference: string;
   profileId: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
+  targetType?: "USER_PROFILE" | "CREATOR_APPLICATION";
+  targetId?: mongoose.Types.ObjectId;
+  ownerUserId?: mongoose.Types.ObjectId;
+  verificationRevision?: number;
   attemptNumber: number;
   profileSubmissionVersion: number;
   status: ProfileVerificationRequestStatus;
@@ -88,14 +92,18 @@ const submittedMediaSnapshotSchema = new Schema<ProfileVerificationSubmittedMedi
 }, { _id: false, strict: "throw" });
 const verificationPolicySchema = new Schema<ProfileVerificationPolicy>({
   key: { type: String, required: true, immutable: true, enum: ["LEGACY_AVATAR_ONLY", "GATED_MULTI_MEDIA"] },
-  version: { type: String, required: true, immutable: true, trim: true, enum: ["V1", "V2"] },
+  version: { type: String, required: true, immutable: true, trim: true, enum: ["V1", "V2", "V3"] },
 }, { _id: false, strict: "throw" });
 
 const ProfileVerificationRequestSchema = new Schema<ProfileVerificationRequestDocument>(
   {
     verificationReference: { type: String, required: true, unique: true, index: true, trim: true, maxlength: 80 },
-    profileId: { type: Schema.Types.ObjectId, ref: "UserProfile", required: true, index: true },
+    profileId: { type: Schema.Types.ObjectId, ref: "UserProfile", required: function (this: ProfileVerificationRequestDocument) { return this.targetType !== "CREATOR_APPLICATION"; }, index: true },
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    targetType: { type: String, enum: ["USER_PROFILE", "CREATOR_APPLICATION"], index: true },
+    targetId: { type: Schema.Types.ObjectId, index: true, required: function (this: ProfileVerificationRequestDocument) { return this.targetType !== undefined; } },
+    ownerUserId: { type: Schema.Types.ObjectId, ref: "User", index: true, required: function (this: ProfileVerificationRequestDocument) { return this.targetType !== undefined; } },
+    verificationRevision: { type: Number, min: 1, required: function (this: ProfileVerificationRequestDocument) { return this.targetType !== undefined; } },
     attemptNumber: { type: Number, required: true, min: 1 },
     profileSubmissionVersion: { type: Number, required: true, min: 1 },
     status: { type: String, required: true, enum: ["PENDING", "PROCESSING", "ADMIN_REVIEW_REQUIRED", "APPROVED", "REJECTED", "EXPIRED"], default: "PENDING", index: true },
@@ -120,8 +128,8 @@ const ProfileVerificationRequestSchema = new Schema<ProfileVerificationRequestDo
 );
 
 ProfileVerificationRequestSchema.index(
-  { profileId: 1 },
-  { unique: true, partialFilterExpression: { isActive: true }, name: "one_active_profile_verification_request" },
+  { targetType: 1, targetId: 1 },
+  { unique: true, partialFilterExpression: { isActive: true, targetType: { $exists: true }, targetId: { $exists: true } }, name: "one_active_target_verification_request" },
 );
 ProfileVerificationRequestSchema.index({ profileId: 1, attemptNumber: -1 });
 ProfileVerificationRequestSchema.index({ status: 1, submittedAt: -1 });

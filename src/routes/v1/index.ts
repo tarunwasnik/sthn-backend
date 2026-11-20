@@ -18,6 +18,7 @@ import creatorAvailabilityRoutes from "./creator.availability.routes";
 import creatorBookingDecisionRoutes from "./creatorBookingDecision.routes";
 import creatorCancelBookingRoutes from "./creatorCancelBooking.routes";
 import payoutDestinationRoutes from "./payoutDestination.routes";
+import creatorBookingSafetyRoutes from "./creatorBookingSafety.routes";
 
 import bookingRoutes from "./booking.routes";
 import userCancelBookingRoutes from "./userCancelBooking.routes";
@@ -26,10 +27,14 @@ import appealRoutes from "./appeal.routes";
 import reviewRoutes from "./review.routes";
 import chatRoutes from "./chat.routes";
 import notificationRoutes from "./notification.routes";
+import accountPreferenceRoutes from "./accountPreference.routes";
+import securityRoutes from "./security.routes";
+import safetyReportRoutes from "./safetyReport.routes";
 
 import adminDashboardRoutes from "./admin.dashboard.routes";
 import adminActionsRoutes from "./admin.actions.routes";
 import controlPlaneFeatureFlagsRoutes from "./controlPlane.featureFlags.routes";
+import visitorMonitorRoutes from "./visitorMonitor.routes";
 
 /* ================= WALLET ================= */
 import walletRoutes from "./wallet.routes";
@@ -45,6 +50,7 @@ router.use("/admin/dashboard", adminDashboardRoutes);
 router.use("/admin", adminRoutes);
 router.use("/admin/wallets", adminWalletRoutes);
 router.use("/admin/financial", adminFinancialRoutes);
+router.use("/visitor-monitor", visitorMonitorRoutes);
 /* ================= USERS ================= */
 router.use("/users", userRoutes);
 router.use("/profile", profileRoutes);
@@ -78,12 +84,16 @@ router.use("/creator", creatorSecureRoutes);
 router.use("/creator", creatorDashboardRoutes);
 router.use("/creator", creatorAvailabilityRoutes);
 router.use("/creator", payoutDestinationRoutes);
+router.use("/creator", creatorBookingSafetyRoutes);
 
 /* ================= CHAT ================= */
 router.use("/chat", chatRoutes);
 
 /* ================= NOTIFICATIONS ================= */
 router.use("/notifications", notificationRoutes);
+router.use("/account-preferences", accountPreferenceRoutes);
+router.use("/security", securityRoutes);
+router.use("/safety-reports", safetyReportRoutes);
 
 /* ================= CONTROL PLANE ================= */
 router.use("/control-plane/feature-flags", controlPlaneFeatureFlagsRoutes);

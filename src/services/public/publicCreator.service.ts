@@ -322,7 +322,6 @@ export const getPublicCreatorsData = async (
 
       coverUrl:
         c.coverUrl ||
-        c.media?.[0] ||
         "/covers/default.png",
 
       media: c.media || [],
@@ -427,6 +426,7 @@ export const getPublicCreatorBySlugData =
 
     return {
       id: creator._id.toString(),
+      reportTargetUserId: creator.userId.toString(),
 
       slug: creator.slug,
 
@@ -439,7 +439,6 @@ export const getPublicCreatorBySlugData =
 
       coverUrl:
         creator.coverUrl ||
-        creator.media?.[0] ||
         "/covers/default.png",
 
       media: creator.media || [],
@@ -466,6 +465,8 @@ export const getPublicCreatorBySlugData =
       city: creator.city || "",
 
       currency: creator.currency,
+
+      acceptingNewBookings: creator.acceptingNewBookings,
 
       age,
 

@@ -18,7 +18,8 @@ export interface CreatorProfileDocument extends Document {
 
   media?: string[];
 
-  primaryCategory: string;
+  primaryCategory?: string;
+  interests?: string[];
   categories?: string[];
 
   bio?: string | null;
@@ -33,6 +34,8 @@ export interface CreatorProfileDocument extends Document {
   reviewCount: number;
 
   status: CreatorStatus;
+  acceptingNewBookings: boolean;
+  bookingAdmissionRevision: number;
   creatorCooldownUntil?: Date | null;
 
   createdAt: Date;
@@ -82,9 +85,9 @@ const CreatorProfileSchema = new Schema<CreatorProfileDocument>(
 
     primaryCategory: {
       type: String,
-      required: true,
       index: true,
     },
+    interests: { type: [String], default: [] },
 
     categories: {
       type: [String],
@@ -141,6 +144,19 @@ const CreatorProfileSchema = new Schema<CreatorProfileDocument>(
       enum: ["active", "inactive", "deactivated"],
       default: "inactive",
       index: true,
+    },
+
+    acceptingNewBookings: {
+      type: Boolean,
+      default: true,
+    },
+
+    // Mutated by both booking admission and Creator safety changes so Mongo
+    // transactions cannot commit a booking against a stale block/pause state.
+    bookingAdmissionRevision: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
 
     creatorCooldownUntil: {

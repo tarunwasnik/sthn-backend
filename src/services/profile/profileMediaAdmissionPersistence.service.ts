@@ -208,7 +208,7 @@ export class ProfileMediaAdmissionPersistenceService {
           set.avatar = avatar.reference;
         }
         if (input.media.cover !== undefined) {
-          cover = await resolve(input.media.cover, "USER_PROFILE_COVER", "cover", [profile.cover]);
+          cover = await resolve(input.media.cover, "USER_PROFILE_COVER", "cover", profile.cover ? [profile.cover] : []);
           set.cover = cover.reference;
         }
         if (input.media.profilePhotos !== undefined) {

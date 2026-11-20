@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema, SchemaDefinitionProperty } from "mongoose";
 
 export type FaceVerificationSessionStatus = "CREATED" | "CAPTURING" | "CAPTURE_COMPLETE" | "CANCELLED" | "EXPIRED" | "INVALIDATED";
+export type FaceVerificationTargetType = "USER_PROFILE" | "CREATOR_APPLICATION";
 export type FaceVerificationChallenge = "NEUTRAL" | "TURN_LEFT" | "TURN_RIGHT" | "LOOK_UP" | "LOOK_DOWN" | "BLINK";
 export type FaceVerificationAvatarCandidate = Readonly<{
   kind: "PROFILE_REFERENCE";
@@ -20,6 +21,13 @@ export type FaceVerificationAvatarCandidate = Readonly<{
 export interface FaceVerificationSessionDocument extends Document {
   sessionReference: string;
   userId: mongoose.Types.ObjectId;
+  /** Typed target fields are required for newly-created targets; legacy sessions remain readable. */
+  targetType?: FaceVerificationTargetType;
+  targetId?: mongoose.Types.ObjectId;
+  ownerUserId?: mongoose.Types.ObjectId;
+  verificationRevision?: number;
+  avatarReference?: string;
+  /** Present for legacy and USER_PROFILE records; absent only for typed Creator targets. */
   profileId: mongoose.Types.ObjectId;
   verificationRequestId?: mongoose.Types.ObjectId;
   profileSubmissionVersion: number;
@@ -73,7 +81,12 @@ const avatarCandidateField = {
 const schema = new Schema<FaceVerificationSessionDocument>({
   sessionReference: { type: String, required: true, unique: true, index: true, trim: true, maxlength: 96 },
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-  profileId: { type: Schema.Types.ObjectId, ref: "UserProfile", required: true, index: true },
+  targetType: { type: String, enum: ["USER_PROFILE", "CREATOR_APPLICATION"], index: true },
+  targetId: { type: Schema.Types.ObjectId, index: true, required: function (this: FaceVerificationSessionDocument) { return this.targetType !== undefined; } },
+  ownerUserId: { type: Schema.Types.ObjectId, ref: "User", index: true, required: function (this: FaceVerificationSessionDocument) { return this.targetType !== undefined; } },
+  verificationRevision: { type: Number, min: 1, required: function (this: FaceVerificationSessionDocument) { return this.targetType !== undefined; } },
+  avatarReference: { type: String, trim: true, maxlength: 2048, required: function (this: FaceVerificationSessionDocument) { return this.targetType === "CREATOR_APPLICATION"; } },
+  profileId: { type: Schema.Types.ObjectId, ref: "UserProfile", required: function (this: FaceVerificationSessionDocument) { return this.targetType !== "CREATOR_APPLICATION"; }, index: true },
   verificationRequestId: { type: Schema.Types.ObjectId, ref: "ProfileVerificationRequest", index: true },
   profileSubmissionVersion: { type: Number, required: true, min: 1, index: true },
   avatarFingerprint: { type: String, required: true, trim: true, minlength: 64, maxlength: 64 },
@@ -92,7 +105,10 @@ const schema = new Schema<FaceVerificationSessionDocument>({
   cleanupAfter: { type: Date, index: true },
 }, { timestamps: true });
 
-schema.index({ profileId: 1 }, { unique: true, partialFilterExpression: { isCurrent: true }, name: "one_current_face_verification_session" });
+schema.index(
+  { targetType: 1, targetId: 1 },
+  { unique: true, partialFilterExpression: { isCurrent: true, targetType: { $exists: true }, targetId: { $exists: true } }, name: "one_current_face_verification_target_session" },
+);
 schema.index({ userId: 1, status: 1, expiresAt: 1 });
 schema.index({ verificationRequestId: 1, profileSubmissionVersion: 1 });
 

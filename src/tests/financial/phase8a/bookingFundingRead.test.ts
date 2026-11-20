@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import jwt from "jsonwebtoken";
 
 import { Booking } from "../../../models/booking.model";
 import { BookingFundReservation } from "../../../models/bookingFundReservation.model";
@@ -10,6 +9,7 @@ import { Wallet } from "../../../models/wallet.model";
 import { WalletProjectionOperation } from "../../../models/walletProjectionOperation.model";
 import {
   createBookingWalletFixture,
+  issueSessionToken,
   postWalletBooking,
   startBookingHttpServer,
 } from "./fixtures/bookingWalletFixtures";
@@ -57,13 +57,13 @@ export const registerBookingFundingReadTests = () => {
       assert.equal((body.funding.walletFunding as { state: string }).state, "ACTIVE");
       assert.equal(JSON.stringify(body).includes("walletId"), false);
       assert.equal(JSON.stringify(body).includes("reservationId"), false);
-      const creatorToken = jwt.sign({ id: fixture.actors.creatorId.toString(), role: "user" }, process.env.JWT_SECRET!);
+      const creatorToken = await issueSessionToken(fixture.actors.creatorId, "user");
       const creatorRead = await fetch(`${server.baseUrl}/api/v1/bookings/${booking._id}/funding`, {
         headers: { authorization: `Bearer ${creatorToken}` },
       });
       assert.equal(creatorRead.status, 200);
       const unrelated = await createActors();
-      const deniedToken = jwt.sign({ id: unrelated.userId.toString(), role: "user" }, process.env.JWT_SECRET!);
+      const deniedToken = await issueSessionToken(unrelated.userId, "user");
       const denied = await fetch(`${server.baseUrl}/api/v1/bookings/${booking._id}/funding`, {
         headers: { authorization: `Bearer ${deniedToken}` },
       });

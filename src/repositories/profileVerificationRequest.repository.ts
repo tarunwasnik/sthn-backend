@@ -9,10 +9,22 @@ import {
   ProfileVerificationRequestStatus,
 } from "../models/profileVerificationRequest.model";
 import { FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS } from "../services/profile/faceVerification.constants";
+import { VerificationTarget } from "../services/creator/creatorVerificationTarget";
 
 const activeStatuses: ProfileVerificationRequestStatus[] = ["PENDING", "PROCESSING", "ADMIN_REVIEW_REQUIRED"];
 
 export class ProfileVerificationRequestRepository {
+  findActiveByTarget(target: Pick<VerificationTarget, "targetType" | "targetId" | "ownerUserId">, session?: ClientSession) {
+    return ProfileVerificationRequest.findOne({ targetType: target.targetType, targetId: target.targetId, ownerUserId: target.ownerUserId, isActive: true }).session(session ?? null).exec();
+  }
+  async createForTarget(input: Omit<Pick<ProfileVerificationRequestDocument, "verificationReference" | "attemptNumber" | "submittedAt" | "submittedMedia" | "verificationPolicy">, "profileId" | "userId" | "profileSubmissionVersion"> & VerificationTarget, session?: ClientSession) {
+    const { targetType, targetId, ownerUserId, verificationRevision, avatarReference: _avatarReference, avatarFingerprint: _avatarFingerprint, ...requestInput } = input;
+    const [request] = await ProfileVerificationRequest.create([{
+      ...requestInput, userId: ownerUserId, targetType, targetId, ownerUserId, ...(targetType === "USER_PROFILE" ? { profileId: targetId } : {}),
+      verificationRevision, profileSubmissionVersion: verificationRevision, status: "PENDING", isActive: true,
+    }], session ? { session } : undefined);
+    return request;
+  }
   findActiveByProfileId(profileId: Types.ObjectId, session?: ClientSession) {
     return ProfileVerificationRequest.findOne({ profileId, isActive: true }).session(session ?? null).exec();
   }
@@ -43,8 +55,20 @@ export class ProfileVerificationRequestRepository {
       .exec();
   }
 
+  listCreatorByStatuses(statuses: ProfileVerificationRequestStatus[]) {
+    return ProfileVerificationRequest.find({ targetType: "CREATOR_APPLICATION", status: { $in: statuses } })
+      .sort({ submittedAt: -1, _id: -1 }).exec();
+  }
+
   async create(input: Pick<ProfileVerificationRequestDocument, "verificationReference" | "profileId" | "userId" | "attemptNumber" | "profileSubmissionVersion" | "submittedAt" | "submittedMedia" | "verificationPolicy">, session?: ClientSession) {
-    const [request] = await ProfileVerificationRequest.create([{ ...input, status: "PENDING", isActive: true }], session ? { session } : undefined);
+    const [request] = await ProfileVerificationRequest.create([{
+      ...input,
+      targetType: "USER_PROFILE",
+      targetId: input.profileId,
+      ownerUserId: input.userId,
+      verificationRevision: input.profileSubmissionVersion,
+      status: "PENDING", isActive: true,
+    }], session ? { session } : undefined);
     return request;
   }
 

@@ -4,10 +4,12 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import User from "../models/User";
 import { Role } from "../constants/roles";
+import { validAuthSession } from "../services/authSession.service";
 
 interface JwtPayload {
   id: string;
   role: Role;
+  sid?: string;
 }
 
 const authenticate = (allowRestrictedRead: boolean) => async (
@@ -28,6 +30,8 @@ const authenticate = (allowRestrictedRead: boolean) => async (
       token,
       process.env.JWT_SECRET as string,
     ) as JwtPayload;
+
+    if (!decoded.sid || !(await validAuthSession(decoded.sid, decoded.id))) return res.status(401).json({ message: "Session expired or revoked" });
 
     // Always trust DB for authoritative state
     const user = await User.findById(decoded.id).select("-password");
@@ -50,6 +54,7 @@ const authenticate = (allowRestrictedRead: boolean) => async (
 
     // Attach authenticated user context
     req.user = user;
+    (req as Request & { authSessionId?: string }).authSessionId = decoded.sid;
 
     next();
   } catch (error) {

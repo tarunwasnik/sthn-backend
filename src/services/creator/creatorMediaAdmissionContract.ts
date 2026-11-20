@@ -3,6 +3,7 @@ import { ImageModerationSurface } from "../../enums/imageModeration.enums";
 export type CreatorMediaClaim = Readonly<
   | { kind: "UNCHANGED"; reference: string }
   | { kind: "ADMISSION"; admissionReference: string }
+  | { kind: "REMOVE" }
 >;
 
 export type CreatorMediaClaims = Readonly<{ avatar?: CreatorMediaClaim; cover?: CreatorMediaClaim; media?: readonly CreatorMediaClaim[] }>;
@@ -33,6 +34,7 @@ export const parseCreatorMediaClaim = (value: unknown, name: string): CreatorMed
   if (!isPlainObject(value)) throw new Error(`Invalid ${name} media claim`);
   if (value.kind === "UNCHANGED" && typeof value.reference === "string" && value.reference.trim() && value.reference.length <= 2048 && Object.keys(value).every((key) => key === "kind" || key === "reference")) return { kind: "UNCHANGED", reference: value.reference };
   if (value.kind === "ADMISSION" && typeof value.admissionReference === "string" && /^imauth_[A-Za-z0-9_-]{1,80}$/.test(value.admissionReference) && Object.keys(value).every((key) => key === "kind" || key === "admissionReference")) return { kind: "ADMISSION", admissionReference: value.admissionReference };
+  if (value.kind === "REMOVE" && Object.keys(value).length === 1) return { kind: "REMOVE" };
   throw new Error(`Invalid ${name} media claim`);
 };
 
@@ -46,7 +48,18 @@ export const parseCreatorMediaClaims = (input: unknown): CreatorMediaClaims => {
   if (input.media !== undefined) {
     if (!Array.isArray(input.media)) throw new Error("Invalid media claims");
     result.media = input.media.map((claim, index) => parseCreatorMediaClaim(claim, `media[${index}]`));
-    const identities = result.media.map((claim) => claim.kind === "ADMISSION" ? `a:${claim.admissionReference}` : `u:${claim.reference}`);
+    if (result.media.some((claim) => claim.kind === "REMOVE")) throw new Error("Gallery media claims cannot remove individual items");
+  const identities = result.media.map((claim) => {
+    if (claim.kind === "ADMISSION") {
+      return `a:${claim.admissionReference}`;
+    }
+
+    if (claim.kind === "UNCHANGED") {
+      return `u:${claim.reference}`;
+    }
+
+    throw new Error("Gallery media claims cannot remove individual items");
+  });
     if (new Set(identities).size !== identities.length) throw new Error("Duplicate creator media claims are not allowed");
   }
   return result;

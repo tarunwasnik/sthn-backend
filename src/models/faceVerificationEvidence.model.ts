@@ -7,6 +7,11 @@ export interface FaceVerificationEvidenceDocument extends Document {
   evidenceReference: string;
   sessionId: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
+  targetType?: "USER_PROFILE" | "CREATOR_APPLICATION";
+  targetId?: mongoose.Types.ObjectId;
+  ownerUserId?: mongoose.Types.ObjectId;
+  verificationRevision?: number;
+  /** Present for legacy and USER_PROFILE evidence; Creator evidence uses target fields. */
   profileId: mongoose.Types.ObjectId;
   verificationRequestId?: mongoose.Types.ObjectId;
   challengeIndex: number;
@@ -30,7 +35,11 @@ const schema = new Schema<FaceVerificationEvidenceDocument>({
   evidenceReference: { type: String, required: true, unique: true, index: true, trim: true, maxlength: 96 },
   sessionId: { type: Schema.Types.ObjectId, ref: "FaceVerificationSession", required: true, index: true },
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-  profileId: { type: Schema.Types.ObjectId, ref: "UserProfile", required: true, index: true },
+  targetType: { type: String, enum: ["USER_PROFILE", "CREATOR_APPLICATION"], index: true },
+  targetId: { type: Schema.Types.ObjectId, index: true, required: function (this: FaceVerificationEvidenceDocument) { return this.targetType === "CREATOR_APPLICATION"; } },
+  ownerUserId: { type: Schema.Types.ObjectId, ref: "User", index: true, required: function (this: FaceVerificationEvidenceDocument) { return this.targetType === "CREATOR_APPLICATION"; } },
+  verificationRevision: { type: Number, min: 1, required: function (this: FaceVerificationEvidenceDocument) { return this.targetType === "CREATOR_APPLICATION"; } },
+  profileId: { type: Schema.Types.ObjectId, ref: "UserProfile", required: function (this: FaceVerificationEvidenceDocument) { return this.targetType !== "CREATOR_APPLICATION"; }, index: true },
   verificationRequestId: { type: Schema.Types.ObjectId, ref: "ProfileVerificationRequest", index: true },
   challengeIndex: { type: Number, required: true, min: 0, max: 4 },
   challenge: { type: String, required: true, enum: ["NEUTRAL", "TURN_LEFT", "TURN_RIGHT", "LOOK_UP", "LOOK_DOWN", "BLINK"] },

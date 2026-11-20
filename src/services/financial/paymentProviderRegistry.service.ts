@@ -79,7 +79,10 @@ export class PaymentProviderRegistry {
     const razorpaySandbox = request.provider === PaymentProvider.RAZORPAY &&
       implementation instanceof RazorpaySandboxPaymentProvider &&
       ["test", "development"].includes(process.env.NODE_ENV ?? "");
-    if ((!internal && !razorpaySandbox) || (razorpaySandbox && request.currency !== "INR") || request.operation !== "PAYMENT" ||
+    if (razorpaySandbox && request.currency !== "INR") {
+      throw new PaymentError("Razorpay test checkout is available only for INR bookings.", "PAYMENT_PROVIDER_UNAVAILABLE");
+    }
+    if ((!internal && !razorpaySandbox) || request.operation !== "PAYMENT" ||
         !SUPPORTED_CURRENCIES.some((currency) => currency === request.currency) ||
         !request.requiredCapabilities.every((capability) => capabilities.includes(capability))) {
       throw new PaymentError("Payment provider or required operation, currency, or capability is unavailable.", "PAYMENT_PROVIDER_UNAVAILABLE");

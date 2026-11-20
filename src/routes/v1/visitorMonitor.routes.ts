@@ -1,0 +1,10 @@
+import { Router } from "express";
+import { collectVisitorTelemetry, listVisitorSessions, monitorOverview, visitorSessionDetail } from "../../controllers/visitorMonitor.controller";
+import { protect } from "../../middlewares/auth.middleware";
+import { authorizeRoles } from "../../middlewares/authorize.middleware";
+const router = Router();
+router.post("/events", collectVisitorTelemetry);
+router.get("/overview", protect, authorizeRoles("admin"), monitorOverview);
+router.get("/sessions", protect, authorizeRoles("admin"), listVisitorSessions);
+router.get("/sessions/:visitorId", protect, authorizeRoles("admin"), visitorSessionDetail);
+export default router;

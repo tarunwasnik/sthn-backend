@@ -4,8 +4,10 @@ import User from "../../models/User";
 import { UserProfile } from "../../models/userProfile.model";
 import { FaceVerificationEvidence } from "../../models/faceVerificationEvidence.model";
 import { FaceVerificationSession } from "../../models/faceVerificationSession.model";
+import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
 import { FaceVerificationChallenge } from "../../models/faceVerificationSession.model";
 import { ensureActiveProfileVerificationRequest } from "../../services/profile/profileVerificationRequest.service";
+import { ensureProfileVerificationJob } from "../../services/profile/profileVerificationJob.service";
 import { getAdminProfileVerificationDetail, readAdminProfileVerificationCapture } from "../../services/profile/profileVerificationAdminRead.service";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "../financial/phase7h/helpers/database";
 
@@ -47,9 +49,34 @@ test("admin detail is exact-attempt ordered and excludes biometric storage inter
   assert.equal(detail.verificationRequest.decisionAuthority, null);
   assert.equal(detail.verificationRequest.aiDecisionSnapshot, null);
   assert.equal(detail.job, null);
+  assert.deepEqual(detail.aiVerification, { lifecycle: "MISSING", resultFormat: "NONE", hasPersistedResult: false });
   assert.deepEqual(detail.captures.map((capture) => capture.challengeIndex), [0, 1, 2, 3, 4]);
   const serialized = JSON.stringify(detail).toLowerCase();
   for (const marker of ["cloudinary", "provider-secret", "cleanupafter", "fingerprint", "base64", "buffer", "embedding", "landmark", "tensor", "geometry"]) assert.equal(serialized.includes(marker), false, marker);
+});
+
+test("admin detail projects durable job lifecycle without treating missing inference as a face-match result", async () => {
+  const data = await fixture("lifecycle");
+  await ensureProfileVerificationJob(data.request);
+
+  let detail = await getAdminProfileVerificationDetail(data.request.verificationReference);
+  assert.equal(detail.aiVerification.lifecycle, "QUEUED");
+
+  await ProfileVerificationJob.updateOne({ verificationRequestId: data.request._id }, { $set: { status: "RUNNING" } });
+  detail = await getAdminProfileVerificationDetail(data.request.verificationReference);
+  assert.equal(detail.aiVerification.lifecycle, "PROCESSING");
+
+  await ProfileVerificationJob.updateOne({ verificationRequestId: data.request._id }, { $set: { status: "RETRY_WAIT" } });
+  detail = await getAdminProfileVerificationDetail(data.request.verificationReference);
+  assert.equal(detail.aiVerification.lifecycle, "RETRYING");
+
+  await ProfileVerificationJob.updateOne({ verificationRequestId: data.request._id }, { $set: { status: "FAILED", failedAt: new Date() } });
+  detail = await getAdminProfileVerificationDetail(data.request.verificationReference);
+  assert.equal(detail.aiVerification.lifecycle, "FAILED");
+
+  await (await import("../../models/profileVerificationRequest.model")).ProfileVerificationRequest.updateOne({ _id: data.request._id }, { $set: { status: "ADMIN_REVIEW_REQUIRED", adminReviewReasonCode: "PROCESSING_TIMEOUT" } });
+  detail = await getAdminProfileVerificationDetail(data.request.verificationReference);
+  assert.equal(detail.aiVerification.lifecycle, "TIMED_OUT");
 });
 
 test("every exact capture is returned through the protected storage boundary", async () => {

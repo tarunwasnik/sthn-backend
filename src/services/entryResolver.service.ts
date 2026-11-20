@@ -18,7 +18,6 @@ export const resolveEntry = (user: any): EntryResult => {
 
   const status = user.status.toLowerCase();
   const role = user.role.toUpperCase();
-  const creatorStatus = user.creatorStatus?.toLowerCase?.() ?? "none";
   const userId = user._id.toString();
 
 

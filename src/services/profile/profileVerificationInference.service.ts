@@ -141,6 +141,8 @@ const validateShadowIdentityAnalysis = (analysis: ProfileVerificationShadowIdent
 };
 
 const validScore = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= -1 && value <= 1;
+// Difference of the best and second-best sorted cosine scores, not confidence.
+const validComparisonMargin = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 2;
 const validCount = (value: unknown, maximum: number) => Number.isInteger(value) && Number(value) >= 0 && Number(value) <= maximum;
 const validateProfileMediaShadowAnalysis = (analysis: ProfileVerificationInferenceOutput["profileMediaShadowAnalysis"] | undefined) => {
   if (!analysis) return undefined;
@@ -156,16 +158,16 @@ const validateProfileMediaShadowAnalysis = (analysis: ProfileVerificationInferen
       && (media.role === "PROFILE_PHOTO" ? validCount(media.profilePhotoIndex, 5) : media.profilePhotoIndex === undefined)
       && ["NO_FACE", "NO_USABLE_FACE", "FACE_CANDIDATES_AVAILABLE", "MEDIA_READ_FAILED"].includes(media.status)
       && validCount(media.detectedFaceCount, 50) && validCount(media.usableFaceCount, 50) && validCount(media.candidateCount, 50)
+      && (media.bestVsSecondMargin === undefined || validComparisonMargin(media.bestVsSecondMargin))
       && (!media.bestCandidate || validCount(media.bestCandidate.candidateIndex, 49) && validStats(media.bestCandidate)
-        && (media.secondBestMedianSimilarity === undefined || validScore(media.secondBestMedianSimilarity))
-        && (media.bestVsSecondMargin === undefined || validScore(media.bestVsSecondMargin))))
+        && (media.secondBestMedianSimilarity === undefined || validScore(media.secondBestMedianSimilarity))))
   ) throw new ProfileVerificationInferenceError("Profile-media shadow analysis is invalid", "FINDINGS_INVALID", 400);
   return analysis;
 };
 
 const validateGatedPolicyAnalysis = (analysis: ProfileVerificationGatedPolicyAnalysis | undefined, policy: ProfileVerificationInferenceInputDescriptor["verificationPolicy"]) => {
   if (!analysis) return undefined;
-  if (policy.key !== "GATED_MULTI_MEDIA" || !["V1", "V2"].includes(policy.version)
+  if (policy.key !== "GATED_MULTI_MEDIA" || !["V1", "V2", "V3"].includes(policy.version)
     || analysis.policy.key !== policy.key || analysis.policy.version !== policy.version
     || !["PASS", "LIVE_CAPTURE_TECHNICAL_FAILURE", "LIVE_ANCHOR_INCOHERENT"].includes(analysis.gate1?.outcome)
     || !validCount(analysis.gate1.usableCaptureCount, 5) || !validScore(analysis.gate1.threshold)
@@ -244,11 +246,13 @@ export const finalizeProfileVerificationInference = async (input: {
   if (retentionDeadline.getTime() <= Date.now()) {
     throw new ProfileVerificationInferenceError("Verification biometric retention expired", "BIOMETRIC_RETENTION_EXPIRED", 409);
   }
-  const session = await faceVerificationSessionRepository.findCurrentCompletedBoundToRequest({
-    requestId: request._id,
-    profileId: request.profileId,
-    userId: request.userId,
-  });
+  const creatorTarget = request.targetType === "CREATOR_APPLICATION" && request.targetId && request.ownerUserId && request.verificationRevision
+    ? { targetType: request.targetType, targetId: request.targetId, ownerUserId: request.ownerUserId, verificationRevision: request.verificationRevision } as const
+    : null;
+  if (request.targetType === "CREATOR_APPLICATION" && (!creatorTarget || !(await (await import("../creator/creatorUpgradeVerificationAuthority")).isCurrentCreatorUpgradeVerification(request)))) return { result: null, replayed: false, noOp: "STALE_SUBMISSION" };
+  const session = creatorTarget
+    ? await faceVerificationSessionRepository.findCurrentCompletedBoundToTarget({ ...creatorTarget, requestId: request._id })
+    : await faceVerificationSessionRepository.findCurrentCompletedBoundToRequest({ requestId: request._id, profileId: request.profileId, userId: request.userId });
   if (!session) {
     throw new ProfileVerificationInferenceError("A completed bound face verification session is required", "SESSION_NOT_COMPLETE", 409);
   }
@@ -261,7 +265,7 @@ export const finalizeProfileVerificationInference = async (input: {
   if (evidence.length !== 5 || captures.some((capture, index) => capture.challengeIndex !== expectedIndexes[index]
     || capture.challenge !== session.challenges[index]
     || String(evidence[index].userId) !== String(request.userId)
-    || String(evidence[index].profileId) !== String(request.profileId)
+    || (creatorTarget ? (evidence[index].targetType !== creatorTarget.targetType || String(evidence[index].targetId) !== String(creatorTarget.targetId) || String(evidence[index].ownerUserId) !== String(creatorTarget.ownerUserId) || evidence[index].verificationRevision !== creatorTarget.verificationRevision) : String(evidence[index].profileId) !== String(request.profileId))
     || String(evidence[index].verificationRequestId) !== String(request._id))) {
     throw new ProfileVerificationInferenceError("Face evidence is incomplete or inconsistent", "EVIDENCE_INCOMPLETE", 409);
   }
@@ -286,7 +290,7 @@ export const finalizeProfileVerificationInference = async (input: {
   if (existing) return { result: existing, replayed: true, noOp: null };
 
   const descriptor: ProfileVerificationInferenceInputDescriptor = {
-    verificationRequestId: String(request._id), profileId: String(request.profileId), userId: String(request.userId),
+    verificationRequestId: String(request._id), profileId: String(creatorTarget?.targetId ?? request.profileId), userId: String(request.userId),
     profileSubmissionVersion: request.profileSubmissionVersion, faceVerificationSessionId: String(session._id), avatarFingerprint: session.avatarFingerprint, evidenceSetFingerprint,
     pipelineManifest: manifest, captures: captures.map(({ challengeIndex, challenge, evidenceReference }) => ({ challengeIndex, challenge, evidenceReference })),
     verificationPolicy,
@@ -303,8 +307,14 @@ export const finalizeProfileVerificationInference = async (input: {
     || new Date(current.submittedAt.getTime() + FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS).getTime() <= Date.now()) {
     throw new ProfileVerificationInferenceError("Verification biometric retention expired", "BIOMETRIC_RETENTION_EXPIRED", 409);
   }
+  if (creatorTarget && !(await (await import("../creator/creatorUpgradeVerificationAuthority")).isCurrentCreatorUpgradeVerification(current))) return { result: null, replayed: false, noOp: "STALE_SUBMISSION" };
   try {
-    const result = await repository.create({
+    const result = creatorTarget ? await repository.createForTarget({
+      ...creatorTarget, avatarReference: session.avatarReference ?? "", avatarFingerprint: session.avatarFingerprint,
+      inferenceReference: inferenceReference(), inferenceRunFingerprint, verificationRequestId: request._id,
+      faceVerificationSessionId: session._id, evidenceSetFingerprint, pipelineManifestFingerprint,
+      pipeline: manifest, findings, ...(shadowIdentityAnalysis ? { shadowIdentityAnalysis } : {}), ...(profileMediaShadowAnalysis ? { profileMediaShadowAnalysis } : {}), ...(gatedPolicyAnalysis ? { gatedPolicyAnalysis } : {}), retentionDeadline,
+    }) : await repository.create({
       inferenceReference: inferenceReference(), inferenceRunFingerprint, verificationRequestId: request._id,
       profileId: request.profileId, userId: request.userId, profileSubmissionVersion: request.profileSubmissionVersion,
       faceVerificationSessionId: session._id, evidenceSetFingerprint, pipelineManifestFingerprint,

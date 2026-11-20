@@ -1,6 +1,5 @@
 import http from "node:http";
 import express from "express";
-import jwt from "jsonwebtoken";
 import { Types } from "mongoose";
 
 import bookingRoutes from "../../../../routes/v1/booking.routes";
@@ -23,8 +22,15 @@ import { creatorServiceMajorToMinor } from
   "../../../../utils/financial/creatorServicePrice.util";
 import { currencyMetadataService } from
   "../../../../services/financial/currencyMetadata.service";
+import { createAuthSession } from "../../../../services/authSession.service";
+import { generateToken } from "../../../../utils/jwt";
 
 let bookingSequence = 0;
+
+export const issueSessionToken = async (userId: Types.ObjectId, role: "user" | "creator" | "admin") => {
+  const session = await createAuthSession(userId.toString());
+  return generateToken({ id: userId.toString(), role, sid: session._id.toString() });
+};
 
 // Phase 8A test callers express expected financial amounts in minor units.
 // CreatorService and Slot persist the equivalent creator-facing major amount.
@@ -105,10 +111,7 @@ export const createBookingWalletFixture = async (
     status: "AVAILABLE",
     price,
   })));
-  const token = jwt.sign(
-    { id: actors.userId.toString(), role: "user" },
-    process.env.JWT_SECRET!,
-  );
+  const token = await issueSessionToken(actors.userId, "user");
   const amount = slotPrices.reduce((sum, price) => sum +
     creatorServiceMajorToMinor(price, supportedCurrency), 0);
   const pricing = marketplacePricingService.calculate({

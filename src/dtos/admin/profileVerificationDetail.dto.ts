@@ -1,14 +1,19 @@
 import { FaceVerificationChallenge, FaceVerificationSessionDocument } from "../../models/faceVerificationSession.model";
 import { ProfileVerificationRequestDocument } from "../../models/profileVerificationRequest.model";
 import { ProfileVerificationJobDocument } from "../../models/profileVerificationJob.model";
+import type { AdminInferenceAdvisoryDto } from "./profileVerificationAdvisory.dto";
+
+export type AdminAiVerificationLifecycleStatus = "QUEUED" | "PROCESSING" | "RETRYING" | "COMPLETED" | "FAILED" | "TIMED_OUT" | "ESCALATED" | "MISSING";
 
 export interface AdminProfileVerificationDetailDto {
+  inferenceAdvisory: AdminInferenceAdvisoryDto;
   account: { userReference: string; email: string; status: string; role: string };
   profile: { profileReference: string; username: string; realName: string | null; dateOfBirth: Date; mobileCountryCode: string | null; mobileNumber: string | null; country: string | null; city: string | null; languages: string[]; bio: string; interests: string[]; profileStatus: string; verificationSubmissionVersion: number; verificationSubmittedAt: Date | null; rejectionReason: string | null; avatar: string; cover: string; profilePhotos: string[] };
   verificationRequest: { verificationReference: string; status: ProfileVerificationRequestDocument["status"]; attemptNumber: number; profileSubmissionVersion: number; verificationPolicy: { key: string; version: string }; submittedAt: Date; processingStartedAt: Date | null; adminReviewRequiredAt: Date | null; adminReviewReasonCode: string | null; adminReviewReason: string | null; decisionAuthority: ProfileVerificationRequestDocument["decisionAuthority"] | null; decidedAt: Date | null; decision: string | null; decisionReason: string | null; expiredAt: Date | null; aiDecisionSnapshot: { source: "AI"; model: { identifier: string; version: string }; similarity: number; threshold: number; decidedAt: Date } | null };
   job: { status: ProfileVerificationJobDocument["status"]; attemptCount: number; maxRetryCount: number; completedAt: Date | null; failedAt: Date | null; lastErrorCode: string | null } | null;
+  aiVerification: { lifecycle: AdminAiVerificationLifecycleStatus; resultFormat: "GATED" | "LEGACY" | "NONE"; hasPersistedResult: boolean };
   faceSession: { sessionReference: string; profileSubmissionVersion: number; status: FaceVerificationSessionDocument["status"]; isCurrent: boolean; requiredCaptureCount: number; acceptedCaptureCount: number; challenges: FaceVerificationChallenge[]; startedAt: Date; captureCompletedAt: Date | null; invalidatedAt: Date | null };
   captures: Array<{ challengeIndex: number; challengeType: FaceVerificationChallenge; viewPath: string }>;
   shadowIdentityAnalysis: { status: "NOT_CONFIGURED" | "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED"; conclusion: "LIKELY_MATCH" | "LIKELY_MISMATCH" | "UNABLE_TO_DETERMINE" | null; similarity: number | null; threshold: number | null; model: { identifier: string; version: string } | null; processedAt: Date | null; usableCaptureCount: number | null; reasonCode: string | null; reason: string | null };
-  gatedVerification: { policy: { key: string; version: string }; gate1: { outcome: string; usableCaptureCount: number; weakestPeerMedian: number | null; threshold: number }; gate2: unknown | null; gate3: unknown | null } | null;
+  gatedVerification: { policy: { key: string; version: string }; gate1: { outcome: string; usableCaptureCount: number; weakestPeerMedian: number | null; threshold: number }; gate2: { outcome: string; avatarAdmission: string | null; optionalMediaSummary: { noFaceValidCount: number; usableFaceEvidenceCount: number; unusableEvidenceCount: number; mediaReadFailedCount: number } } | null; gate3: { conclusion: "LIKELY_MATCH" | "LIKELY_MISMATCH" | "UNABLE_TO_DETERMINE"; reasonCode: string | null; avatarMembership: string; avatarMedianSimilarity: number | null; membershipThreshold: number; optionalPersonASupportCount: number; optionalAmbiguousMediaCount: number; optionalTechnicalFailureCount: number } | null } | null;
 }

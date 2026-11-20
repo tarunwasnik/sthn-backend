@@ -15,17 +15,27 @@ export const GATED_PROFILE_VERIFICATION_POLICY_V2: ProfileVerificationPolicy = {
   version: "V2",
 };
 
+/** Deployment-candidate policy. Existing V1/V2 submissions remain advisory. */
+export const GATED_PROFILE_VERIFICATION_POLICY_V3: ProfileVerificationPolicy = {
+  key: "GATED_MULTI_MEDIA",
+  version: "V3",
+};
+
 /** Historical alias retained for callers and fixtures that mean shadow-only V1. */
 export const GATED_PROFILE_VERIFICATION_POLICY = GATED_PROFILE_VERIFICATION_POLICY_V1;
 
 export const parseNewProfileVerificationPolicy = (value: unknown): ProfileVerificationPolicy => {
-  if (value === undefined || value === null || value === "") return LEGACY_PROFILE_VERIFICATION_POLICY;
+  // New submissions are AI-first by default. Historical requests without a
+  // persisted policy still resolve through `resolveProfileVerificationPolicy`
+  // to V1, so this does not reinterpret or alter existing authority.
+  if (value === undefined || value === null || value === "") return GATED_PROFILE_VERIFICATION_POLICY_V3;
   if (typeof value !== "string") throw new Error("STHN_PROFILE_VERIFICATION_POLICY must select a supported verification policy");
   const normalized = value.trim();
   if (normalized === "LEGACY_AVATAR_ONLY" || normalized === "LEGACY_AVATAR_ONLY_V1") return LEGACY_PROFILE_VERIFICATION_POLICY;
   if (normalized === "GATED_MULTI_MEDIA" || normalized === "GATED_MULTI_MEDIA_V1") return GATED_PROFILE_VERIFICATION_POLICY_V1;
   if (normalized === "GATED_MULTI_MEDIA_V2") return GATED_PROFILE_VERIFICATION_POLICY_V2;
-  throw new Error("STHN_PROFILE_VERIFICATION_POLICY must be LEGACY_AVATAR_ONLY_V1, GATED_MULTI_MEDIA_V1, or GATED_MULTI_MEDIA_V2");
+  if (normalized === "GATED_MULTI_MEDIA_V3") return GATED_PROFILE_VERIFICATION_POLICY_V3;
+  throw new Error("STHN_PROFILE_VERIFICATION_POLICY must be LEGACY_AVATAR_ONLY_V1, GATED_MULTI_MEDIA_V1, GATED_MULTI_MEDIA_V2, or GATED_MULTI_MEDIA_V3");
 };
 
 /**
@@ -40,8 +50,12 @@ export const resolveProfileVerificationPolicy = (
 
 export const isGatedProfileVerificationPolicy = (
   policy: ProfileVerificationPolicy,
-) => policy.key === "GATED_MULTI_MEDIA" && (policy.version === "V1" || policy.version === "V2");
+) => policy.key === "GATED_MULTI_MEDIA" && (policy.version === "V1" || policy.version === "V2" || policy.version === "V3");
 
 export const hasGatedAutomatedDecisionAuthority = (
   policy: ProfileVerificationPolicy,
 ) => policy.key === "GATED_MULTI_MEDIA" && policy.version === "V2";
+
+export const hasDeploymentAutomaticDecisionPolicy = (
+  policy: ProfileVerificationPolicy,
+) => policy.key === "GATED_MULTI_MEDIA" && policy.version === "V3";

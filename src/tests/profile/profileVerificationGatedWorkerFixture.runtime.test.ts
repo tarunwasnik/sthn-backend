@@ -12,7 +12,8 @@ import { FaceVerificationEvidence } from "../../models/faceVerificationEvidence.
 import { ProfileVerificationInferenceResult } from "../../models/profileVerificationInferenceResult.model";
 import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
 import { ProfileVerificationRequest } from "../../models/profileVerificationRequest.model";
-import { ensureActiveProfileVerificationRequest } from "../../services/profile/profileVerificationRequest.service";
+import { AuditLog } from "../../models/auditLog.model";
+import { ensureActiveProfileVerificationRequest, escalateProfileVerificationRequest } from "../../services/profile/profileVerificationRequest.service";
 import { ensureProfileVerificationJob, processNextProfileVerificationJob } from "../../services/profile/profileVerificationJob.service";
 import { createSFaceProfileVerificationAdapter } from "../../services/profile/profileVerificationSFaceAdapter";
 import { getAdminProfileVerificationDetail } from "../../services/profile/profileVerificationAdminRead.service";
@@ -97,7 +98,53 @@ test("canonical worker completes bounded Gate-1 technical failure and Gate-2 inv
   } finally { if (previous === undefined) delete process.env.STHN_PROFILE_VERIFICATION_POLICY; else process.env.STHN_PROFILE_VERIFICATION_POLICY = previous; if (threshold === undefined) delete process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD; else process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD = threshold; }
 });
 
-test("canonical worker persists and applies a V2 gated match without consulting legacy authority", async () => {
+test("timeout-escalated work persists late AI evidence and completes without replacing its timeout escalation", async () => {
+  const previous = process.env.STHN_PROFILE_VERIFICATION_POLICY;
+  process.env.STHN_PROFILE_VERIFICATION_POLICY = "GATED_MULTI_MEDIA_V1";
+  try {
+    const { request, profile } = await createGatedWorkerFixture("late-timeout");
+    await escalateProfileVerificationRequest({
+      profileId: String(profile._id),
+      reasonCode: "PROCESSING_TIMEOUT",
+      reason: "Verification processing remained unresolved at the submission deadline.",
+    });
+    const timeoutAuditsBefore = await AuditLog.countDocuments({ entityId: request._id, action: "PROFILE_VERIFICATION_ADMIN_REVIEW_REQUIRED" });
+
+    const outcome = await processNextProfileVerificationJob({
+      workerId: "late-timeout-worker",
+      adapterFactory: () => boundedGatedAdapter({
+        policy: { key: "GATED_MULTI_MEDIA", version: "V1" },
+        gate1: { outcome: "LIVE_CAPTURE_TECHNICAL_FAILURE", usableCaptureCount: 4, threshold: .28, policyVersion: "V1" },
+      }),
+    });
+
+    const [stored, job, result, detail] = await Promise.all([
+      ProfileVerificationRequest.findById(request._id),
+      ProfileVerificationJob.findOne({ verificationRequestId: request._id }),
+      ProfileVerificationInferenceResult.findOne({ verificationRequestId: request._id }),
+      getAdminProfileVerificationDetail(request.verificationReference),
+    ]);
+    assert.ok(outcome?.result);
+    assert.equal(outcome?.completed, true);
+    assert.equal(stored?.status, "ADMIN_REVIEW_REQUIRED");
+    assert.equal(stored?.adminReviewReasonCode, "PROCESSING_TIMEOUT");
+    assert.equal(stored?.decision, undefined);
+    assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification");
+    assert.equal(job?.status, "COMPLETED");
+    assert.equal(job?.attemptCount, 1);
+    assert.ok(result?.gatedPolicyAnalysis);
+    assert.equal(detail.aiVerification.lifecycle, "COMPLETED");
+    assert.equal(detail.aiVerification.hasPersistedResult, true);
+    assert.ok(detail.gatedVerification);
+    assert.equal(await AuditLog.countDocuments({ entityId: request._id, action: "PROFILE_VERIFICATION_ADMIN_REVIEW_REQUIRED" }), timeoutAuditsBefore);
+    assert.equal(await ProfileVerificationInferenceResult.countDocuments({ verificationRequestId: request._id }), 1);
+  } finally {
+    if (previous === undefined) delete process.env.STHN_PROFILE_VERIFICATION_POLICY;
+    else process.env.STHN_PROFILE_VERIFICATION_POLICY = previous;
+  }
+});
+
+test("canonical worker persists a V2 gated match as advisory evidence without consulting legacy authority", async () => {
   const previous = process.env.STHN_PROFILE_VERIFICATION_POLICY; const threshold = process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD;
   process.env.STHN_PROFILE_VERIFICATION_POLICY = "GATED_MULTI_MEDIA_V2"; process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD = "0.99";
   try {
@@ -107,8 +154,8 @@ test("canonical worker persists and applies a V2 gated match without consulting 
     const outcome = await processNextProfileVerificationJob({ workerId: "y4t-v2", adapterFactory: () => ({ ...base, infer: async () => ({ ...(await base.infer()), profileMediaShadowAnalysis: { status: "COMPLETED", processedAt: new Date(), model: { identifier: SFACE_ARTIFACT.identifier, version: SFACE_ARTIFACT.version }, summary: { submittedMediaCount: 8, processedMediaCount: 8, mediaWithNoFaceCount: 0, mediaWithUsableFacesCount: 8, multiFaceMediaCount: 0, failedMediaCount: 0 }, live: { usableCaptureCount: 5, pairwiseComparisonCount: 10, minimumSimilarity: .6, maximumSimilarity: .7, meanSimilarity: .65, medianSimilarity: .65 }, media: [] } }) }) as never });
     const stored = await ProfileVerificationRequest.findById(request._id).orFail();
     assert.ok(outcome?.result); assert.equal(outcome?.completed, true); assert.equal(stored.verificationPolicy?.version, "V2");
-    assert.equal(stored.status, "APPROVED"); assert.equal(stored.decisionAuthority, "AI"); assert.equal(stored.aiDecisionSnapshot?.threshold, .36);
-    assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "verified");
+    assert.equal(stored.status, "ADMIN_REVIEW_REQUIRED"); assert.equal(stored.decisionAuthority, undefined); assert.equal(stored.aiDecisionSnapshot, undefined);
+    assert.equal((await UserProfile.findById(profile._id))?.profileStatus, "pending_verification");
   } finally { if (previous === undefined) delete process.env.STHN_PROFILE_VERIFICATION_POLICY; else process.env.STHN_PROFILE_VERIFICATION_POLICY = previous; if (threshold === undefined) delete process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD; else process.env.STHN_SFACE_IDENTITY_APPROVAL_THRESHOLD = threshold; }
 });
 

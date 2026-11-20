@@ -1,11 +1,24 @@
 import { ClientSession, Types } from "mongoose";
 import { ulid } from "ulid";
 import { FaceVerificationEvidence, FaceVerificationEvidenceDocument } from "../models/faceVerificationEvidence.model";
+import { VerificationTarget } from "../services/creator/creatorVerificationTarget";
 import { FACE_VERIFICATION_EVIDENCE_DELETION_CLAIM_TTL_MS, FACE_VERIFICATION_SHORT_CLEANUP_MS } from "../services/profile/faceVerification.constants";
 
 export class FaceVerificationEvidenceRepository {
+  createTargetReservation(input: Omit<Pick<FaceVerificationEvidenceDocument, "evidenceReference" | "sessionId" | "challengeIndex" | "challenge" | "cloudinaryPublicId">, "profileId" | "userId"> & Pick<VerificationTarget, "targetType" | "targetId" | "ownerUserId" | "verificationRevision">) {
+    const { targetType, targetId, ownerUserId, verificationRevision, ...evidenceInput } = input;
+    return FaceVerificationEvidence.create({ ...evidenceInput, userId: ownerUserId, ownerUserId, targetType, targetId, verificationRevision, ...(targetType === "USER_PROFILE" ? { profileId: targetId } : {}), status: "UPLOADING", cloudinaryResourceType: "image", cleanupAfter: new Date(Date.now() + FACE_VERIFICATION_SHORT_CLEANUP_MS) });
+  }
   findSlot(sessionId: Types.ObjectId, challengeIndex: number) { return FaceVerificationEvidence.findOne({ sessionId, challengeIndex }).exec(); }
-  createReservation(input: Pick<FaceVerificationEvidenceDocument, "evidenceReference" | "sessionId" | "userId" | "profileId" | "challengeIndex" | "challenge" | "cloudinaryPublicId">) { return FaceVerificationEvidence.create({ ...input, status: "UPLOADING", cloudinaryResourceType: "image", cleanupAfter: new Date(Date.now() + FACE_VERIFICATION_SHORT_CLEANUP_MS) }); }
+  createReservation(input: Pick<FaceVerificationEvidenceDocument, "evidenceReference" | "sessionId" | "userId" | "profileId" | "verificationRevision" | "challengeIndex" | "challenge" | "cloudinaryPublicId">) {
+    return FaceVerificationEvidence.create({
+      ...input,
+      targetType: "USER_PROFILE",
+      targetId: input.profileId,
+      ownerUserId: input.userId,
+      status: "UPLOADING", cloudinaryResourceType: "image", cleanupAfter: new Date(Date.now() + FACE_VERIFICATION_SHORT_CLEANUP_MS),
+    });
+  }
   finalizeStored(id: Types.ObjectId, input: { mimeType: string; bytes: number; format: string; captureReceivedAt: Date }) { return FaceVerificationEvidence.findOneAndUpdate({ _id: id, status: "UPLOADING" }, { $set: { status: "STORED", ...input }, $unset: { cleanupAfter: 1 } }, { new: true }).exec(); }
   setCleanupForSession(sessionId: Types.ObjectId, cleanupAfter: Date, session?: ClientSession) { return FaceVerificationEvidence.updateMany({ sessionId, status: { $in: ["UPLOADING", "STORED", "DELETE_PENDING"] } }, { $min: { cleanupAfter } }, { session }).exec(); }
   bindSessionEvidence(sessionId: Types.ObjectId, requestId: Types.ObjectId, session?: ClientSession) { return FaceVerificationEvidence.updateMany({ sessionId, verificationRequestId: { $exists: false } }, { $set: { verificationRequestId: requestId } }, { session }).exec(); }
@@ -15,7 +28,7 @@ export class FaceVerificationEvidenceRepository {
   }
   countStored(sessionId: Types.ObjectId, session?: ClientSession) { return FaceVerificationEvidence.countDocuments({ sessionId, status: "STORED" }).session(session ?? null).exec(); }
   countStoredBoundToRequest(sessionId: Types.ObjectId, requestId: Types.ObjectId, session?: ClientSession) { return FaceVerificationEvidence.countDocuments({ sessionId, verificationRequestId: requestId, status: "STORED" }).session(session ?? null).exec(); }
-  listStoredForSession(sessionId: Types.ObjectId) { return FaceVerificationEvidence.find({ sessionId, status: "STORED" }).sort({ challengeIndex: 1, _id: 1 }).exec(); }
+  listStoredForSession(sessionId: Types.ObjectId, session?: ClientSession) { return FaceVerificationEvidence.find({ sessionId, status: "STORED" }).sort({ challengeIndex: 1, _id: 1 }).session(session ?? null).exec(); }
   listDueForCleanup(now: Date, limit = 50) { return FaceVerificationEvidence.find({ status: { $in: ["UPLOADING", "STORED", "DELETE_PENDING"] }, cleanupAfter: { $lte: now } }).sort({ cleanupAfter: 1 }).limit(limit).exec(); }
   claimDueForDeletion(id: Types.ObjectId, now: Date) {
     const staleBefore = new Date(now.getTime() - FACE_VERIFICATION_EVIDENCE_DELETION_CLAIM_TTL_MS);

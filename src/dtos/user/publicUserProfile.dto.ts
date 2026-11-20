@@ -1,3 +1,4 @@
+
 export interface PublicUserProfileDto {
   id: string;
   username: string;
@@ -13,6 +14,7 @@ export interface PublicUserProfileDto {
 }
 
 type PublicUserProfileSource = {
+  userId: unknown;
   _id: unknown;
   username: string;
   dateOfBirth?: Date | null;
@@ -30,7 +32,7 @@ export const toPublicUserProfileDto = (
   profile: PublicUserProfileSource,
   calculateAge: (dateOfBirth: Date) => number,
 ): PublicUserProfileDto => ({
-  id: String(profile._id),
+  id: String(profile.userId),
   username: profile.username,
   avatar: profile.avatar,
   cover: profile.cover,

@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
-import jwt from "jsonwebtoken";
 import { BookingFundingIntent } from "../../models/bookingFundingIntent.model";
 import { Booking } from "../../models/booking.model";
 import { Payment } from "../../models/payment.model";
 import { PaymentOperation } from "../../models/paymentOperation.model";
 import { BookingFundReservation } from "../../models/bookingFundReservation.model";
 import { Slot } from "../../models/slot.model";
+import { CreatorProfile } from "../../models/creatorProfile.model";
 import { PaymentProvider } from "../../enums/financial/paymentProvider.enum";
 import { createBookingCheckoutQuote } from "../../services/booking/bookingCheckoutQuote.service";
 import { paymentProviderRegistry } from "../../services/financial/paymentProviderRegistry.service";
 import { RazorpaySandboxPaymentProvider } from "../../services/financial/providers/razorpaySandbox.provider";
-import { createBookingWalletFixture } from "./phase8a/fixtures/bookingWalletFixtures";
+import { createBookingWalletFixture, issueSessionToken } from "./phase8a/fixtures/bookingWalletFixtures";
 import { startReleaseHttpServer } from "./phase8b/fixtures/bookingWalletReleaseFixtures";
 import { clearPhase7HDatabase, connectPhase7HDatabase, disconnectPhase7HDatabase } from "./phase7h/helpers/database";
 
@@ -49,7 +49,7 @@ async function fixture() {
   return {
     bookingFixture,
     quote,
-    token: jwt.sign({ id: String(customer._id), role: "user" }, process.env.JWT_SECRET!),
+    token: await issueSessionToken(customer._id, "user"),
   };
 }
 
@@ -57,6 +57,40 @@ const post = (baseUrl: string, token: string, body: object, key: string) => fetc
   method: "POST",
   headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "Idempotency-Key": key },
   body: JSON.stringify(body),
+});
+
+test("USD Razorpay booking is rejected before creating funding or dispatching an order", async () => {
+  const x = await fixture();
+  await CreatorProfile.updateOne({ userId: x.bookingFixture.actors.creatorId }, { $set: { currency: "USD" } });
+  const server = await startReleaseHttpServer();
+  try {
+    const response = await post(server.baseUrl, x.token, { serviceId: String(x.bookingFixture.serviceId), slotIds: x.bookingFixture.slotIds.map(String), paymentMethod: "CARD", paymentProvider: "RAZORPAY", sandbox: true, checkoutQuote: x.quote.token }, "razorpay-usd-denied");
+    const body = await response.json() as { message: string; code: string };
+    assert.equal(response.status, 422);
+    assert.equal(body.code, "PAYMENT_PROVIDER_UNAVAILABLE");
+    assert.match(body.message, /only for INR/);
+    assert.equal(orderCalls, 0);
+    assert.equal(await Booking.countDocuments(), 0);
+    assert.equal(await Payment.countDocuments(), 0);
+    assert.equal(await BookingFundingIntent.countDocuments(), 0);
+  } finally { await server.close(); }
+});
+
+test("internal simulator booking creates and replays a captured payment", async () => {
+  const x = await fixture();
+  const server = await startReleaseHttpServer();
+  const body = { serviceId: String(x.bookingFixture.serviceId), slotIds: x.bookingFixture.slotIds.map(String), paymentMethod: "INTERNAL", checkoutQuote: x.quote.token };
+  try {
+    const first = await post(server.baseUrl, x.token, body, "internal-simulator-replay");
+    const result = await first.json() as { payment?: { status: string }; message?: string };
+    assert.equal(first.status, 201, result.message);
+    assert.equal(result.payment?.status, "CAPTURED");
+    const replay = await post(server.baseUrl, x.token, body, "internal-simulator-replay");
+    assert.equal(replay.status, 200);
+    assert.equal(await Booking.countDocuments(), 1);
+    assert.equal(await Payment.countDocuments(), 1);
+    assert.equal(orderCalls, 0);
+  } finally { await server.close(); }
 });
 
 test("explicit Razorpay sandbox booking admission creates one pending checkout session and replays it without another order", async () => {

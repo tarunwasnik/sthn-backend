@@ -10,9 +10,16 @@ export type CreatorApplicationStatus =
 
 export interface CreatorApplicationDocument extends Document {
   userId: mongoose.Types.ObjectId;
+  /** Distinguishes the future direct-Creator flow from the verified-User upgrade. */
+  applicationJourney: "user_upgrade" | "direct_creator";
+  /** Optimistic-concurrency version for applicant-facing draft edits. */
+  draftVersion: number;
+  /** Future Creator face-capture sessions bind to this revision. */
+  verificationRevision: number;
 
   displayName: string;
-  primaryCategory: string;
+  primaryCategory?: string;
+  interests?: string[];
 
   country: string;
   city: string;
@@ -50,34 +57,38 @@ const CreatorApplicationSchema = new Schema<CreatorApplicationDocument>(
       index: true,
     },
 
+    applicationJourney: { type: String, enum: ["user_upgrade", "direct_creator"], default: "user_upgrade", index: true },
+    draftVersion: { type: Number, default: 0, min: 0 },
+    verificationRevision: { type: Number, default: 0, min: 0 },
+
     displayName: {
       type: String,
-      required: true,
+      required: function (this: CreatorApplicationDocument) { return this.status !== "draft"; },
       trim: true,
     },
 
     primaryCategory: {
       type: String,
-      required: true,
       index: true,
     },
+    interests: { type: [String], default: [] },
 
     country: {
       type: String,
-      required: true,
+      required: function (this: CreatorApplicationDocument) { return this.status !== "draft"; },
       trim: true,
       index: true,
     },
 
     city: {
       type: String,
-      required: true,
+      required: function (this: CreatorApplicationDocument) { return this.status !== "draft"; },
       trim: true,
     },
 
     currency: {
       type: String,
-      required: true,
+      required: function (this: CreatorApplicationDocument) { return this.status !== "draft"; },
       uppercase: true,
       trim: true,
     },
@@ -89,7 +100,7 @@ const CreatorApplicationSchema = new Schema<CreatorApplicationDocument>(
 
     publicBio: {
       type: String,
-      required: true,
+      required: function (this: CreatorApplicationDocument) { return this.status !== "draft"; },
       trim: true,
     },
 
@@ -103,16 +114,25 @@ const CreatorApplicationSchema = new Schema<CreatorApplicationDocument>(
     avatarUrl: {
       type: String,
       default: null,
+      required: function (this: CreatorApplicationDocument) { return this.status !== "draft"; },
     },
 
     coverUrl: {
       type: String,
       default: null,
+      required: function (this: CreatorApplicationDocument) { return this.status !== "draft"; },
     },
 
     media: {
       type: [String],
       default: [],
+      validate: {
+        validator: function (value: string[]) {
+          return (this as CreatorApplicationDocument).status === "draft" || (value.length >= 2 && value.length <= 6);
+        },
+        message: "Gallery must contain between 2 and 6 images",
+      },
+      required: function (this: CreatorApplicationDocument) { return this.status !== "draft"; },
     },
 
     status: {

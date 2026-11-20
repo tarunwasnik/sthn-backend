@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import jwt from "jsonwebtoken";
 
 import { Booking } from "../../../models/booking.model";
 import { BookingFundReservation } from "../../../models/bookingFundReservation.model";
@@ -17,6 +16,7 @@ import {
   postUserCancellation,
   startReleaseHttpServer,
 } from "./fixtures/bookingWalletReleaseFixtures";
+import { issueSessionToken } from "../phase8a/fixtures/bookingWalletFixtures";
 
 const assertCancelledRelease = async (
   bookingId: string,
@@ -64,10 +64,7 @@ export const registerBookingWalletReleaseCancellationTests = () => {
         server.baseUrl,
         { walletAmount: 1_000, slotAmounts: [400] },
       );
-      const creatorAsCustomerToken = jwt.sign(
-        { id: fixture.actors.userId.toString(), role: "creator" },
-        process.env.JWT_SECRET!,
-      );
+      const creatorAsCustomerToken = await issueSessionToken(fixture.actors.userId, "creator");
       const response = await fetch(
         `${server.baseUrl}/api/v1/bookings/${booking._id.toString()}/cancel`,
         { method: "POST", headers: { authorization: `Bearer ${creatorAsCustomerToken}` } },
@@ -88,7 +85,7 @@ export const registerBookingWalletReleaseCancellationTests = () => {
     try {
       const { fixture, booking } = await createActiveWalletBooking(server.baseUrl, { walletAmount: 1_000, slotAmounts: [400] });
       await Booking.updateOne({ _id: booking._id }, { $set: { hasInteracted: true } });
-      const creatorAsCustomerToken = jwt.sign({ id: fixture.actors.userId.toString(), role: "creator" }, process.env.JWT_SECRET!);
+      const creatorAsCustomerToken = await issueSessionToken(fixture.actors.userId, "creator");
       const response = await fetch(`${server.baseUrl}/api/v1/bookings/${booking._id.toString()}/cancel`, { method: "POST", headers: { authorization: `Bearer ${creatorAsCustomerToken}` } });
       assert.equal(response.status, 200, await response.text());
       await assertCancelledRelease(booking._id.toString(), fixture.actors.wallet._id, BookingWalletReleaseCause.USER_CANCELLED);

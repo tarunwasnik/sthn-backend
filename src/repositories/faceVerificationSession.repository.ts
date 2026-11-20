@@ -1,5 +1,6 @@
 import { ClientSession, Types } from "mongoose";
 import { FaceVerificationAvatarCandidate, FaceVerificationSession, FaceVerificationSessionDocument } from "../models/faceVerificationSession.model";
+import { VerificationTarget } from "../services/creator/creatorVerificationTarget";
 
 export const faceVerificationAvatarCandidateMatches = (
   stored: FaceVerificationAvatarCandidate | undefined,
@@ -25,6 +26,12 @@ const candidateFilter = (candidate: FaceVerificationAvatarCandidate): Record<str
   };
 
 export class FaceVerificationSessionRepository {
+  findCurrentByTarget(target: Pick<VerificationTarget, "targetType" | "targetId" | "ownerUserId">, session?: ClientSession) {
+    return FaceVerificationSession.findOne({ targetType: target.targetType, targetId: target.targetId, ownerUserId: target.ownerUserId, isCurrent: true }).session(session ?? null).exec();
+  }
+  createForTarget(input: Omit<Pick<FaceVerificationSessionDocument, "sessionReference" | "avatarFingerprint" | "challenges" | "expiresAt" | "avatarCandidate">, "avatarCandidate"> & Pick<VerificationTarget, "targetType" | "targetId" | "ownerUserId" | "verificationRevision" | "avatarReference"> & { avatarCandidate?: FaceVerificationAvatarCandidate }) {
+    return FaceVerificationSession.create({ ...input, userId: input.ownerUserId, targetType: input.targetType, targetId: input.targetId, ownerUserId: input.ownerUserId, verificationRevision: input.verificationRevision, avatarReference: input.avatarReference, ...(input.targetType === "USER_PROFILE" ? { profileId: input.targetId } : {}), profileSubmissionVersion: input.verificationRevision, status: "CREATED", isCurrent: true, requiredCaptureCount: 5, acceptedCaptureCount: 0, startedAt: new Date() });
+  }
   findCurrent(profileId: Types.ObjectId) { return FaceVerificationSession.findOne({ profileId, isCurrent: true }).exec(); }
   findOwned(sessionReference: string, userId: Types.ObjectId) { return FaceVerificationSession.findOne({ sessionReference, userId }).exec(); }
   findById(id: Types.ObjectId) { return FaceVerificationSession.findById(id).exec(); }
@@ -40,7 +47,14 @@ export class FaceVerificationSessionRepository {
     }).exec();
   }
   create(input: Pick<FaceVerificationSessionDocument, "sessionReference" | "userId" | "profileId" | "profileSubmissionVersion" | "avatarFingerprint" | "challenges" | "expiresAt" | "avatarCandidate">) {
-    return FaceVerificationSession.create({ ...input, status: "CREATED", isCurrent: true, requiredCaptureCount: 5, acceptedCaptureCount: 0, startedAt: new Date() });
+    return FaceVerificationSession.create({
+      ...input,
+      targetType: "USER_PROFILE",
+      targetId: input.profileId,
+      ownerUserId: input.userId,
+      verificationRevision: input.profileSubmissionVersion,
+      status: "CREATED", isCurrent: true, requiredCaptureCount: 5, acceptedCaptureCount: 0, startedAt: new Date(),
+    });
   }
   listExpiredCurrent(now: Date) {
     return FaceVerificationSession.find({
@@ -85,6 +99,16 @@ export class FaceVerificationSessionRepository {
   }
   bindCompletedToRequest(input: { profileId: Types.ObjectId; requestId: Types.ObjectId; version: number; avatarFingerprint: string; avatarCandidate?: FaceVerificationAvatarCandidate; session?: ClientSession }) {
     return FaceVerificationSession.findOneAndUpdate({ profileId: input.profileId, isCurrent: true, status: "CAPTURE_COMPLETE", expiresAt: { $gt: new Date() }, profileSubmissionVersion: input.version, avatarFingerprint: input.avatarFingerprint, verificationRequestId: { $exists: false }, ...(input.avatarCandidate ? candidateFilter(input.avatarCandidate) : {}) }, { $set: { verificationRequestId: input.requestId } }, { new: true, session: input.session }).exec();
+  }
+  bindCompletedTargetToRequest(input: Pick<VerificationTarget, "targetType" | "targetId" | "ownerUserId" | "verificationRevision"> & { requestId: Types.ObjectId; session?: ClientSession }) {
+    return FaceVerificationSession.findOneAndUpdate(
+      { targetType: input.targetType, targetId: input.targetId, ownerUserId: input.ownerUserId, verificationRevision: input.verificationRevision, isCurrent: true, status: "CAPTURE_COMPLETE", expiresAt: { $gt: new Date() }, verificationRequestId: { $exists: false } },
+      { $set: { verificationRequestId: input.requestId } },
+      { new: true, session: input.session },
+    ).exec();
+  }
+  findCurrentCompletedBoundToTarget(input: Pick<VerificationTarget, "targetType" | "targetId" | "ownerUserId" | "verificationRevision"> & { requestId: Types.ObjectId }) {
+    return FaceVerificationSession.findOne({ targetType: input.targetType, targetId: input.targetId, ownerUserId: input.ownerUserId, verificationRevision: input.verificationRevision, verificationRequestId: input.requestId, isCurrent: true, status: "CAPTURE_COMPLETE", requiredCaptureCount: 5, acceptedCaptureCount: 5 }).exec();
   }
   findCurrentCompletedForInitialSubmission(input: { profileId: Types.ObjectId; userId: Types.ObjectId; version: number; avatarFingerprint: string; session?: ClientSession }) {
     return FaceVerificationSession.findOne({ profileId: input.profileId, userId: input.userId, isCurrent: true, status: "CAPTURE_COMPLETE", profileSubmissionVersion: input.version, avatarFingerprint: input.avatarFingerprint }).session(input.session ?? null).exec();

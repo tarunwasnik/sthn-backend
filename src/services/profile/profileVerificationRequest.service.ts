@@ -21,9 +21,10 @@ import { profileVerificationJobRepository } from "../../repositories/profileVeri
 import { profileVerificationInferenceResultRepository } from "../../repositories/profileVerificationInferenceResult.repository";
 import { deriveProfileVerificationLifecycleStage } from "./profileVerificationLifecycle.service";
 import { createProfileVerificationSubmittedMediaSnapshot } from "./profileVerificationSubmittedMedia.service";
-import { selectNewProfileVerificationPolicy } from "./profileVerificationPolicy.service";
+import { hasDeploymentAutomaticDecisionPolicy, resolveProfileVerificationPolicy, selectNewProfileVerificationPolicy } from "./profileVerificationPolicy.service";
 import { notificationService } from "../notification/notification.service";
 import { notificationDeliveryService } from "../notification/notificationDelivery.service";
+import { isUserProfileAutomaticVerificationEnabled } from "../../config/profileVerificationAutomaticDecision";
 
 const adminReviewReasonCodes = new Set<ProfileVerificationAdminReviewReasonCode>([
   "FACE_MATCH_UNCERTAIN", "LIVENESS_UNCERTAIN", "TEXT_MODERATION_UNCERTAIN",
@@ -214,11 +215,12 @@ export const decideProfileVerificationRequest = async (input: {
   aiDecisionSnapshot?: { source: "AI"; model: { identifier: string; version: string }; similarity: number; threshold: number; decidedAt: Date };
 }): Promise<{ request: ProfileVerificationRequestDocument; replayed: boolean }> => {
   if (!mongoose.Types.ObjectId.isValid(input.profileId)) throw new AppError("Invalid profileId", 400);
-  if (input.authority !== "ADMIN") throw new AppError("Only an Admin can finalize profile verification", 403);
-  if (!input.decidedBy || !mongoose.Types.ObjectId.isValid(input.decidedBy)) {
+  if (input.authority !== "ADMIN" && input.authority !== "AI") throw new AppError("Unsupported verification decision authority", 403);
+  if (input.authority === "ADMIN" && (!input.decidedBy || !mongoose.Types.ObjectId.isValid(input.decidedBy))) {
     throw new AppError("Admin identity is required", 400);
   }
-  if (input.reasonCode) throw new AppError("Corrective AI reason codes cannot be set by Admin decisions", 400);
+  if (input.authority === "ADMIN" && input.reasonCode) throw new AppError("Corrective AI reason codes cannot be set by Admin decisions", 400);
+  if (input.authority === "AI" && (!isUserProfileAutomaticVerificationEnabled() || !input.aiDecisionSnapshot)) throw new AppError("Only an Admin can finalize profile verification while automatic profile verification is disabled", 403);
   if (input.decision === "REJECT" && (!input.reason || !input.reason.trim())) {
     throw new AppError("Rejection reason is required", 400);
   }
@@ -243,6 +245,9 @@ export const decideProfileVerificationRequest = async (input: {
           return;
         }
         throw new AppError(latest.status === "EXPIRED" ? "Verification attempt expired; fresh submission required" : "Profile verification decision is already final", 409);
+      }
+      if (input.authority === "AI" && !hasDeploymentAutomaticDecisionPolicy(resolveProfileVerificationPolicy(request))) {
+        throw new AppError("Verification request is not eligible for automatic decisions", 409);
       }
       if ((input.expectedRequestId && String(request._id) !== input.expectedRequestId) || (input.expectedSubmissionVersion !== undefined && request.profileSubmissionVersion !== input.expectedSubmissionVersion) || (input.expectedSubmissionVersion !== undefined && profile.verificationSubmissionVersion !== input.expectedSubmissionVersion)) throw new AppError("Profile verification authority is stale", 409);
 
@@ -323,7 +328,7 @@ export const expireProfileVerificationRequests = async (now = new Date()) => {
     if (deadline.getTime() > now.getTime()) continue;
     const updated = await profileVerificationRequestRepository.transitionToExpired({ requestId: request._id, now, retentionDeadline: deadline });
     if (!updated) continue;
-    const profile = await UserProfile.findById(updated.profileId);
+    const profile = updated.targetType === "CREATOR_APPLICATION" ? null : await UserProfile.findById(updated.profileId);
     if (profile) {
       profile.profileStatus = "incomplete";
       profile.rejectionReason = "";

@@ -105,6 +105,7 @@ const UserProfileSchema = new Schema<UserProfileDocument>(
 
     cover: {
       type: String,
+      default: "",
       required: function (this: UserProfileDocument) { return this.profileStatus !== "incomplete"; },
     },
 

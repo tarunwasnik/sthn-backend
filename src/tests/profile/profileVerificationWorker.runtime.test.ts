@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { createProfileVerificationWorker } from "../../services/profile/profileVerificationWorker.service";
+import { getSFaceSessionCreationCountForTests, resetSFaceRunnerForTests } from "../../services/profile/profileVerificationFaceEmbeddingAdapter";
+import { getYuNetSessionCreationCountForTests, resetYuNetRunnerForTests } from "../../services/profile/profileVerificationYuNetRunner";
 
 test("profile verification worker drains sequential jobs and waits only when idle", async () => {
   let worker: ReturnType<typeof createProfileVerificationWorker>;
@@ -56,4 +58,17 @@ test("profile verification worker start is idempotent within one process", async
   assert.equal(first, second);
   await first;
   assert.equal(calls, 1);
+});
+
+test("idle worker polling does not initialize YuNet or SFace", async () => {
+  resetYuNetRunnerForTests();
+  resetSFaceRunnerForTests();
+  let worker: ReturnType<typeof createProfileVerificationWorker>;
+  worker = createProfileVerificationWorker({
+    processNext: async () => null,
+    wait: async () => { void worker.stop(); },
+  });
+  await worker.start();
+  assert.equal(getYuNetSessionCreationCountForTests(), 0);
+  assert.equal(getSFaceSessionCreationCountForTests(), 0);
 });

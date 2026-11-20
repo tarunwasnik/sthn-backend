@@ -49,7 +49,8 @@ export class CreatorMediaAdmissionPersistenceService {
         const surfaces = creatorMediaSurfaces[input.kind];
         const original = resource.media;
         const consumed = new Set<string>();
-        const resolve = async (claim: CreatorMediaClaim, surface: NonNullable<typeof surfaces.avatar>, slot: string, existing: readonly string[]): Promise<Resolved> => {
+        const resolve = async (claim: CreatorMediaClaim, surface: NonNullable<typeof surfaces.avatar>, slot: string, existing: readonly string[]): Promise<Resolved | null> => {
+          if (claim.kind === "REMOVE") return null;
           if (claim.kind === "UNCHANGED") {
             if (!existing.includes(claim.reference)) throw new CreatorMediaAdmissionPersistenceError("UNCHANGED_REFERENCE_INVALID");
             return { reference: claim.reference };
@@ -66,11 +67,12 @@ export class CreatorMediaAdmissionPersistenceService {
         const avatar = input.claims.avatar === undefined ? undefined : surfaces.avatar ? await resolve(input.claims.avatar, surfaces.avatar, "avatar", original.avatar ? [original.avatar] : []) : (() => { throw new CreatorMediaAdmissionPersistenceError("UNSUPPORTED_SLOT"); })();
         const cover = input.claims.cover === undefined ? undefined : surfaces.cover ? await resolve(input.claims.cover, surfaces.cover, "cover", original.cover ? [original.cover] : []) : (() => { throw new CreatorMediaAdmissionPersistenceError("UNSUPPORTED_SLOT"); })();
         const media = input.claims.media === undefined ? undefined : await Promise.all(input.claims.media.map((claim, index) => resolve(claim, surfaces.media, `media:${index}`, original.media)));
-        const next: CreatorAuthoritativeMedia = { avatar: avatar?.reference ?? original.avatar, cover: cover?.reference ?? original.cover, media: media?.map((item) => item.reference) ?? [...original.media] };
+        if (media?.some((item) => item === null)) throw new CreatorMediaAdmissionPersistenceError("UNSUPPORTED_SLOT");
+        const next: CreatorAuthoritativeMedia = { avatar: avatar === undefined ? original.avatar : avatar?.reference ?? null, cover: cover === undefined ? original.cover : cover?.reference ?? null, media: media?.map((item) => item!.reference) ?? [...original.media] };
         const desired = [
           ...(next.avatar ? [{ slot: "avatar", resolved: avatar ?? { reference: next.avatar } }] : []),
           ...(next.cover ? [{ slot: "cover", resolved: cover ?? { reference: next.cover } }] : []),
-          ...next.media.map((reference, index) => ({ slot: `media:${index}`, resolved: media?.[index] ?? { reference } })),
+          ...next.media.map((reference, index) => ({ slot: `media:${index}`, resolved: media?.[index]! ?? { reference } })),
         ];
         const current = await providerAssetReferenceRepository.findCurrentByEntity(input.kind as ProviderAssetEntityType, resource.id, session);
         const retained = new Set(desired.filter((wanted) => !wanted.resolved.trusted && current.some((existing) => existing.slot === wanted.slot && existing.authoritativeReference === wanted.resolved.reference)).map((wanted) => wanted.slot));

@@ -15,15 +15,19 @@ type SubmittedProfileMediaSource = {
   profilePhotos: string[];
 };
 
-export const GATED_PROFILE_PHOTO_COUNT = 6;
+export const PROFILE_GALLERY_MIN_COUNT = 2;
+export const PROFILE_GALLERY_MAX_COUNT = 6;
 
 export const requireProfilePhotoCountForVerificationPolicy = (
   profilePhotos: readonly string[],
   policy: ProfileVerificationPolicy,
 ) => {
-  if (policy.key === "GATED_MULTI_MEDIA" && (policy.version === "V1" || policy.version === "V2") && profilePhotos.length !== GATED_PROFILE_PHOTO_COUNT) {
+  // Avatar and cover are separate mandatory media. Every policy accepts the
+  // same admitted gallery range, including V3; the former exact-six rule
+  // incorrectly rejected otherwise valid 2–5 image submissions.
+  if (profilePhotos.length < PROFILE_GALLERY_MIN_COUNT || profilePhotos.length > PROFILE_GALLERY_MAX_COUNT) {
     throw new AppError(
-      `Exactly ${GATED_PROFILE_PHOTO_COUNT} profile photos are required for verification`,
+      `Profile gallery must contain between ${PROFILE_GALLERY_MIN_COUNT} and ${PROFILE_GALLERY_MAX_COUNT} images for verification`,
       400,
       "PROFILE_PHOTO_COUNT_INVALID",
     );
@@ -51,7 +55,7 @@ export const createProfileVerificationSubmittedMediaSnapshot = (
   policy?: ProfileVerificationPolicy,
 ): ProfileVerificationSubmittedMediaSnapshot => {
   if (!profile.avatar?.trim() || !profile.cover?.trim()
-    || !Array.isArray(profile.profilePhotos) || profile.profilePhotos.length < 2 || profile.profilePhotos.length > 6
+    || !Array.isArray(profile.profilePhotos) || profile.profilePhotos.length < PROFILE_GALLERY_MIN_COUNT || profile.profilePhotos.length > PROFILE_GALLERY_MAX_COUNT
     || profile.profilePhotos.some((photo) => typeof photo !== "string" || !photo.trim())) {
     throw new ProfileVerificationInferenceError("Submitted profile media authority is invalid", "STALE_SUBMISSION", 409);
   }

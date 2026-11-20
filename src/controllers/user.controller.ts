@@ -64,8 +64,9 @@ export const getUserPublicProfile = asyncHandler(
 
     const profile = await UserProfile.findOne({
       userId,
+      profileStatus: "verified",
     })
-      .select("username dateOfBirth avatar cover bio interests country city languages profilePhotos")
+      .select("userId username dateOfBirth avatar cover bio interests country city languages profilePhotos")
       .lean();
 
     if (!profile) {

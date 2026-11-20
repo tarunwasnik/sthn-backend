@@ -180,7 +180,7 @@ export const acceptFaceVerificationCapture = async (input: { userId: string; ses
   const evidenceReference = `FACE_EVIDENCE_${ulid()}`;
   const publicId = `sthn/verification/face-evidence/${session.sessionReference}/${index}-${evidenceReference}`;
   let evidence;
-  try { evidence = await faceVerificationEvidenceRepository.createReservation({ evidenceReference, sessionId: session._id, userId: session.userId, profileId: session.profileId, challengeIndex: index, challenge, cloudinaryPublicId: publicId }); }
+  try { evidence = await faceVerificationEvidenceRepository.createReservation({ evidenceReference, sessionId: session._id, userId: session.userId, profileId: session.profileId, verificationRevision: session.verificationRevision ?? session.profileSubmissionVersion, challengeIndex: index, challenge, cloudinaryPublicId: publicId }); }
   catch (error) { if (duplicateKey(error)) { const replay = await faceVerificationEvidenceRepository.findSlot(session._id, index); if (replay?.status === "STORED") return { session, evidence: replay, replayed: true }; } throw error; }
   const stored = await storeFaceVerificationEvidence({ buffer: input.file.buffer, publicId });
   const finalized = await faceVerificationEvidenceRepository.finalizeStored(evidence._id, { mimeType: stored.mimeType, bytes: stored.bytes, format: stored.format, captureReceivedAt: new Date() });

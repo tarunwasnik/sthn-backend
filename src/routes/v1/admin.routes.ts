@@ -3,6 +3,7 @@
 import { Router } from "express";
 import { protect } from "../../middlewares/auth.middleware";
 import { authorizeRoles } from "../../middlewares/authorize.middleware";
+import { listAdminCreatorVerificationCases, getAdminCreatorVerificationCase, getAdminCreatorVerificationCapture } from "../../controllers/adminCreatorVerification.controller";
 
 import {
   suspendUser,
@@ -42,6 +43,7 @@ import { addAdminDisputeFinding, createAdminDisputeRequest, finalizeAdminDispute
 import { chatDocumentUpload, chatImageUpload } from "../../middlewares/upload.middleware";
 import { uploadAdminDocument, uploadAdminImage } from "../../controllers/disputeDirectEvidence.controller";
 import { getAdminAppeal, listAdminAppeals } from "../../controllers/adminAppeal.controller";
+import { adminDecideSafetyReport, adminGetSafetyReport, adminListSafetyReports } from "../../controllers/safetyReport.controller";
 
 const router = Router();
 
@@ -70,6 +72,9 @@ router.post(
 );
 
 router.get("/audit-logs", protect, authorizeRoles("admin"), getAuditLogs);
+router.get("/creator-verification", protect, authorizeRoles("admin"), listAdminCreatorVerificationCases);
+router.get("/creator-verification/:verificationReference", protect, authorizeRoles("admin"), getAdminCreatorVerificationCase);
+router.get("/creator-verification/:verificationReference/captures/:challengeIndex", protect, authorizeRoles("admin"), getAdminCreatorVerificationCapture);
 router.get("/governance/targets/:userId", protect, authorizeRoles("admin"), getAdminGovernanceTargetController);
 
 /* ================= PAYOUT DESTINATION VERIFICATION ================= */
@@ -215,6 +220,11 @@ router.get("/disputes/:disputeId", protect, authorizeRoles("admin"), getAdminDis
 
 router.get("/appeals", protect, authorizeRoles("admin"), listAdminAppeals);
 router.get("/appeals/:appealId", protect, authorizeRoles("admin"), getAdminAppeal);
+
+/* ================= ACCOUNT SAFETY REPORTS ================= */
+router.get("/safety-reports", protect, authorizeRoles("admin"), adminListSafetyReports);
+router.get("/safety-reports/:reportId", protect, authorizeRoles("admin"), adminGetSafetyReport);
+router.patch("/safety-reports/:reportId", protect, authorizeRoles("admin"), adminDecideSafetyReport);
 
 router.post(
   "/appeals/:appealId/decide",

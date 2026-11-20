@@ -23,7 +23,7 @@ export type AdminCreatorListDto = {
   slug: string;
   displayName: string;
   avatarUrl: string | null;
-  primaryCategory: string;
+  primaryCategory: string | null;
   country: string;
   city: string;
   currency: string;
@@ -42,7 +42,7 @@ export const toAdminCreatorListDto = (
   slug: creator.slug,
   displayName: creator.displayName,
   avatarUrl: creator.avatarUrl ?? null,
-  primaryCategory: creator.primaryCategory,
+  primaryCategory: creator.primaryCategory ?? null,
   country: creator.country,
   city: creator.city,
   currency: creator.currency,

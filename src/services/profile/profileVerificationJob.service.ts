@@ -2,7 +2,7 @@ import { ulid } from "ulid";
 import { ClientSession, Types } from "mongoose";
 
 import { ProfileVerificationRequestDocument } from "../../models/profileVerificationRequest.model";
-import { ProfileVerificationJobDocument } from "../../models/profileVerificationJob.model";
+import { ProfileVerificationJob, ProfileVerificationJobDocument } from "../../models/profileVerificationJob.model";
 import { profileVerificationJobRepository } from "../../repositories/profileVerificationJob.repository";
 import { profileVerificationRequestRepository } from "../../repositories/profileVerificationRequest.repository";
 import { FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS } from "./faceVerification.constants";
@@ -13,14 +13,32 @@ import { profileVerificationInferenceResultRepository } from "../../repositories
 import { withYuNetRunnerAuditContext } from "./profileVerificationYuNetRuntimeAudit.service";
 import { applyProfileVerificationAiDecision } from "./profileVerificationAiDecision.service";
 import { UserProfile } from "../../models/userProfile.model";
+import { CreatorApplication } from "../../models/creatorApplication.model";
 import { AppError } from "../../utils/AppError";
 import { ProfileVerificationInferenceAdapter } from "./profileVerificationInferenceAdapter";
 import { reportProfileVerificationMemory } from "./profileVerificationMemoryDiagnostic.service";
+import { applyCreatorV3AutomaticDecision } from "../creator/creatorV3AutomaticDecision.service";
+import { emitIdentityChanged } from "../../sockets/chat.socket";
+import { notificationDeliveryService } from "../notification/notificationDelivery.service";
 
 const LEASE_MS = 5 * 60 * 1000;
 const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000];
 const PROCESSING_TIMEOUT_MS = 30 * 60 * 1000;
 const processingJobReference = () => `PROFILE_VERIFICATION_JOB_${ulid()}`;
+const eligibleCreatorUpgradeIds = async () => {
+  const candidates = await ProfileVerificationJob.distinct("targetId", { targetType: "CREATOR_APPLICATION", status: { $in: ["PENDING", "RETRY_WAIT", "RUNNING"] } });
+  return CreatorApplication.distinct("_id", { _id: { $in: candidates }, applicationJourney: "user_upgrade" });
+};
+
+const escalateStaleSubmission = async (request: ProfileVerificationRequestDocument, now: Date) => (
+  profileVerificationRequestRepository.transitionToAdminReview({
+    requestId: request._id,
+    reasonCode: "OTHER",
+    reason: "The submitted verification evidence no longer matches its authoritative revision. A new verification submission is required.",
+    requiredAt: now,
+    now,
+  })
+);
 
 const boundedError = (value: unknown, maximum: number) => (
   typeof value === "string" && value.trim() ? value.trim().slice(0, maximum) : undefined
@@ -37,6 +55,12 @@ const isReconciliationApplicableProfile = async (profileId: Types.ObjectId, subm
 
 const escalateFailedProfileVerificationJob = async (job: ProfileVerificationJobDocument, reason: string, now: Date) => {
   const request = await profileVerificationRequestRepository.findById(job.verificationRequestId);
+  if (job.targetType === "CREATOR_APPLICATION" && (!request || request.targetType !== "CREATOR_APPLICATION" || !job.targetId || !request.targetId || !job.targetId.equals(request.targetId) || !job.ownerUserId || !request.ownerUserId || !job.ownerUserId.equals(request.ownerUserId))) return;
+  if (request?.targetType === "CREATOR_APPLICATION") {
+    if (job.targetType !== "CREATOR_APPLICATION") return;
+    await profileVerificationRequestRepository.transitionToAdminReview({ requestId: request._id, reasonCode: "OTHER", reason, requiredAt: now, now });
+    return;
+  }
   if (request && request.isActive && (request.status === "PENDING" || request.status === "PROCESSING")) {
     const { escalateProfileVerificationRequest } = await import("./profileVerificationRequest.service");
     await escalateProfileVerificationRequest({ profileId: String(request.profileId), reasonCode: "MODEL_FAILURE", reason, now });
@@ -69,13 +93,23 @@ export const ensureProfileVerificationJob = async (
 
 export const claimProfileVerificationJob = async (input: { workerId: string; now?: Date }) => {
   const now = input.now ?? new Date();
-  const job = await profileVerificationJobRepository.claimNext(input.workerId, now, new Date(now.getTime() + LEASE_MS));
+  const creatorUpgradeIds = await eligibleCreatorUpgradeIds();
+  const job = await profileVerificationJobRepository.claimNext(input.workerId, now, new Date(now.getTime() + LEASE_MS), creatorUpgradeIds);
   if (!job) return null;
 
   const request = await profileVerificationRequestRepository.findById(job.verificationRequestId);
+  if (job.targetType === "CREATOR_APPLICATION" && request && (request.targetType !== job.targetType || !job.targetId || !request.targetId || !job.ownerUserId || !request.ownerUserId || !job.targetId.equals(request.targetId) || !job.ownerUserId.equals(request.ownerUserId) || job.verificationRevision !== request.verificationRevision)) {
+    await profileVerificationJobRepository.fail({ jobId: job._id, workerId: input.workerId, now, errorCode: "STALE_SUBMISSION", errorMessage: "Creator job target does not match its request." });
+    if (request.targetType === "CREATOR_APPLICATION" && job.targetId && request.targetId && job.targetId.equals(request.targetId) && job.ownerUserId && request.ownerUserId && job.ownerUserId.equals(request.ownerUserId)) await escalateStaleSubmission(request, now);
+    return { job, request, actionable: false };
+  }
   if (isTerminalRequest(request) || request!.profileSubmissionVersion !== job.profileSubmissionVersion
     || request!.submittedAt.getTime() + FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS <= now.getTime()) {
-    await profileVerificationJobRepository.completeIfNotTerminal({ jobId: job._id, now });
+    if (job.targetType === "CREATOR_APPLICATION") {
+      await profileVerificationJobRepository.failInactiveCreatorRequest(job._id, now);
+      if (request?.targetType === "CREATOR_APPLICATION" && request.isActive && request.profileSubmissionVersion !== job.profileSubmissionVersion) await escalateStaleSubmission(request, now);
+    }
+    else await profileVerificationJobRepository.completeIfNotTerminal({ jobId: job._id, now });
     return { job, request, actionable: false };
   }
 
@@ -84,7 +118,11 @@ export const claimProfileVerificationJob = async (input: { workerId: string; now
     if (!processing) {
       const current = await profileVerificationRequestRepository.findById(request!._id);
       if (isTerminalRequest(current) || current?.profileSubmissionVersion !== job.profileSubmissionVersion) {
-        await profileVerificationJobRepository.completeIfNotTerminal({ jobId: job._id, now });
+        if (job.targetType === "CREATOR_APPLICATION") {
+          await profileVerificationJobRepository.failInactiveCreatorRequest(job._id, now);
+          if (current?.targetType === "CREATOR_APPLICATION" && current.isActive && current.profileSubmissionVersion !== job.profileSubmissionVersion) await escalateStaleSubmission(current, now);
+        }
+        else await profileVerificationJobRepository.completeIfNotTerminal({ jobId: job._id, now });
         return { job, request: current, actionable: false };
       }
     }
@@ -130,16 +168,45 @@ export const processNextProfileVerificationJob = async (input: { workerId: strin
   const now = input.now ?? new Date();
   const claim = await claimProfileVerificationJob({ workerId: input.workerId, now });
   if (!claim) return null;
-  if (!claim.actionable) return { ...claim, result: null, completed: true };
+  if (!claim.actionable) return { ...claim, result: null, completed: claim.job.targetType !== "CREATOR_APPLICATION" };
   reportProfileVerificationMemory("WORKER_CLAIMED");
   try {
     const outcome = await withYuNetRunnerAuditContext({ verificationReference: claim.request!.verificationReference, jobReference: claim.job.jobReference, submissionVersion: claim.job.profileSubmissionVersion, attemptCount: claim.job.attemptCount }, () => finalizeProfileVerificationInference({
       verificationRequestId: String(claim.job.verificationRequestId), adapter: input.adapterFactory?.() ?? createSFaceProfileVerificationAdapter(),
     }));
     reportProfileVerificationMemory("INFERENCE_FINALIZED");
-    if (outcome.result) {
+    if (outcome.noOp === "STALE_SUBMISSION") {
+      // This is not a successful completed inference. Preserve the immutable
+      // stale evidence, stop retrying it, and make the applicant/Admin state
+      // explicit rather than leaving an active request in PROCESSING.
+      const failure = await profileVerificationJobRepository.fail({
+        jobId: claim.job._id,
+        workerId: input.workerId,
+        now: new Date(),
+        errorCode: "STALE_SUBMISSION",
+        errorMessage: "Submitted face evidence does not match the authoritative verification revision.",
+      });
+      await escalateStaleSubmission(claim.request!, new Date());
+      return { ...claim, result: null, replayed: false, completed: false, failure };
+    }
+    if (claim.request!.targetType === "CREATOR_APPLICATION" && !outcome.result) {
+      const failure = await profileVerificationJobRepository.fail({ jobId: claim.job._id, workerId: input.workerId, now: new Date(), errorCode: "NO_INFERENCE_RESULT", errorMessage: "Creator verification did not produce an inference result." });
+      await escalateStaleSubmission(claim.request!, new Date());
+      return { ...claim, result: null, replayed: false, completed: false, failure };
+    }
+    if (outcome.result && claim.request!.targetType !== "CREATOR_APPLICATION") {
       const decision = await applyProfileVerificationAiDecision({ request: claim.request!, result: outcome.result });
       reportProfileVerificationMemory("DECISION_APPLIED", { decisionType: decision.request.status as "APPROVED" | "REJECTED" | "ADMIN_REVIEW_REQUIRED" });
+    }
+    if (outcome.result && claim.request!.targetType === "CREATOR_APPLICATION") {
+      const decision = await applyCreatorV3AutomaticDecision({ request: claim.request!, result: outcome.result });
+      if (decision.approval) {
+        emitIdentityChanged(decision.approval.creatorProfile.userId.toString());
+        if (decision.approval.delivery?.created) notificationDeliveryService.deliverPersisted(decision.approval.delivery.notification, { postCommit: true });
+      }
+      if (decision.evaluation.finalAction === "ADMIN_REVIEW" || decision.evaluation.finalAction === "DISABLED") {
+        await profileVerificationRequestRepository.transitionToAdminReview({ requestId: claim.request!._id, reasonCode: "OTHER", reason: decision.evaluation.finalAction === "DISABLED" ? "Creator V3 automatic verification is disabled; Admin review is required." : decision.evaluation.reason, requiredAt: new Date(), now: new Date() });
+      }
     }
     const completed = await profileVerificationJobRepository.completeIfNotTerminal({ jobId: claim.job._id, now: new Date() });
     reportProfileVerificationMemory("WORKER_COMPLETED");
@@ -160,17 +227,32 @@ export const reconcileProfileVerificationJobs = async (now = new Date()) => {
   const report = { jobsCreated: 0, expiredLeasesRecovered: 0, expiredLeasesFailed: 0, terminalJobsCompleted: 0, timeoutEscalated: 0, skipped: 0 };
   const { expireProfileVerificationRequests } = await import("./profileVerificationRequest.service");
   await expireProfileVerificationRequests(now);
+  const creatorUpgradeIds = await eligibleCreatorUpgradeIds();
   for (;;) {
-    const failed = await profileVerificationJobRepository.failOneExpiredLeaseAtAttemptLimit(now);
+    const failed = await profileVerificationJobRepository.failOneExpiredLeaseAtAttemptLimit(now, creatorUpgradeIds);
     if (!failed) break;
     report.expiredLeasesFailed += 1;
     await escalateFailedProfileVerificationJob(failed, "Verification processing stopped before completion after bounded attempts.", now);
   }
-  const recovered = await profileVerificationJobRepository.recoverExpiredLeasesBelowAttemptLimit(now);
+  const recovered = await profileVerificationJobRepository.recoverExpiredLeasesBelowAttemptLimit(now, creatorUpgradeIds);
   report.expiredLeasesRecovered = recovered.modifiedCount;
 
   const activeRequests = await profileVerificationRequestRepository.listActive();
   for (const request of activeRequests) {
+    if (request.targetType === "CREATOR_APPLICATION") {
+      const valid = await (await import("../creator/creatorUpgradeVerificationAuthority")).isCurrentCreatorUpgradeVerification(request);
+      if (!valid || !request.targetId || !request.ownerUserId || !request.verificationRevision) { report.skipped += 1; continue; }
+      let job = await profileVerificationJobRepository.findByRequestId(request._id);
+      if (!job) {
+        try { job = await profileVerificationJobRepository.createForTarget({ targetType: "CREATOR_APPLICATION", targetId: request.targetId, ownerUserId: request.ownerUserId, verificationRevision: request.verificationRevision, verificationRequestId: request._id, jobReference: processingJobReference(), nextAttemptAt: now }); report.jobsCreated += 1; }
+        catch (error) { job = await profileVerificationJobRepository.findByRequestId(request._id); if (!job) throw error; }
+      }
+      if (job.status !== "COMPLETED" && request.submittedAt.getTime() + PROCESSING_TIMEOUT_MS <= now.getTime() && request.submittedAt.getTime() + FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS > now.getTime()) {
+        const escalated = await profileVerificationRequestRepository.transitionToAdminReview({ requestId: request._id, reasonCode: "PROCESSING_TIMEOUT", reason: "Verification processing remained unresolved at the submission deadline.", requiredAt: now, now });
+        if (escalated) report.timeoutEscalated += 1;
+      }
+      continue;
+    }
     if (!(await isReconciliationApplicableProfile(request.profileId, request.profileSubmissionVersion))) {
       report.skipped += 1;
       continue;
@@ -208,6 +290,12 @@ export const reconcileProfileVerificationJobs = async (now = new Date()) => {
 
   const nonTerminalJobs = await profileVerificationJobRepository.listNonTerminal();
   for (const job of nonTerminalJobs) {
+    if (job.targetType === "CREATOR_APPLICATION") {
+      if (!job.targetId || !creatorUpgradeIds.some((id) => id.equals(job.targetId))) { report.skipped += 1; continue; }
+      const creatorRequest = await profileVerificationRequestRepository.findById(job.verificationRequestId);
+      if (isTerminalRequest(creatorRequest)) await profileVerificationJobRepository.failInactiveCreatorRequest(job._id, now);
+      continue;
+    }
     const request = await profileVerificationRequestRepository.findById(job.verificationRequestId);
     if (isTerminalRequest(request) || request!.profileSubmissionVersion !== job.profileSubmissionVersion
       || !(await isReconciliationApplicableProfile(job.profileId, job.profileSubmissionVersion))) {

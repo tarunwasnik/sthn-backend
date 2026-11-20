@@ -142,7 +142,7 @@ const enrichedBookings = bookings.map((b: any) => {
       _id: String(b.userId),
       displayName: profile?.username || "Unknown",
       avatarUrl:
-        profile?.profilePhotos?.[0] || null,
+        profile?.avatar || null,
     },
 
     slots: (b.slotIds || [])

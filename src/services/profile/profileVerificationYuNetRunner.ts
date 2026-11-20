@@ -19,6 +19,7 @@ export type YuNetPreFilterScoreSummary = {
   thresholdCounts: Record<"0.30" | "0.40" | "0.50" | "0.55" | "0.60" | "0.65" | "0.70" | "0.80" | "0.90", number>;
 };
 let sessionPromise: Promise<ort.InferenceSession> | null = null;
+let sessionCreationCount = 0;
 
 const disposeOutput = (output: Output) => {
   for (const tensor of Object.values(output)) tensor.dispose?.();
@@ -66,13 +67,15 @@ const loadSession = async (role: YuNetRunnerRole, auditEnabled = true) => {
     catch { if (audit) await updateYuNetRunnerAudit(audit._id, "SESSION_LOAD_FAILED"); throw technicalInferenceFailure(); }
     const metadata = session.inputMetadata[0];
     if (session.inputNames.length !== 1 || session.inputNames[0] !== "input" || !metadata?.isTensor || metadata.shape.join(",") !== "1,3,height,width") throw technicalInferenceFailure("YuNet model input contract is invalid");
+    sessionCreationCount += 1;
     if (audit) await updateYuNetRunnerAudit(audit._id, "SESSION_LOAD_SUCCEEDED"); return session;
   })();
   try { return await sessionPromise; } catch (error) { sessionPromise = null; throw error; }
 };
 
 /** Test-only cache reset; production never changes the configured artifact at runtime. */
-export const resetYuNetRunnerForTests = () => { sessionPromise = null; };
+export const resetYuNetRunnerForTests = () => { sessionPromise = null; sessionCreationCount = 0; };
+export const getYuNetSessionCreationCountForTests = () => sessionCreationCount;
 
 const runYuNetInference = async (encoded: Buffer, role: YuNetRunnerRole, auditEnabled = true) => {
   const source = sharp(encoded, { limitInputPixels: YUNET_LIMITS.maxPixels, limitInputChannels: YUNET_LIMITS.maxChannels, pages: 1, animated: false, failOn: "warning" });

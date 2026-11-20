@@ -41,8 +41,8 @@ export const createSFaceProfileVerificationAdapter = (dependencies: { evidenceRe
   const embedder = getProductionFaceEmbeddingAdapter();
   return {
     pipelineManifest: {
-      kind: "MODEL_RUNTIME", pipelineVersion: "STHN_SFACE_SHADOW_MEDIAN_3_NO_THRESHOLD_V2", runtimeIdentifier: "onnxruntime-node", runtimeVersion: "1.27.0",
-      preprocessingVersion: "YUNET_5PT_SFACE_112_BGR_L2_COSINE_MEDIAN_MIN3_NO_THRESHOLD_V1",
+      kind: "MODEL_RUNTIME", pipelineVersion: "STHN_SFACE_ADVISORY_MULTI_MEDIA_V3", runtimeIdentifier: "onnxruntime-node", runtimeVersion: "1.27.0",
+      preprocessingVersion: "YUNET_BGR_5PT_ALIGN_SFACE_112_RGB_NCHW_L2_COSINE_V2",
       detector: { identifier: YUNET_ARTIFACT.identifier, version: YUNET_ARTIFACT.version, artifactSha256: YUNET_ARTIFACT.sha256 },
       embedding: { identifier: SFACE_ARTIFACT.identifier, version: SFACE_ARTIFACT.version, artifactSha256: SFACE_ARTIFACT.sha256 },
     },
@@ -76,7 +76,8 @@ export const createSFaceProfileVerificationAdapter = (dependencies: { evidenceRe
         const gate1 = evaluateProfileVerificationGate1LiveAnchor(liveEmbeddings);
         reportProfileVerificationMemory("GATE1_COMPLETE");
         if (gate1.outcome !== "PASS") {
-          return { findings: { ...findings, avatar: { status: "NO_USABLE_FACE" } }, profileMediaShadowAnalysis, gatedPolicyAnalysis: { policy: input.verificationPolicy, gate1 } };
+          // Gate 3 did not run; a live-anchor failure says nothing about avatar detection.
+          return { findings: { ...findings, avatar: { status: "NOT_RUN" } }, profileMediaShadowAnalysis, gatedPolicyAnalysis: { policy: input.verificationPolicy, gate1 } };
         }
         const gate2 = evaluateProfileVerificationGate2MediaAdmission(profileMediaShadowAnalysis);
         reportProfileVerificationMemory("GATE2_COMPLETE");
@@ -91,7 +92,9 @@ export const createSFaceProfileVerificationAdapter = (dependencies: { evidenceRe
           },
         };
         if (gate2.status !== "READY_FOR_GATE3") {
-          return { findings: { ...findings, avatar: { status: "NO_USABLE_FACE" } }, profileMediaShadowAnalysis, gatedPolicyAnalysis: { policy: input.verificationPolicy, gate1, gate2: compactGate2 } };
+          const status = gate2.avatar?.admission === "AVATAR_INVALID_MULTIPLE_FACES" ? "MULTIPLE_FACES"
+            : gate2.avatar?.admission === "AVATAR_INVALID_NO_FACE" || gate2.avatar?.admission === "AVATAR_INVALID_FACE_UNUSABLE" ? "NO_USABLE_FACE" : "NOT_RUN";
+          return { findings: { ...findings, avatar: { status } }, profileMediaShadowAnalysis, gatedPolicyAnalysis: { policy: input.verificationPolicy, gate1, gate2: compactGate2 } };
         }
         const gate3 = evaluateProfileVerificationGate3IdentityPolicy({ gate1Accepted: true, analysis: profileMediaShadowAnalysis, gate2 });
         reportProfileVerificationMemory("GATE3_COMPLETE");
@@ -112,7 +115,7 @@ export const createSFaceProfileVerificationAdapter = (dependencies: { evidenceRe
       try { avatarDetection = await detector(await avatarReader(input), "REFERENCE"); }
       catch (error) {
         if (error instanceof ProfileVerificationInferenceError && ["STALE_SUBMISSION", "TERMINAL_REQUEST"].includes(error.code)) throw error;
-        return { findings: { ...findings, avatar: { status: "NO_USABLE_FACE" } }, shadowIdentityAnalysis: unable("REFERENCE_AVATAR_UNAVAILABLE", "The authoritative submitted avatar could not be processed."), profileMediaShadowAnalysis };
+        return { findings: { ...findings, avatar: { status: "NOT_RUN" } }, shadowIdentityAnalysis: unable("REFERENCE_AVATAR_UNAVAILABLE", "The authoritative submitted avatar could not be processed."), profileMediaShadowAnalysis };
       }
       const referenceValidation = validateBiometricReferenceDetection(avatarDetection);
       if (!referenceValidation.valid) return { findings: { ...findings, avatar: { status: referenceValidation.reason === "MULTIPLE_FACES" ? "MULTIPLE_FACES" : "NO_USABLE_FACE" } }, shadowIdentityAnalysis: unable(referenceValidation.reason === "MULTIPLE_FACES" ? "MULTIPLE_REFERENCE_FACES" : "REFERENCE_FACE_NOT_FOUND", "The authoritative submitted avatar has no usable face."), profileMediaShadowAnalysis };
@@ -120,7 +123,7 @@ export const createSFaceProfileVerificationAdapter = (dependencies: { evidenceRe
       try {
         const avatarBytes = await avatarReader(input);
         reference = normalizeFaceEmbeddingL2(await embedder.infer(await alignFaceEvidence({ bytes: avatarBytes, landmarks: avatarDetection.faces[0].landmarks, preprocessing: SFACE_FACE_EMBEDDING_SPECIFICATION.preprocessing })), 128);
-      } catch { return { findings: { ...findings, avatar: { status: "NO_USABLE_FACE" } }, shadowIdentityAnalysis: unable("REFERENCE_ALIGNMENT_UNAVAILABLE", "The authoritative submitted avatar could not be aligned for analysis."), profileMediaShadowAnalysis }; }
+      } catch { return { findings: { ...findings, avatar: { status: "NOT_RUN" } }, shadowIdentityAnalysis: unable("REFERENCE_ALIGNMENT_UNAVAILABLE", "The authoritative submitted avatar could not be aligned for analysis."), profileMediaShadowAnalysis }; }
       const embeddings: number[][] = [];
       for (const capture of detected) {
         if (findings.captures[capture.challengeIndex]?.usability !== "USABLE" || capture.detection.faces.length !== 1) continue;

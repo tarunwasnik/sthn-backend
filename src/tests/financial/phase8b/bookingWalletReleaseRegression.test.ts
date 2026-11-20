@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import jwt from "jsonwebtoken";
 
 import { Booking } from "../../../models/booking.model";
 import { BookingFundReservation } from "../../../models/bookingFundReservation.model";
@@ -16,6 +15,7 @@ import { PaymentMethod } from "../../../enums/financial/paymentMethod.enum";
 import { PaymentStatus } from "../../../enums/financial/paymentStatus.enum";
 import {
   createBookingWalletFixture,
+  issueSessionToken,
 } from "../phase8a/fixtures/bookingWalletFixtures";
 import {
   createActors,
@@ -32,15 +32,18 @@ export const registerBookingWalletReleaseRegressionTests = () => {
     const server = await startReleaseHttpServer();
     try {
       const fixture = await createBookingWalletFixture({ walletAmount: 0, slotAmounts: [200] });
+      const preview = await fetch(`${server.baseUrl}/api/v1/bookings/pricing-preview`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${fixture.token}` }, body: JSON.stringify({ serviceId: String(fixture.serviceId), slotIds: fixture.slotIds.map(String) }) });
+      const previewBody = await preview.json() as { preview: { checkoutQuote: { token: string } } };
+      assert.equal(preview.status, 200);
       const response = await fetch(`${server.baseUrl}/api/v1/bookings/request`, {
         method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${fixture.token}` },
-        body: JSON.stringify({ serviceId: String(fixture.serviceId), slotIds: fixture.slotIds.map(String), paymentMethod: PaymentMethod.INTERNAL }),
+        body: JSON.stringify({ serviceId: String(fixture.serviceId), slotIds: fixture.slotIds.map(String), paymentMethod: PaymentMethod.INTERNAL, idempotencyKey: "phase8b-provider-acceptance", checkoutQuote: previewBody.preview.checkoutQuote.token }),
       });
       const body = await response.json() as Record<string, any>;
       assert.equal(response.status, 201, JSON.stringify(body));
       const booking = await Booking.findById(body.booking._id).orFail();
       const operation = await PaymentOperation.findOne({ paymentId: booking.paymentId }).orFail();
-      const token = jwt.sign({ id: fixture.actors.creatorId.toString(), role: "creator" }, process.env.JWT_SECRET!);
+      const token = await issueSessionToken(fixture.actors.creatorId, "creator");
       const readFunding = async () => {
         const result = await fetch(`${server.baseUrl}/api/v1/bookings/${booking._id}/funding`, {
           headers: { authorization: `Bearer ${fixture.token}` },
@@ -108,6 +111,9 @@ export const registerBookingWalletReleaseRegressionTests = () => {
         walletAmount: 0,
         slotAmounts: [200],
       });
+      const preview = await fetch(`${server.baseUrl}/api/v1/bookings/pricing-preview`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${fixture.token}` }, body: JSON.stringify({ serviceId: String(fixture.serviceId), slotIds: fixture.slotIds.map(String) }) });
+      const previewBody = await preview.json() as { preview: { checkoutQuote: { token: string } } };
+      assert.equal(preview.status, 200);
       const response = await fetch(`${server.baseUrl}/api/v1/bookings/request`, {
         method: "POST",
         headers: {
@@ -118,6 +124,8 @@ export const registerBookingWalletReleaseRegressionTests = () => {
           serviceId: fixture.serviceId.toString(),
           slotIds: fixture.slotIds.map(String),
           paymentMethod: PaymentMethod.INTERNAL,
+          idempotencyKey: "phase8b-internal-rejection",
+          checkoutQuote: previewBody.preview.checkoutQuote.token,
         }),
       });
       const body = await response.json() as Record<string, any>;
@@ -128,10 +136,7 @@ export const registerBookingWalletReleaseRegressionTests = () => {
       assert.equal(payment.method, PaymentMethod.INTERNAL);
       assert.equal(await InternalPaymentModel.countDocuments({ paymentId: payment._id }), 1);
 
-      const creatorToken = jwt.sign(
-        { id: fixture.actors.creatorId.toString(), role: "creator" },
-        process.env.JWT_SECRET!,
-      );
+      const creatorToken = await issueSessionToken(fixture.actors.creatorId, "creator");
       const rejected = await postCreatorDecision(
         server.baseUrl,
         booking._id.toString(),

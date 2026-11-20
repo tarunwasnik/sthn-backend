@@ -8,6 +8,7 @@ import { UserProfile } from "../../models/userProfile.model";
 import { ProfileVerificationRequest } from "../../models/profileVerificationRequest.model";
 import { ProfileVerificationJob } from "../../models/profileVerificationJob.model";
 import { FaceVerificationSession } from "../../models/faceVerificationSession.model";
+import { FaceVerificationEvidence } from "../../models/faceVerificationEvidence.model";
 import { ImageModerationAsset } from "../../models/imageModerationAsset.model";
 import { ImageModerationAttempt } from "../../models/imageModerationAttempt.model";
 import { ImageAdmission } from "../../models/imageAdmission.model";
@@ -43,6 +44,13 @@ const body = (username = "draft-recovery") => ({
 const sha = "a".repeat(64);
 const future = () => new Date(Date.now() + 60_000);
 const admission = (admissionReference: string) => ({ kind: "ADMISSION" as const, admissionReference });
+const unchanged = (reference: string) => ({ kind: "UNCHANGED" as const, reference });
+const unchangedDraft = (input: ReturnType<typeof body>) => ({
+  ...input,
+  avatar: unchanged(input.avatar),
+  cover: unchanged(input.cover),
+  profilePhotos: input.profilePhotos.map(unchanged),
+});
 const seedAdmission = async (actorId: Types.ObjectId, surface: "USER_PROFILE_AVATAR" | "USER_PROFILE_COVER" | "USER_PROFILE_PHOTO", trustedMediaReference: string) => {
   const entityBinding = `PENDING:${actorId}:${surface}`;
   const asset = await ImageModerationAsset.create({ assetReference: `ima_${new Types.ObjectId()}`, actorId, contentSha256: sha, providerAssetId: `provider_${new Types.ObjectId()}`, trustedMediaReference, expiresAt: future(), retentionDeadline: future() });
@@ -122,7 +130,7 @@ test("gated final submission rejects a two-photo draft without partial authority
     await invoke(saveMyOnboardingDraft, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: await admittedDraft(user._id, twoPhotoDraft) });
 
     await assert.rejects(
-      invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(user._id), twoPhotoDraft) }),
+      invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(user._id), unchangedDraft(twoPhotoDraft)) }),
       (error: unknown) => (error as { statusCode?: number; code?: string }).statusCode === 400
         && (error as { code?: string }).code === "PROFILE_PHOTO_COUNT_INVALID",
     );
@@ -137,7 +145,7 @@ test("gated final submission rejects a two-photo draft without partial authority
     await invoke(saveMyOnboardingDraft, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: await admittedDraft(user._id, sixPhotoDraft) });
     profile = await UserProfile.findOne({ userId: user._id });
     assert.ok(profile);
-    await FaceVerificationSession.create({
+    const session = await FaceVerificationSession.create({
       sessionReference: "ONBOARDING_GATED_COMPLETE",
       userId: user._id,
       profileId: profile._id,
@@ -152,22 +160,35 @@ test("gated final submission rejects a two-photo draft without partial authority
       expiresAt: new Date(Date.now() + 60_000),
       captureCompletedAt: new Date(),
     });
+    await FaceVerificationEvidence.insertMany(session.challenges.map((challenge, challengeIndex) => ({
+      evidenceReference: `ONBOARDING_GATED_${challengeIndex}`,
+      sessionId: session._id,
+      userId: user._id,
+      profileId: session.profileId,
+      challengeIndex,
+      challenge,
+      cloudinaryPublicId: `test/onboarding-gated/${challengeIndex}`,
+      status: "STORED",
+      mimeType: "image/jpeg",
+      bytes: 1,
+      format: "jpg",
+    })));
     setBiometricReferenceAvatarValidationDependenciesForTests({
       reader: async () => Buffer.from("draft-avatar"),
       detector: async () => ({ width: 100, height: 100, decodedBytes: 30_000, faces: [{ x: 30, y: 30, width: 40, height: 40, confidence: 0.9, landmarks: { rightEye: { x: 40, y: 42 }, leftEye: { x: 55, y: 42 }, noseTip: { x: 48, y: 50 }, rightMouthCorner: { x: 42, y: 60 }, leftMouthCorner: { x: 54, y: 60 } } }] }),
     });
 
-    await invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(user._id), sixPhotoDraft) });
+    await invoke(upsertProfile, { user: { id: String(user._id), role: "user", status: "pending_profile" }, body: withUserProfileTextAdmission(String(user._id), unchangedDraft(sixPhotoDraft)) });
     profile = await UserProfile.findOne({ userId: user._id });
     const request = await ProfileVerificationRequest.findOne({ userId: user._id });
-    const session = await FaceVerificationSession.findOne({ userId: user._id });
+    const boundSession = await FaceVerificationSession.findOne({ userId: user._id });
     assert.equal(profile?.profileStatus, "pending_verification");
     assert.equal(profile?.verificationSubmissionVersion, 1);
     assert.equal(request?.profileSubmissionVersion, 1);
     assert.equal(request?.verificationPolicy?.key, "GATED_MULTI_MEDIA");
     assert.equal(request?.submittedMedia?.profilePhotos.length, 6);
     assert.deepEqual(request?.submittedMedia?.profilePhotos.map((photo) => photo.sourceReference), sixPhotoDraft.profilePhotos);
-    assert.equal(String(session?.verificationRequestId), String(request?._id));
+    assert.equal(String(boundSession?.verificationRequestId), String(request?._id));
     assert.equal(await ProfileVerificationJob.countDocuments({ verificationRequestId: request?._id }), 1);
   } finally {
     if (previousPolicy === undefined) delete process.env.STHN_PROFILE_VERIFICATION_POLICY;

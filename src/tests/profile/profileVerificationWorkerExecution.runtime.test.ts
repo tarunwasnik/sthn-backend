@@ -1,16 +1,36 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseProfileVerificationWorkerEnabled } from "../../config/profileVerificationWorkerExecution";
+import { parseProfileVerificationStartupDiagnosticEnabled, parseProfileVerificationWorkerEnabled } from "../../config/profileVerificationWorkerExecution";
 import { startProfileVerificationWorkerIfEnabled } from "../../services/profile/profileVerificationWorkerBootstrap.service";
 
-test("profile-verification worker execution config is disabled when absent or explicitly false", () => {
-  assert.equal(parseProfileVerificationWorkerEnabled(undefined), false);
+test("profile-verification worker execution config defaults only an explicit development environment to enabled", () => {
+  assert.equal(parseProfileVerificationWorkerEnabled(undefined, "development"), true);
+  assert.equal(parseProfileVerificationWorkerEnabled(undefined, "production"), false);
+  assert.equal(parseProfileVerificationWorkerEnabled(undefined, "test"), false);
+  assert.equal(parseProfileVerificationWorkerEnabled(undefined, "staging"), false);
+  assert.equal(parseProfileVerificationWorkerEnabled(undefined, undefined), false);
   assert.equal(parseProfileVerificationWorkerEnabled("false"), false);
 });
 
-test("profile-verification worker execution config is enabled only by explicit true", () => {
-  assert.equal(parseProfileVerificationWorkerEnabled("true"), true);
+test("profile-verification worker explicit values override the environment default", () => {
+  assert.equal(parseProfileVerificationWorkerEnabled("true", "production"), true);
+  assert.equal(parseProfileVerificationWorkerEnabled("false", "development"), false);
+});
+
+test("startup YuNet diagnostic is disabled by default and requires a strict explicit opt-in", () => {
+  assert.equal(parseProfileVerificationStartupDiagnosticEnabled(undefined), false);
+  assert.equal(parseProfileVerificationStartupDiagnosticEnabled("true"), true);
+  assert.equal(parseProfileVerificationStartupDiagnosticEnabled("false"), false);
+  assert.throws(() => parseProfileVerificationStartupDiagnosticEnabled("yes"), /must be exactly true or false/);
+});
+
+test("development entrypoint establishes NODE_ENV before importing the server", () => {
+  const fs = require("node:fs") as typeof import("node:fs");
+  const path = require("node:path") as typeof import("node:path");
+  const source = fs.readFileSync(path.resolve(__dirname, "../../developmentServer.ts"), "utf8");
+  assert.match(source, /process\.env\.NODE_ENV = "development"/);
+  assert.match(source, /startServer/);
 });
 
 test("profile-verification worker execution config fails closed for malformed explicit values", () => {

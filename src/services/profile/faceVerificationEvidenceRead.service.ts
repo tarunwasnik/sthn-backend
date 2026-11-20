@@ -17,13 +17,17 @@ export const resolveProfileVerificationEvidenceAuthority = async (input: { verif
     || request.submittedAt.getTime() + FACE_VERIFICATION_REQUEST_MAX_RETENTION_MS <= (input.now ?? new Date()).getTime()) {
     return { request: null, session: null, records: null, noOp: "TERMINAL_REQUEST" as const };
   }
-  const session = await faceVerificationSessionRepository.findCurrentCompletedBoundToRequest({ requestId: request._id, profileId: request.profileId, userId: request.userId });
+  const creatorTarget = request.targetType === "CREATOR_APPLICATION" && request.targetId && request.ownerUserId && request.verificationRevision
+    ? { targetType: request.targetType, targetId: request.targetId, ownerUserId: request.ownerUserId, verificationRevision: request.verificationRevision } as const : null;
+  const session = creatorTarget
+    ? await faceVerificationSessionRepository.findCurrentCompletedBoundToTarget({ ...creatorTarget, requestId: request._id })
+    : await faceVerificationSessionRepository.findCurrentCompletedBoundToRequest({ requestId: request._id, profileId: request.profileId, userId: request.userId });
   if (!session) throw new ProfileVerificationInferenceError("A completed bound face verification session is required", "SESSION_NOT_COMPLETE", 409);
   if (session.profileSubmissionVersion !== request.profileSubmissionVersion) return { request: null, session: null, records: null, noOp: "STALE_SUBMISSION" as const };
   const records = await faceVerificationEvidenceRepository.listStoredForSession(session._id);
   if (records.length !== 5 || records.some((record, index) => (
     record.challengeIndex !== expectedIndexes[index] || record.challenge !== session.challenges[index]
-    || String(record.userId) !== String(request.userId) || String(record.profileId) !== String(request.profileId)
+    || String(record.userId) !== String(request.userId) || (creatorTarget ? (record.targetType !== creatorTarget.targetType || String(record.targetId) !== String(creatorTarget.targetId) || String(record.ownerUserId) !== String(creatorTarget.ownerUserId) || record.verificationRevision !== creatorTarget.verificationRevision) : String(record.profileId) !== String(request.profileId))
     || String(record.verificationRequestId) !== String(request._id) || record.cloudinaryResourceType !== "image"
     || !record.bytes || !normalizeFaceVerificationMimeType(record.mimeType) || !normalizeFaceVerificationFormat(record.format)
   ))) throw new ProfileVerificationInferenceError("Face evidence is incomplete or inconsistent", "EVIDENCE_INCOMPLETE", 409);

@@ -5,11 +5,12 @@ import { Router } from "express";
 import { register, login, googleLogin, getMe } from "../controllers/auth.controller";
 import { authEntry } from "../controllers/authEntry.controller";
 import { protect } from "../middlewares/auth.middleware";
+import { throttleLogin, throttleRegistration } from "../middlewares/authThrottle.middleware";
 
 const router = Router();
 
-router.post("/register", register);
-router.post("/login", login);
+router.post("/register", throttleRegistration, register);
+router.post("/login", throttleLogin, login);
 router.post("/google", googleLogin);
 
 router.get("/entry", protect, authEntry);

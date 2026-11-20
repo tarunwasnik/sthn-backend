@@ -1,4 +1,6 @@
 import { UserProfile } from "../../models/userProfile.model";
+import { CreatorApplication } from "../../models/creatorApplication.model";
+import { ProfileVerificationRequest } from "../../models/profileVerificationRequest.model";
 import cloudinary, { extractPublicId } from "../../config/cloudinary";
 import { ProfileVerificationInferenceError } from "../../errors/profile/ProfileVerificationInferenceError";
 import type { TrustedAvatarAdmissionCandidate } from "../imageModeration/imageAdmission.service";
@@ -68,7 +70,16 @@ export const readBoundProfileVerificationAvatar = async (input: { profileId: str
 };
 
 /** Reads the current profile-bound avatar only when it also belongs to the immutable submitted version. */
-export const readAuthoritativeProfileVerificationAvatar = async (input: { profileId: string; userId: string; profileSubmissionVersion: number; avatarFingerprint: string }) => {
+export const readAuthoritativeProfileVerificationAvatar = async (input: { profileId: string; userId: string; profileSubmissionVersion: number; avatarFingerprint: string; verificationRequestId?: string }) => {
+  if (input.verificationRequestId) {
+    const request = await ProfileVerificationRequest.findById(input.verificationRequestId).lean();
+    if (request?.targetType === "CREATOR_APPLICATION") {
+      const application = await CreatorApplication.findOne({ _id: request.targetId, userId: request.ownerUserId, applicationJourney: "user_upgrade", verificationRevision: request.verificationRevision }).lean();
+      const avatar = request.submittedMedia?.avatar;
+      if (!request.isActive || String(request.userId) !== input.userId || String(request.ownerUserId) !== input.userId || String(request.targetId) !== input.profileId || request.verificationRevision !== input.profileSubmissionVersion || !application?.avatarUrl || !avatar || application.avatarUrl !== avatar.sourceReference || avatar.fingerprint !== input.avatarFingerprint || fingerprintAvatarReference(avatar.sourceReference) !== input.avatarFingerprint) throw new ProfileVerificationInferenceError("Avatar submission authority is stale", "STALE_SUBMISSION", 409);
+      return readTrustedFaceVerificationAvatarReference(avatar.sourceReference);
+    }
+  }
   const profile = await UserProfile.findById(input.profileId).exec();
   if (!profile || profile.verificationSubmissionVersion !== input.profileSubmissionVersion) throw new ProfileVerificationInferenceError("Avatar submission authority is stale", "STALE_SUBMISSION", 409);
   return readBoundProfileVerificationAvatar(input);

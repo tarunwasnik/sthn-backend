@@ -8,6 +8,7 @@ import User from "../../models/User";
 import { Booking } from "../../models/booking.model";
 import { Chat } from "../../models/chat.model";
 import { chatSocket, personalRoom } from "../../sockets/chat.socket";
+import { createAuthSession, revokeAuthSession } from "../../services/authSession.service";
 import {
   clearPhase7HDatabase,
   connectPhase7HDatabase,
@@ -54,7 +55,7 @@ const authenticate = async (io: FakeIo, socket: FakeSocket) => new Promise<Error
   void io.middleware(socket, (error?: Error) => resolve(error));
 });
 
-const tokenFor = (id: Types.ObjectId, role = "user") => jwt.sign({ id: String(id), role }, process.env.JWT_SECRET!);
+const tokenFor = async (id: Types.ObjectId, role = "user") => { const session = await createAuthSession(String(id)); return jwt.sign({ id: String(id), role, sid: String(session._id) }, process.env.JWT_SECRET!); };
 
 async function fixture(status: "CONFIRMED" | "CANCELLED" = "CONFIRMED") {
   const suffix = new Types.ObjectId().toString();
@@ -74,7 +75,7 @@ test("socket authentication derives personal-room membership from the database-b
   const io = new FakeIo(); chatSocket(io as unknown as Server);
   assert.ok(await authenticate(io, new FakeSocket()) instanceof Error);
   const { customer } = await fixture();
-  const socket = new FakeSocket(tokenFor(customer._id));
+  const socket = new FakeSocket(await tokenFor(customer._id));
   assert.equal(await authenticate(io, socket), undefined);
   io.connection(socket);
   assert.equal(socket.data.userId, String(customer._id));
@@ -82,12 +83,22 @@ test("socket authentication derives personal-room membership from the database-b
   assert.equal(socket.handlers.has("join-user"), false);
 });
 
+test("a revoked session JWT is rejected during socket authentication", async () => {
+  const io = new FakeIo(); chatSocket(io as unknown as Server);
+  const { customer } = await fixture();
+  const session = await createAuthSession(String(customer._id));
+  const token = jwt.sign({ id: String(customer._id), role: "user", sid: String(session._id) }, process.env.JWT_SECRET!);
+  assert.equal(await authenticate(io, new FakeSocket(token)), undefined);
+  await revokeAuthSession(String(session._id), String(customer._id));
+  assert.ok(await authenticate(io, new FakeSocket(token)) instanceof Error);
+});
+
 test("only booking participants join, including a creator acting as the booking customer", async () => {
   const io = new FakeIo(); chatSocket(io as unknown as Server);
   const { customer, creator, stranger, booking } = await fixture();
   await User.updateOne({ _id: customer._id }, { $set: { role: "creator" } });
-  const customerSocket = new FakeSocket(tokenFor(customer._id, "creator"));
-  const strangerSocket = new FakeSocket(tokenFor(stranger._id));
+  const customerSocket = new FakeSocket(await tokenFor(customer._id, "creator"));
+  const strangerSocket = new FakeSocket(await tokenFor(stranger._id));
   assert.equal(await authenticate(io, customerSocket), undefined); io.connection(customerSocket);
   assert.equal(await authenticate(io, strangerSocket), undefined); io.connection(strangerSocket);
   let participantResult: { ok: boolean } | undefined;
@@ -104,8 +115,8 @@ test("only booking participants join, including a creator acting as the booking 
 test("typing and delivered events ignore spoofed identity and require room membership", async () => {
   const io = new FakeIo(); chatSocket(io as unknown as Server);
   const { customer, creator, stranger, booking, message } = await fixture();
-  const customerSocket = new FakeSocket(tokenFor(customer._id));
-  const strangerSocket = new FakeSocket(tokenFor(stranger._id));
+  const customerSocket = new FakeSocket(await tokenFor(customer._id));
+  const strangerSocket = new FakeSocket(await tokenFor(stranger._id));
   assert.equal(await authenticate(io, customerSocket), undefined); io.connection(customerSocket);
   assert.equal(await authenticate(io, strangerSocket), undefined); io.connection(strangerSocket);
   await customerSocket.invoke("join-booking", String(booking._id));
@@ -118,7 +129,7 @@ test("typing and delivered events ignore spoofed identity and require room membe
 test("terminal bookings remain readable rooms but reject transient chat mutations", async () => {
   const io = new FakeIo(); chatSocket(io as unknown as Server);
   const { customer, booking, message } = await fixture("CANCELLED");
-  const socket = new FakeSocket(tokenFor(customer._id));
+  const socket = new FakeSocket(await tokenFor(customer._id));
   assert.equal(await authenticate(io, socket), undefined); io.connection(socket);
   await socket.invoke("join-booking", String(booking._id));
   await socket.invoke("chat:typing", { bookingId: String(booking._id) });

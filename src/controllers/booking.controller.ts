@@ -38,6 +38,8 @@ import { verifyBookingCheckoutQuote } from "../services/booking/bookingCheckoutQ
 import { FeatureFlagEvaluator } from "../services/controlPlane/featureFlagEvaluator.service";
 import { bookingFundingAdmissionService, BookingFundingAdmissionError } from "../services/booking/bookingFundingAdmission.service";
 import { paymentOperationService } from "../services/financial/paymentOperation.service";
+import { assertCreatorBookingAdmission } from "../services/creator/creatorBookingSafety.service";
+import { AppError } from "../utils/AppError";
 
 /* =========================================================
    CLEANUP EXPIRED BOOKINGS
@@ -406,6 +408,7 @@ export const requestBooking = async (
       }
     } catch (error) {
       if (error instanceof BookingFundingAdmissionError) return res.status(error.code === "CONFLICT" ? 409 : 422).json({ message: error.message, code: error.code });
+      if (error instanceof PaymentError && error.code === "PAYMENT_PROVIDER_UNAVAILABLE") return res.status(422).json({ message: error.message, code: error.code });
       return res.status(500).json({ message: "Failed to admit provider booking funding." });
     }
   }
@@ -521,6 +524,13 @@ export const requestBooking = async (
     });
   }
 
+  try {
+    await assertCreatorBookingAdmission({ creatorId: new mongoose.Types.ObjectId(serviceForGovernance.creatorId), customerId: new mongoose.Types.ObjectId(user.id) });
+  } catch (error) {
+    if (error instanceof Error && "statusCode" in error) return res.status((error as { statusCode: number }).statusCode).json({ message: error.message });
+    throw error;
+  }
+
   const session = await mongoose.startSession();
 
   try {
@@ -546,6 +556,8 @@ export const requestBooking = async (
     if (creatorProfile.status !== "active") {
       throw new Error("Creator is not active");
     }
+
+    await assertCreatorBookingAdmission({ creatorId, customerId: new mongoose.Types.ObjectId(user.id), session });
 
     const slots = await Slot.find({
       _id: { $in: slotIds },
@@ -853,6 +865,9 @@ export const requestBooking = async (
         message: err.message,
         code: err.code,
       });
+    }
+    if (err instanceof AppError) {
+      return res.status(err.statusCode).json({ message: err.message, ...(err.code ? { code: err.code } : {}) });
     }
 
     if (paymentMethod === PaymentMethod.WALLET) {

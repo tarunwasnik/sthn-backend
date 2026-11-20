@@ -1,4 +1,6 @@
 import { ProfileVerificationInferenceResult, ProfileVerificationInferenceResultDocument } from "../models/profileVerificationInferenceResult.model";
+import { ProfileVerificationRequest } from "../models/profileVerificationRequest.model";
+import { VerificationTarget } from "../services/creator/creatorVerificationTarget";
 
 export type CreateProfileVerificationInferenceResultInput = Pick<
   ProfileVerificationInferenceResultDocument,
@@ -19,7 +21,15 @@ export type CreateProfileVerificationInferenceResultInput = Pick<
   | "retentionDeadline"
 >;
 
+export type CreateTargetVerificationInferenceResultInput = Omit<
+  CreateProfileVerificationInferenceResultInput,
+  "profileId" | "userId" | "profileSubmissionVersion"
+> & VerificationTarget;
+
 export class ProfileVerificationInferenceResultRepository {
+  findForTargetAttempt(input: Pick<VerificationTarget, "targetType" | "targetId" | "ownerUserId" | "verificationRevision"> & { requestId: import("mongoose").Types.ObjectId; sessionId: import("mongoose").Types.ObjectId }) {
+    return ProfileVerificationInferenceResult.findOne({ verificationRequestId: input.requestId, faceVerificationSessionId: input.sessionId, targetType: input.targetType, targetId: input.targetId, ownerUserId: input.ownerUserId, verificationRevision: input.verificationRevision }).sort({ createdAt: -1, _id: -1 }).exec();
+  }
   findByRunFingerprint(inferenceRunFingerprint: string) {
     return ProfileVerificationInferenceResult.findOne({ inferenceRunFingerprint }).exec();
   }
@@ -34,7 +44,35 @@ export class ProfileVerificationInferenceResultRepository {
   }
 
   create(input: CreateProfileVerificationInferenceResultInput) {
-    return ProfileVerificationInferenceResult.create(input);
+    return ProfileVerificationInferenceResult.create({
+      ...input,
+      targetType: "USER_PROFILE",
+      targetId: input.profileId,
+      ownerUserId: input.userId,
+      verificationRevision: input.profileSubmissionVersion,
+    });
+  }
+
+  async createForTarget(input: CreateTargetVerificationInferenceResultInput) {
+    const request = await ProfileVerificationRequest.exists({
+      _id: input.verificationRequestId,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      ownerUserId: input.ownerUserId,
+      verificationRevision: input.verificationRevision,
+    });
+    if (!request) throw new Error("Verification inference target does not match its request");
+    const { targetType, targetId, ownerUserId, verificationRevision, avatarReference: _avatarReference, avatarFingerprint: _avatarFingerprint, ...result } = input;
+    return ProfileVerificationInferenceResult.create({
+      ...result,
+      userId: ownerUserId,
+      targetType,
+      targetId,
+      ownerUserId,
+      ...(targetType === "USER_PROFILE" ? { profileId: targetId } : {}),
+      verificationRevision,
+      profileSubmissionVersion: verificationRevision,
+    });
   }
 
   shortenRetentionDeadline(id: import("mongoose").Types.ObjectId, existingDeadline: Date, proposedDeadline: Date) {

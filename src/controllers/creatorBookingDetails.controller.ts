@@ -54,7 +54,7 @@ export const getCreatorBookingDetails = async (
           displayName:
             userProfile?.username || "User",
           avatarUrl:
-            userProfile?.profilePhotos?.[0] || null,
+            userProfile?.avatar || null,
         },
 
         service: {

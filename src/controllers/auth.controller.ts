@@ -5,8 +5,15 @@ import { OAuth2Client } from "google-auth-library";
 import User from "../models/User";
 import { ROLES } from "../constants/roles";
 import { generateToken } from "../utils/jwt";
+import { createAuthSession } from "../services/authSession.service";
+import { validateNewPassword } from "../services/auth/passwordPolicy.service";
+import { AppError } from "../utils/AppError";
+import { clearLoginFailures, recordFailedLogin } from "../services/auth/loginProtection.service";
+import { assertPasswordNotBreached } from "../services/auth/breachedPassword.service";
+import { recordVisitorTelemetry } from "../services/visitorMonitor.service";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("STHN_AUTH_TIMING_DUMMY", 10);
 
 const normalizeEmail = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
@@ -14,6 +21,7 @@ const normalizeEmail = (value: unknown): string | null => {
   const email = value.trim().toLowerCase();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
 };
+
 
 /* ================= REGISTER ================= */
 
@@ -27,11 +35,13 @@ export const register = async (req: Request, res: Response) => {
         message: "A valid email and password are required",
       });
     }
+    validateNewPassword(password);
+    await assertPasswordNotBreached(password);
 
     const existingUser = await User.findOne({ email });
 
     if (existingUser) {
-      return res.status(409).json({
+      return res.status(400).json({
         message: "Unable to create an account with those details",
       });
     }
@@ -46,10 +56,8 @@ export const register = async (req: Request, res: Response) => {
       status: "pending_profile",
     });
 
-    const token = generateToken({
-      id: user._id.toString(),
-      role: user.role,
-    });
+    const session = await createAuthSession(String(user._id));
+    const token = generateToken({ id: user._id.toString(), role: user.role, sid: String(session._id) });
 
     return res.status(201).json({
       message: "User registered successfully",
@@ -59,6 +67,7 @@ export const register = async (req: Request, res: Response) => {
     });
 
   } catch (err) {
+    if (err instanceof AppError) return res.status(err.statusCode).json({ message: err.message, code: err.code });
     console.error("REGISTER ERROR:", err);
     return res.status(500).json({ message: "Server error" });
   }
@@ -77,55 +86,34 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).select("password authProvider status role loginFailureCount loginCooldownUntil");
+    const now = new Date();
+    if (user?.loginCooldownUntil && user.loginCooldownUntil > now) {
+      res.setHeader("Retry-After", String(Math.max(1, Math.ceil((user.loginCooldownUntil.getTime() - now.getTime()) / 1000))));
+      return res.status(429).json({ message: "Too many attempts. Please try again later.", code: "LOGIN_COOLDOWN" });
+    }
 
-    if (!user) {
+    const isMatch = await bcrypt.compare(password, user?.password || DUMMY_PASSWORD_HASH);
+    const canAuthenticate = Boolean(user && user.authProvider === "local" && user.password && user.status !== "suspended" && user.status !== "banned" && isMatch);
+    if (!canAuthenticate) {
+      if (user) await recordFailedLogin(email, now);
+      void recordVisitorTelemetry(req, { visitorId: typeof req.headers["x-visitor-id"] === "string" ? req.headers["x-visitor-id"] : "", type: "LOGIN_FAILED" }).catch(() => undefined);
       return res.status(400).json({
         message: "Invalid credentials",
       });
     }
 
-    if (user.status === "suspended") {
-      return res.status(403).json({
-        message: "Account suspended. Contact support.",
-      });
-    }
+    const authenticatedUser = user!;
+    await clearLoginFailures(String(authenticatedUser._id));
 
-    if (user.status === "banned") {
-      return res.status(403).json({
-        message: "Account permanently banned.",
-      });
-    }
-
-    if (user.authProvider !== "local") {
-      return res.status(400).json({
-        message: "Please login using Google",
-      });
-    }
-
-    if (!user.password) {
-      return res.status(400).json({
-        message: "Password login not available for this account",
-      });
-    }
-
-    const isMatch = await bcrypt.compare(password, user.password);
-
-    if (!isMatch) {
-      return res.status(400).json({
-        message: "Invalid credentials",
-      });
-    }
-
-    const token = generateToken({
-      id: user._id.toString(),
-      role: user.role,
-    });
+    const session = await createAuthSession(String(authenticatedUser._id));
+    void recordVisitorTelemetry(req, { visitorId: typeof req.headers["x-visitor-id"] === "string" ? req.headers["x-visitor-id"] : "", type: "LOGIN", accountId: String(authenticatedUser._id), role: authenticatedUser.role }).catch(() => undefined);
+    const token = generateToken({ id: authenticatedUser._id.toString(), role: authenticatedUser.role, sid: String(session._id) });
 
     return res.json({
       token,
-      role: user.role,
-      status: user.status,
+      role: authenticatedUser.role,
+      status: authenticatedUser.status,
     });
 
   } catch (err) {
@@ -205,10 +193,9 @@ export const googleLogin = async (req: Request, res: Response) => {
       });
     }
 
-    const token = generateToken({
-      id: user._id.toString(),
-      role: user.role,
-    });
+    const session = await createAuthSession(String(user._id));
+    void recordVisitorTelemetry(req, { visitorId: typeof req.headers["x-visitor-id"] === "string" ? req.headers["x-visitor-id"] : "", type: "LOGIN", accountId: String(user._id), role: user.role }).catch(() => undefined);
+    const token = generateToken({ id: user._id.toString(), role: user.role, sid: String(session._id) });
 
     return res.json({
       token,
@@ -238,7 +225,7 @@ export const getMe = async (req: Request, res: Response) => {
     }
 
     const user = await User.findById(authUser.id)
-      .select("email role status creatorStatus");
+      .select("email role status creatorStatus authProvider");
 
     if (!user) {
       return res.status(404).json({
@@ -252,6 +239,7 @@ export const getMe = async (req: Request, res: Response) => {
       role: user.role,
       status: user.status,
       creatorStatus: user.creatorStatus,
+      authProvider: user.authProvider,
     });
 
   } catch (err) {

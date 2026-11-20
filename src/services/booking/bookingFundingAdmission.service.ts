@@ -12,6 +12,7 @@ import { marketplacePricingService } from "../financial/marketplacePricing.servi
 import { paymentProviderRegistry } from "../financial/paymentProviderRegistry.service";
 import { resolveAccountGovernance } from "../accountGovernance/accountGovernanceResolver.service";
 import { verifyBookingCheckoutQuote } from "./bookingCheckoutQuote.service";
+import { assertCreatorBookingAdmission } from "../creator/creatorBookingSafety.service";
 
 export class BookingFundingAdmissionError extends Error {
   constructor(message: string, readonly code: "INVALID" | "CONFLICT" | "UNAUTHORIZED" | "INTEGRITY") { super(message); }
@@ -86,6 +87,8 @@ export class BookingFundingAdmissionService {
     if (!service || !service.isActive || !service.creatorId.equals(creatorId) || !creator || creator.status !== "active" || customerId.equals(creatorId)) return invalid("Invalid creator or service.");
     const creatorUser = await intents.findUser(creatorId);
     if (!creatorUser || resolveAccountGovernance(creatorUser).blocksIncomingBookings) return invalid("Creator is unavailable.");
+    try { await assertCreatorBookingAdmission({ creatorId, customerId }); }
+    catch (error) { if (error instanceof Error) return invalid(error.message); throw error; }
     const currency = creator.currency as SupportedCurrency;
     if (!SUPPORTED_CURRENCIES.includes(currency)) return invalid("Unsupported currency.");
     paymentProviderRegistry.select({ provider: input.provider, currency, operation: "PAYMENT", requiredCapabilities: ["session", "verify", "status"] });

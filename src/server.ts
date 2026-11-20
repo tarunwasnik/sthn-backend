@@ -24,8 +24,7 @@ import { faceVerificationEvidenceCleanupJob } from "./jobs/faceVerificationEvide
 import { stopProfileVerificationWorker } from "./services/profile/profileVerificationWorker.service";
 import { startProfileVerificationWorkerIfEnabled } from "./services/profile/profileVerificationWorkerBootstrap.service";
 import { startMediaCleanupSchedulerIfEnabled, stopMediaCleanupScheduler } from "./services/mediaCleanupScheduler.service";
-import sharp from "sharp";
-import { detectYuNetFaces } from "./services/profile/profileVerificationYuNetRunner";
+import { PROFILE_VERIFICATION_STARTUP_DIAGNOSTIC_ENABLED } from "./config/profileVerificationWorkerExecution";
 import { reportProfileVerificationMemory } from "./services/profile/profileVerificationMemoryDiagnostic.service";
 import { readLocalMobileDevelopmentConfig } from "./config/localMobileDevelopment";
 import { assertNoRetiredAdamCoddConfiguration } from "./services/imageModeration/adamCoddImageSafety.config";
@@ -35,6 +34,10 @@ import { errorHandler } from "./middlewares/errorHandler"; // ✅ ADDED
 mongoose.set("bufferCommands", false);
 
 const app = express();
+// Default to not trusting forwarding headers. Set TRUSTED_PROXY_HOPS=1 only when
+// the backend is consistently reached through one trusted proxy (such as Caddy).
+const trustedProxyHops = Number.parseInt(process.env.TRUSTED_PROXY_HOPS || "0", 10);
+app.set("trust proxy", Number.isInteger(trustedProxyHops) && trustedProxyHops >= 0 ? trustedProxyHops : 0);
 
 /* ===================== CORS CONFIG ===================== */
 
@@ -62,7 +65,7 @@ app.use(
   }),
 );
 
-app.use(express.json());
+app.use(express.json({ limit: "16kb" }));
 
 /* ===================== SOCKET SINGLETON ===================== */
 
@@ -193,11 +196,20 @@ export async function startServer() {
       console.log(`🚀 Server + Socket.IO running on port ${PORT}`);
 
       startJobLoop();
-      startProfileVerificationWorkerIfEnabled();
+      const profileVerificationWorkerEnabled = startProfileVerificationWorkerIfEnabled();
+      console.log(profileVerificationWorkerEnabled
+        ? "Profile-verification worker enabled for this process."
+        : "Profile-verification worker disabled for this process.");
       startMediaCleanupSchedulerIfEnabled();
-      const runYuNetSyntheticDiagnostic = () => void sharp({ create: { width: 32, height: 32, channels: 3, background: { r: 0, g: 0, b: 0 } } }).png().toBuffer().then((synthetic) => detectYuNetFaces(synthetic, "SYNTHETIC")).catch((error) => console.error("YuNet synthetic diagnostic smoke failed", error));
-      runYuNetSyntheticDiagnostic();
-      setTimeout(runYuNetSyntheticDiagnostic, 70_000);
+      if (PROFILE_VERIFICATION_STARTUP_DIAGNOSTIC_ENABLED) {
+        const runYuNetSyntheticDiagnostic = () => void import("sharp").then(async ({ default: sharp }) => {
+          const { detectYuNetFaces } = await import("./services/profile/profileVerificationYuNetRunner");
+          const synthetic = await sharp({ create: { width: 32, height: 32, channels: 3, background: { r: 0, g: 0, b: 0 } } }).png().toBuffer();
+          await detectYuNetFaces(synthetic, "SYNTHETIC");
+        }).catch((error) => console.error("YuNet synthetic diagnostic smoke failed", error));
+        runYuNetSyntheticDiagnostic();
+        setTimeout(runYuNetSyntheticDiagnostic, 70_000);
+      }
       console.log("⏱ Background jobs scheduled");
     };
     if (localMobileDevelopment.bindHost) httpServer.listen(Number(PORT), localMobileDevelopment.bindHost, onListening);

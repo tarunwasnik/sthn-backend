@@ -10,7 +10,7 @@ type MediaReader = (item: ProfileVerificationSubmittedMediaItem) => Promise<Buff
 type Detector = (bytes: Buffer) => Promise<YuNetDetection>;
 type Embedder = (input: Awaited<ReturnType<typeof alignFaceEvidence>>) => Promise<number[]>;
 const stats = (values: number[]) => ({ minimumSimilarity: Math.min(...values), maximumSimilarity: Math.max(...values), meanSimilarity: values.reduce((sum, value) => sum + value, 0) / values.length, medianSimilarity: medianSFaceSimilarity(values) });
-const mediaItems = (snapshot: ProfileVerificationSubmittedMediaSnapshot) => [snapshot.avatar, snapshot.cover, ...snapshot.profilePhotos];
+const mediaItems = (snapshot: ProfileVerificationSubmittedMediaSnapshot) => [snapshot.avatar, ...(snapshot.cover ? [snapshot.cover] : []), ...snapshot.profilePhotos];
 
 /** Bounded shadow-only live-capture-to-frozen-media analysis. Embeddings never leave this call. */
 export const analyseLiveCaptureProfileMediaShadow = async (input: {

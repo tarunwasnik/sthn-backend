@@ -8,6 +8,10 @@ export interface ProfileVerificationJobDocument extends Document {
   verificationRequestId: mongoose.Types.ObjectId;
   profileId: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
+  targetType?: "USER_PROFILE" | "CREATOR_APPLICATION";
+  targetId?: mongoose.Types.ObjectId;
+  ownerUserId?: mongoose.Types.ObjectId;
+  verificationRevision?: number;
   profileSubmissionVersion: number;
   jobType: ProfileVerificationJobType;
   status: ProfileVerificationJobStatus;
@@ -29,8 +33,12 @@ export interface ProfileVerificationJobDocument extends Document {
 const ProfileVerificationJobSchema = new Schema<ProfileVerificationJobDocument>({
   jobReference: { type: String, required: true, unique: true, trim: true, maxlength: 96, index: true },
   verificationRequestId: { type: Schema.Types.ObjectId, ref: "ProfileVerificationRequest", required: true, index: true },
-  profileId: { type: Schema.Types.ObjectId, ref: "UserProfile", required: true, index: true },
+  profileId: { type: Schema.Types.ObjectId, ref: "UserProfile", required: function (this: ProfileVerificationJobDocument) { return this.targetType !== "CREATOR_APPLICATION"; }, index: true },
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+  targetType: { type: String, enum: ["USER_PROFILE", "CREATOR_APPLICATION"], index: true },
+  targetId: { type: Schema.Types.ObjectId, index: true, required: function (this: ProfileVerificationJobDocument) { return this.targetType === "CREATOR_APPLICATION"; } },
+  ownerUserId: { type: Schema.Types.ObjectId, ref: "User", index: true, required: function (this: ProfileVerificationJobDocument) { return this.targetType === "CREATOR_APPLICATION"; } },
+  verificationRevision: { type: Number, min: 1, required: function (this: ProfileVerificationJobDocument) { return this.targetType === "CREATOR_APPLICATION"; } },
   profileSubmissionVersion: { type: Number, required: true, min: 1 },
   jobType: { type: String, required: true, enum: ["PROFILE_VERIFICATION_PROCESSING"], index: true },
   status: { type: String, required: true, enum: ["PENDING", "RUNNING", "RETRY_WAIT", "COMPLETED", "FAILED"], default: "PENDING", index: true },

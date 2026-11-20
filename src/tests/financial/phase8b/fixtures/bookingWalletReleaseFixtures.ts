@@ -1,6 +1,5 @@
 import http from "node:http";
 import express from "express";
-import jwt from "jsonwebtoken";
 
 import bookingRoutes from "../../../../routes/v1/booking.routes";
 import creatorDecisionRoutes from "../../../../routes/v1/creatorBookingDecision.routes";
@@ -14,6 +13,7 @@ import {
   createBookingWalletFixture,
   postWalletBooking,
 } from "../../phase8a/fixtures/bookingWalletFixtures";
+import { issueSessionToken } from "../../phase8a/fixtures/bookingWalletFixtures";
 import { Phase7HActors } from "../../phase7h/fixtures/topUpFixtures";
 
 let releaseSequence = 0;
@@ -59,14 +59,8 @@ export const createActiveWalletBooking = async (
   const booking = await Booking.findOne({
     bookingReference: response.body.booking.bookingReference,
   }).orFail();
-  const creatorToken = jwt.sign(
-    { id: fixture.actors.creatorId.toString(), role: "creator" },
-    process.env.JWT_SECRET!,
-  );
-  const adminToken = jwt.sign(
-    { id: fixture.actors.adminId.toString(), role: "admin" },
-    process.env.JWT_SECRET!,
-  );
+  const creatorToken = await issueSessionToken(fixture.actors.creatorId, "creator");
+  const adminToken = await issueSessionToken(fixture.actors.adminId, "admin");
   return { fixture, booking, response, creatorToken, adminToken };
 };
 
